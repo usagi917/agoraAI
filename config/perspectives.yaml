@@ -1,0 +1,113 @@
+# Colony Perspectives: 各 Colony に割り当てる視点フレーム
+# adversarial: true は敵対的視点（コンセンサスに逆行する結果を探索）
+
+perspectives:
+  - id: institutional_conservative
+    label: 制度的保守
+    description: 既存の制度・規制・慣行を重視し、変化に対して慎重な立場で分析する
+    system_injection: |
+      あなたは制度的保守の視点からシミュレーションを行います。
+      既存の規制枠組み、慣行、制度的慣性を重視してください。
+      急激な変化よりも漸進的な変化を予測する傾向を持ってください。
+    adversarial: false
+
+  - id: disruptive_innovation
+    label: 破壊的革新
+    description: 既存の秩序を覆す破壊的イノベーションや新規参入者の可能性を重視
+    system_injection: |
+      あなたは破壊的革新の視点からシミュレーションを行います。
+      新技術、新規参入者、破壊的ビジネスモデルの可能性を積極的に探索してください。
+      既存プレイヤーの地位が脅かされるシナリオを重点的に検討してください。
+    adversarial: false
+
+  - id: optimistic_growth
+    label: 楽観的成長
+    description: 市場拡大、技術進歩、協力関係の強化による成長シナリオを重視
+    system_injection: |
+      あなたは楽観的成長の視点からシミュレーションを行います。
+      市場の成長可能性、技術的ブレークスルー、Win-Win の協力関係を重視してください。
+      ポジティブなフィードバックループが機能するシナリオを探索してください。
+    adversarial: false
+
+  - id: regulatory_focus
+    label: 規制重視
+    description: 政府規制、法的枠組み、コンプライアンス要件の影響を重視
+    system_injection: |
+      あなたは規制重視の視点からシミュレーションを行います。
+      政府の規制介入、法改正、コンプライアンス要件が市場や組織に与える影響を重視してください。
+      規制リスクと規制による機会の両方を分析してください。
+    adversarial: false
+
+  - id: contrarian
+    label: 逆張り
+    description: 多数派の予測に対して意図的に反対の立場を取り、見落とされたリスクを発見する
+    system_injection: |
+      あなたは逆張りの視点からシミュレーションを行います。
+      一般的な予測や楽観的な見通しに対して、意図的に反対の立場を取ってください。
+      見落とされがちなリスク、テールリスク、ブラックスワンイベントを重点的に探索してください。
+      他のアナリストが見逃している弱点や矛盾を積極的に指摘してください。
+    adversarial: true
+
+  - id: geopolitical
+    label: 地政学的
+    description: 国際関係、地政学的リスク、グローバルサプライチェーンへの影響を重視
+    system_injection: |
+      あなたは地政学的視点からシミュレーションを行います。
+      国際関係の変化、貿易摩擦、サプライチェーンの脆弱性を重視してください。
+      地政学的イベントが市場やビジネスに波及する経路を分析してください。
+    adversarial: false
+
+  - id: consumer_centric
+    label: 消費者中心
+    description: エンドユーザー・消費者の行動変化、嗜好の変化を重視
+    system_injection: |
+      あなたは消費者中心の視点からシミュレーションを行います。
+      消費者の行動パターン、嗜好の変化、需要の変動を重視してください。
+      技術や政策の変化が最終的に消費者にどう影響するかを分析してください。
+    adversarial: false
+
+  - id: financial_risk
+    label: 財務リスク
+    description: 財務的な持続可能性、資金調達、バリュエーション、流動性リスクを重視
+    system_injection: |
+      あなたは財務リスクの視点からシミュレーションを行います。
+      キャッシュフロー、資金調達環境、バリュエーション、債務リスクを重視してください。
+      財務的な持続可能性に疑問があるシナリオを積極的に検討してください。
+    adversarial: false
+
+  - id: technology_determinism
+    label: 技術決定論
+    description: 技術の発展が社会・市場の方向性を決定するという立場で分析
+    system_injection: |
+      あなたは技術決定論の視点からシミュレーションを行います。
+      技術の発展トレンド、技術的制約、技術的可能性が結果を左右すると考えてください。
+      技術のS字カーブ、ハイプサイクル、技術的ロックインを考慮してください。
+    adversarial: false
+
+  - id: social_impact
+    label: 社会的影響
+    description: 雇用、格差、社会的受容性、ESGの観点から分析
+    system_injection: |
+      あなたは社会的影響の視点からシミュレーションを行います。
+      雇用への影響、社会的格差、公共の受容性、ESG要因を重視してください。
+      社会的な反発やバックラッシュの可能性も検討してください。
+    adversarial: false
+
+  - id: ecosystem_dynamics
+    label: エコシステム動態
+    description: プラットフォーム経済、ネットワーク効果、エコシステム競争を重視
+    system_injection: |
+      あなたはエコシステム動態の視点からシミュレーションを行います。
+      プラットフォーム戦略、ネットワーク効果、エコシステム間の競争を重視してください。
+      Winner-takes-all の動態やマルチサイドプラットフォームの力学を分析してください。
+    adversarial: false
+
+  - id: black_swan_hunter
+    label: ブラックスワン探索
+    description: 低確率だが高インパクトなイベントを積極的に探索する敵対的視点
+    system_injection: |
+      あなたはブラックスワン探索の視点からシミュレーションを行います。
+      低確率だが高インパクトなイベント（ブラックスワン）を積極的に探索してください。
+      他の視点では無視されるようなテールリスク、システミックリスク、カスケード障害を検討してください。
+      「ありえない」と思われるシナリオにも真剣に取り組んでください。
+    adversarial: true

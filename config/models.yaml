@@ -1,0 +1,171 @@
+# LLM Model Configuration
+# OpenAI API (3-tier model strategy)
+default_model: gpt-5-nano-2025-08-07
+api_base: https://api.openai.com/v1
+provider: openai
+
+tasks:
+  # === Tier 1: 高品質タスク (gpt-4o, reasoning_effort: high) ===
+  world_build:
+    model: gpt-4o
+    temperature: 0.3
+    max_tokens: 8192
+    reasoning_effort: high
+
+  report_generate:
+    model: gpt-4o
+    temperature: 0.4
+    max_tokens: 8192
+    reasoning_effort: high
+
+  gm_action_resolve:
+    model: gpt-4o
+    temperature: 0.3
+    max_tokens: 4096
+    reasoning_effort: high
+
+  evaluation:
+    model: gpt-4o
+    temperature: 0.3
+    max_tokens: 4096
+    reasoning_effort: high
+
+  negotiation:
+    model: gpt-4o
+    temperature: 0.5
+    max_tokens: 4096
+    reasoning_effort: high
+
+  debate_judge:
+    model: gpt-4o
+    temperature: 0.3
+    max_tokens: 4096
+    reasoning_effort: high
+
+  self_critique:
+    model: gpt-4o
+    temperature: 0.4
+    max_tokens: 2048
+    reasoning_effort: high
+
+  # === Tier 2: 標準タスク (gpt-5-nano, reasoning_effort: low) ===
+  bdi_perceive:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.3
+    max_tokens: 2048
+    reasoning_effort: low
+
+  bdi_deliberate:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.5
+    max_tokens: 4096
+    reasoning_effort: low
+
+  bdi_execute:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.5
+    max_tokens: 2048
+    reasoning_effort: low
+
+  agent_generate:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.5
+    max_tokens: 8192
+    reasoning_effort: low
+
+  round_process:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.5
+    max_tokens: 8192
+    reasoning_effort: low
+
+  reflection:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.4
+    max_tokens: 2048
+    reasoning_effort: low
+
+  followup:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.3
+    max_tokens: 4096
+    reasoning_effort: low
+
+  swarm_report:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.4
+    max_tokens: 8192
+    reasoning_effort: low
+
+  conversation_respond:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.5
+    max_tokens: 2048
+    reasoning_effort: low
+
+  causal_intervene:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.3
+    max_tokens: 2048
+    reasoning_effort: low
+
+  # === Tier 3: バッチ/軽量タスク (gpt-5-nano, reasoning_effort: minimal) ===
+  memory_importance:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.2
+    max_tokens: 512
+    reasoning_effort: minimal
+
+  claim_extract:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.3
+    max_tokens: 4096
+    reasoning_effort: minimal
+
+  entity_extract:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.2
+    max_tokens: 4096
+    reasoning_effort: minimal
+
+  relation_extract:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.2
+    max_tokens: 4096
+    reasoning_effort: minimal
+
+  entity_dedup:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.1
+    max_tokens: 512
+    reasoning_effort: minimal
+
+  community_summary:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.3
+    max_tokens: 2048
+    reasoning_effort: minimal
+
+  gm_consistency_check:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.2
+    max_tokens: 2048
+    reasoning_effort: minimal
+
+  tom_infer:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.4
+    max_tokens: 2048
+    reasoning_effort: minimal
+
+  batch_reactive_process:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.3
+    max_tokens: 4096
+    reasoning_effort: minimal
+
+  batch_conversation_respond:
+    model: gpt-5-nano-2025-08-07
+    temperature: 0.5
+    max_tokens: 4096
+    reasoning_effort: minimal

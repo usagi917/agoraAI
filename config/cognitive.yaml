@@ -1,0 +1,52 @@
+memory:
+  episodic_max_entries: 100
+  reflection_threshold: 5
+  reflection_max_level: 2
+  recency_weight: 1.0
+  relevance_weight: 1.0
+  importance_weight: 1.0
+  recency_decay_lambda: 0.5
+
+cognitive:
+  mode: advanced  # legacy / advanced
+  bdi:
+    max_intentions: 3
+    commitment_decay: 0.1
+    belief_update_threshold: 0.3
+  perception:
+    visibility_radius: 0.7
+    noise_level: 0.1
+
+game_master:
+  max_active_agents: 100
+  max_concurrent_agents: 30
+  conflict_resolution: priority  # priority / random / negotiation
+  consistency_check_frequency: 2
+  enable_event_injection: true
+
+tom:
+  enabled: true
+  update_frequency: 2
+  max_models_per_agent: 5
+
+social:
+  influence_model: independent_cascade
+  coalition_detection: true
+
+scheduling:
+  protagonist_count: 8
+  active_count: 22
+  reactive_count: 40
+  reclassify_frequency: 2
+
+communication:
+  max_messages_per_agent_per_round: 5
+  max_conversation_turns: 8
+  batch_response_size: 5
+  relevance_threshold: 0.3
+  enable_structured_debate: true
+
+rate_limiting:
+  rpm: 500
+  tpm: 200000
+  concurrent_requests: 20

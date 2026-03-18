@@ -1,0 +1,67 @@
+from src.app.models.project import Project
+from src.app.models.document import Document
+from src.app.models.entity import Entity
+from src.app.models.relation import Relation
+from src.app.models.template import Template
+from src.app.models.run import Run
+from src.app.models.world_state import WorldState
+from src.app.models.graph_state import GraphState
+from src.app.models.graph_diff import GraphDiff
+from src.app.models.timeline_event import TimelineEvent
+from src.app.models.report import Report
+from src.app.models.followup import Followup
+from src.app.models.token_usage import TokenUsage
+from src.app.models.log import Log
+from src.app.models.swarm import Swarm
+from src.app.models.colony import Colony
+from src.app.models.outcome_claim import OutcomeClaim
+from src.app.models.claim_cluster import ClaimCluster
+from src.app.models.aggregation_result import AggregationResult
+from src.app.models.calibration_data import CalibrationData
+from src.app.models.simulation import Simulation
+from src.app.models.kg_node import KGNode
+from src.app.models.kg_edge import KGEdge
+from src.app.models.community import Community
+from src.app.models.memory_entry import MemoryEntry
+from src.app.models.agent_state import AgentState
+from src.app.models.message import Message
+from src.app.models.environment_rule import EnvironmentRule
+from src.app.models.evaluation_score import EvaluationScore
+
+
+def _import_all_models():
+    """Ensure all models are imported for metadata.create_all."""
+    pass
+
+
+__all__ = [
+    "Project",
+    "Document",
+    "Entity",
+    "Relation",
+    "Template",
+    "Run",
+    "WorldState",
+    "GraphState",
+    "GraphDiff",
+    "TimelineEvent",
+    "Report",
+    "Followup",
+    "TokenUsage",
+    "Log",
+    "Swarm",
+    "Colony",
+    "OutcomeClaim",
+    "ClaimCluster",
+    "AggregationResult",
+    "CalibrationData",
+    "Simulation",
+    "KGNode",
+    "KGEdge",
+    "Community",
+    "MemoryEntry",
+    "AgentState",
+    "Message",
+    "EnvironmentRule",
+    "EvaluationScore",
+]

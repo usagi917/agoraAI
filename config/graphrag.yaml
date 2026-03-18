@@ -1,0 +1,8 @@
+graphrag:
+  enabled: true
+  chunk_size: 2000
+  chunk_overlap: 200
+  extraction_passes: 2
+  dedup_threshold: 0.85
+  community_algorithm: louvain
+  community_min_size: 3

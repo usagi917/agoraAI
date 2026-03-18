@@ -1,0 +1,33 @@
+name: business_analysis
+display_name: ビジネス分析
+description: 企業・市場・競合に関する文書を分析し、ビジネス環境のシミュレーションを実行します。
+category: ビジネス
+
+prompts:
+  world_build: |
+    以下の文書からビジネス環境の世界モデルを構築してください。
+    企業、市場、製品、競合、規制機関などのエンティティを抽出し、
+    それらの関係性（競合、協力、規制、供給など）を特定してください。
+
+  agent_generate: |
+    ビジネス環境のエージェントを生成してください。
+    各エージェントは企業、規制機関、消費者グループなどを表し、
+    それぞれの目標、戦略、意思決定パターンを定義してください。
+
+  round_process: |
+    ビジネス環境のシミュレーションラウンドを実行してください。
+    各エージェントの意思決定（価格変更、製品発表、市場参入など）を
+    シミュレートし、関係性の変化とイベントを生成してください。
+
+  report_sections:
+    - executive_summary
+    - input_assumptions
+    - entities_overview
+    - simulation_summary
+    - scenario_comparison
+    - event_timeline
+    - risks
+    - opportunities
+    - recommended_actions
+    - uncertainty
+    - evidence_references

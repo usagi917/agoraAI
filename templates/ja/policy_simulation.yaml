@@ -1,0 +1,33 @@
+name: policy_simulation
+display_name: 政策シミュレーション
+description: 政策文書や法規制を分析し、ステークホルダーの反応をシミュレーションします。
+category: 政策
+
+prompts:
+  world_build: |
+    以下の文書から政策環境の世界モデルを構築してください。
+    政府機関、企業、市民団体、国際機関などのエンティティを抽出し、
+    それらの関係性（規制、影響、連携、対立など）を特定してください。
+
+  agent_generate: |
+    政策環境のエージェントを生成してください。
+    各エージェントは政府機関、ロビー団体、影響を受ける業界などを表し、
+    それぞれの政策立場、影響力、行動パターンを定義してください。
+
+  round_process: |
+    政策シミュレーションのラウンドを実行してください。
+    各エージェントの反応（支持、反対、修正提案、ロビー活動など）を
+    シミュレートし、政策の変化と影響を生成してください。
+
+  report_sections:
+    - executive_summary
+    - input_assumptions
+    - entities_overview
+    - simulation_summary
+    - scenario_comparison
+    - event_timeline
+    - risks
+    - opportunities
+    - recommended_actions
+    - uncertainty
+    - evidence_references

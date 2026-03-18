@@ -1,0 +1,33 @@
+name: scenario_exploration
+display_name: シナリオ探索
+description: 将来のシナリオを複数生成し、各シナリオの展開をシミュレーションします。
+category: シナリオ
+
+prompts:
+  world_build: |
+    以下の文書から世界モデルを構築してください。
+    主要なアクター、リソース、技術、制約条件などのエンティティを抽出し、
+    それらの関係性と依存関係を特定してください。
+
+  agent_generate: |
+    シナリオ探索のエージェントを生成してください。
+    各エージェントは主要なアクターや影響力のある組織を表し、
+    それぞれの目標、能力、制約を定義してください。
+
+  round_process: |
+    シナリオ探索のラウンドを実行してください。
+    各エージェントの行動と環境の変化をシミュレートし、
+    分岐点となるイベントと複数のシナリオ候補を生成してください。
+
+  report_sections:
+    - executive_summary
+    - input_assumptions
+    - entities_overview
+    - simulation_summary
+    - scenario_comparison
+    - event_timeline
+    - risks
+    - opportunities
+    - recommended_actions
+    - uncertainty
+    - evidence_references

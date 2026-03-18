@@ -1,0 +1,44 @@
+# Swarm Profiles: Colony 数と温度分布の設定
+
+profiles:
+  preview:
+    colony_count: 3
+    description: 高速プレビュー（3 Colony、少ラウンド）
+    round_count: 2
+    temperatures: [0.3, 0.5, 0.7]
+    ensure_adversarial: true
+    diversity_mode: minimal
+
+  standard:
+    colony_count: 5
+    description: 標準分析（5 Colony、標準ラウンド）
+    round_count: 4
+    temperatures: [0.2, 0.4, 0.5, 0.6, 0.8]
+    ensure_adversarial: true
+    diversity_mode: balanced
+
+  quality:
+    colony_count: 8
+    description: 高品質分析（8 Colony、多ラウンド）
+    round_count: 6
+    temperatures: [0.2, 0.3, 0.4, 0.5, 0.5, 0.6, 0.7, 0.8]
+    ensure_adversarial: true
+    diversity_mode: maximum
+
+  hybrid_standard:
+    colony_count: 5
+    deep_colony_count: 1
+    description: Hybrid 標準（1 Deep + 4 Shallow Colony）
+    round_count: 4
+    temperatures: [0.3, 0.4, 0.5, 0.6, 0.8]
+    ensure_adversarial: true
+    diversity_mode: balanced
+
+  hybrid_quality:
+    colony_count: 8
+    deep_colony_count: 1
+    description: Hybrid 高品質（1 Deep + 7 Shallow Colony）
+    round_count: 6
+    temperatures: [0.3, 0.2, 0.3, 0.5, 0.5, 0.6, 0.7, 0.8]
+    ensure_adversarial: true
+    diversity_mode: maximum
