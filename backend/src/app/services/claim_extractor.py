@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.llm.client import llm_client
-from src.app.llm.prompts import CLAIM_EXTRACT_SYSTEM, CLAIM_EXTRACT_USER
+from src.app.llm.prompts import CLAIM_EXTRACT_SYSTEM_V2, CLAIM_EXTRACT_USER_V2
 from src.app.models.outcome_claim import OutcomeClaim
 from src.app.services.cost_tracker import record_usage
 
@@ -24,30 +24,39 @@ async def extract_claims(
 
     for colony_result in colony_results:
         colony_id = colony_result["colony_id"]
+        colony_config = colony_result.get("colony_config")
+        perspective = ""
+        if colony_config:
+            perspective = f"{colony_config.perspective_label} (温度: {colony_config.temperature}, 対立的: {colony_config.adversarial})"
+
         world_state = colony_result.get("world_state", {})
         events = colony_result.get("events", [])
         agents = colony_result.get("agents", {})
 
-        # プロンプトサイズ縮小
+        # プロンプトサイズ縮小（より多くのコンテキストを保持）
         compact_state = {
             "entities": [
                 {"label": e.get("label"), "type": e.get("entity_type"),
-                 "stance": e.get("stance"), "importance": e.get("importance_score")}
+                 "stance": e.get("stance"), "importance": e.get("importance_score"),
+                 "sentiment": e.get("sentiment_score")}
                 for e in world_state.get("entities", [])
             ],
             "summary": world_state.get("world_summary", ""),
         }
         compact_events = [
             {"title": ev.get("title"), "type": ev.get("event_type"),
-             "description": ev.get("description", "")[:200]}
+             "description": ev.get("description", "")[:300],
+             "severity": ev.get("severity")}
             for ev in events[:15]
         ]
         compact_agents = [
-            {"name": a.get("name"), "role": a.get("role")}
+            {"name": a.get("name"), "role": a.get("role"),
+             "goals": a.get("goals", [])[:2]}
             for a in agents.get("agents", [])
         ]
 
-        user_prompt = CLAIM_EXTRACT_USER.format(
+        user_prompt = CLAIM_EXTRACT_USER_V2.format(
+            perspective=perspective or "デフォルト視点",
             world_state=json.dumps(compact_state, ensure_ascii=False)[:3000],
             events=json.dumps(compact_events, ensure_ascii=False)[:2000],
             agents=json.dumps(compact_agents, ensure_ascii=False)[:1000],
@@ -56,7 +65,7 @@ async def extract_claims(
         try:
             result, usage = await llm_client.call(
                 task_name="world_build",  # 高品質モデルを使用
-                system_prompt=CLAIM_EXTRACT_SYSTEM,
+                system_prompt=CLAIM_EXTRACT_SYSTEM_V2,
                 user_prompt=user_prompt,
                 response_format={"type": "json_object"},
             )

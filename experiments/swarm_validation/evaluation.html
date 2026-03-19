@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Single vs Swarm ブラインド評価</title>
+<style>
+  :root {
+    --bg: #0f0f14;
+    --surface: #1a1a24;
+    --card: #22222e;
+    --border: #2a2a3a;
+    --accent: #6366f1;
+    --accent-glow: rgba(99, 102, 241, 0.3);
+    --text: #e4e4e7;
+    --text-muted: #71717a;
+    --success: #22c55e;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+  .header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 1.5rem 2rem;
+    text-align: center;
+  }
+  .header h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  .header p { color: var(--text-muted); font-size: 0.85rem; }
+  .setup {
+    max-width: 600px;
+    margin: 2rem auto;
+    padding: 1.5rem;
+    background: var(--surface);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+  }
+  .setup label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
+  .setup input[type="text"], .setup input[type="file"] {
+    width: 100%;
+    padding: 0.6rem 0.8rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+  }
+  .btn {
+    padding: 0.6rem 1.2rem;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-primary:hover { filter: brightness(1.15); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-outline {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .btn-outline:hover { border-color: var(--accent); }
+  .btn-success { background: var(--success); color: white; }
+
+  .main { max-width: 1400px; margin: 0 auto; padding: 1rem 2rem 4rem; }
+  .hidden { display: none !important; }
+
+  /* Navigation */
+  .nav-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: var(--surface);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+  }
+  .nav-bar .progress { color: var(--text-muted); font-size: 0.85rem; }
+  .nav-dots {
+    display: flex;
+    gap: 0.4rem;
+  }
+  .nav-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--border);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .nav-dot.current { background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
+  .nav-dot.done { background: var(--success); }
+
+  /* Test case info */
+  .tc-info {
+    padding: 1rem 1.5rem;
+    background: var(--surface);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    margin-bottom: 1.5rem;
+  }
+  .tc-info h2 { font-size: 1.1rem; margin-bottom: 0.3rem; }
+  .tc-info .domain {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    background: var(--accent);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    margin-right: 0.5rem;
+  }
+  .tc-info .prompt {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+  }
+
+  /* Comparison */
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  @media (max-width: 900px) {
+    .comparison { grid-template-columns: 1fr; }
+  }
+  .report-card {
+    background: var(--surface);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .report-card-header {
+    padding: 0.8rem 1.2rem;
+    font-weight: 700;
+    font-size: 1.1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .report-card-header.a { background: rgba(99, 102, 241, 0.15); color: #818cf8; }
+  .report-card-header.b { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+  .report-content {
+    padding: 1.2rem;
+    max-height: 500px;
+    overflow-y: auto;
+    font-size: 0.85rem;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .report-content h1, .report-content h2, .report-content h3 {
+    margin: 1rem 0 0.5rem;
+    color: var(--text);
+  }
+  .report-content h1 { font-size: 1.2rem; }
+  .report-content h2 { font-size: 1.05rem; }
+  .report-content h3 { font-size: 0.95rem; }
+
+  /* Scenario card (swarm) */
+  .scenario {
+    background: var(--card);
+    border-radius: 8px;
+    padding: 0.8rem;
+    margin-bottom: 0.6rem;
+  }
+  .scenario-prob {
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--accent);
+  }
+  .scenario-desc { font-size: 0.85rem; margin-top: 0.3rem; }
+
+  /* Rating section */
+  .rating-section {
+    background: var(--surface);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .rating-section h3 { margin-bottom: 1rem; }
+  .dimension-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+  }
+  .dimension {
+    background: var(--card);
+    border-radius: 8px;
+    padding: 1rem;
+  }
+  .dimension-label {
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+  }
+  .dimension-desc {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 0.6rem;
+  }
+  .score-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+  }
+  .score-row .label {
+    width: 80px;
+    font-size: 0.8rem;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .score-row .label.a { color: #818cf8; }
+  .score-row .label.b { color: #fbbf24; }
+  .score-btns {
+    display: flex;
+    gap: 0.3rem;
+  }
+  .score-btn {
+    width: 32px; height: 32px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: all 0.15s;
+  }
+  .score-btn:hover { border-color: var(--accent); }
+  .score-btn.selected {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+
+  /* Winner */
+  .winner-section {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+  }
+  .winner-section span { font-weight: 600; }
+  .winner-btn {
+    padding: 0.5rem 1.2rem;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+  .winner-btn:hover { border-color: var(--accent); }
+  .winner-btn.selected-a { border-color: #818cf8; background: rgba(99, 102, 241, 0.2); color: #818cf8; }
+  .winner-btn.selected-b { border-color: #fbbf24; background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+  .winner-btn.selected-tie { border-color: var(--success); background: rgba(34, 197, 94, 0.2); color: var(--success); }
+
+  /* Export */
+  .export-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0; right: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 1rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .export-bar .status { font-size: 0.85rem; color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Single vs Swarm ブラインド品質評価</h1>
+  <p>2つの分析結果（A/B）を比較し、5次元で評価してください。どちらがSingle/Swarmかは伏せられています。</p>
+</div>
+
+<!-- Setup -->
+<div id="setup" class="setup">
+  <label>評価者名</label>
+  <input type="text" id="evaluator-name" placeholder="例: 田中太郎">
+  <label>実験結果ファイル (experiment_runs.json)</label>
+  <input type="file" id="file-input" accept=".json">
+  <button class="btn btn-primary" id="start-btn" disabled onclick="startEvaluation()">評価を開始</button>
+</div>
+
+<!-- Evaluation UI -->
+<div id="eval-ui" class="main hidden">
+  <div class="nav-bar">
+    <button class="btn btn-outline" onclick="navigate(-1)">← 前</button>
+    <div>
+      <div class="nav-dots" id="nav-dots"></div>
+      <div class="progress" id="progress-text"></div>
+    </div>
+    <button class="btn btn-outline" onclick="navigate(1)">次 →</button>
+  </div>
+
+  <div id="tc-info" class="tc-info"></div>
+
+  <div class="comparison" id="comparison"></div>
+
+  <div class="rating-section" id="rating-section"></div>
+
+  <div class="export-bar">
+    <div class="status" id="export-status">未完了</div>
+    <button class="btn btn-success" onclick="exportResults()">結果をエクスポート (JSON)</button>
+  </div>
+</div>
+
+<script>
+const DIMENSIONS = [
+  { key: 'depth', label: '分析の深さ', desc: 'トピックをどれだけ深く掘り下げているか' },
+  { key: 'breadth', label: '視点の多様性', desc: '異なる立場・視点がどれだけ考慮されているか' },
+  { key: 'actionability', label: '実行可能性', desc: '提案がどれだけ具体的で実践的か' },
+  { key: 'risk', label: 'リスク特定', desc: 'リスクや不確実性がどれだけ適切に識別されているか' },
+  { key: 'overall', label: '総合品質', desc: '分析全体の質を総合的に評価' },
+];
+
+let experimentData = null;
+let assignmentMap = {};   // tc_id -> { A: "single"|"swarm", B: ... }
+let ratings = {};         // tc_id -> { winner, a_scores, b_scores }
+let currentIndex = 0;
+let evaluatorName = '';
+
+// File & name handlers
+document.getElementById('file-input').addEventListener('change', checkReady);
+document.getElementById('evaluator-name').addEventListener('input', checkReady);
+
+function checkReady() {
+  const name = document.getElementById('evaluator-name').value.trim();
+  const file = document.getElementById('file-input').files[0];
+  document.getElementById('start-btn').disabled = !(name && file);
+}
+
+function startEvaluation() {
+  evaluatorName = document.getElementById('evaluator-name').value.trim();
+  const file = document.getElementById('file-input').files[0];
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      experimentData = JSON.parse(e.target.result);
+      initEvaluation();
+    } catch (err) {
+      alert('JSONの読み込みに失敗しました: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function initEvaluation() {
+  const runs = experimentData.runs.filter(r => !r.error && r.single?.status === 'completed' && r.swarm?.status === 'completed');
+  if (runs.length === 0) {
+    alert('完了したテストケースが見つかりません');
+    return;
+  }
+  experimentData.runs = runs;
+
+  // Randomize A/B assignment
+  runs.forEach(run => {
+    const coinFlip = Math.random() < 0.5;
+    assignmentMap[run.test_case_id] = coinFlip
+      ? { A: 'single', B: 'swarm' }
+      : { A: 'swarm', B: 'single' };
+    ratings[run.test_case_id] = {
+      winner: null,
+      a_scores: {},
+      b_scores: {},
+    };
+  });
+
+  document.getElementById('setup').classList.add('hidden');
+  document.getElementById('eval-ui').classList.remove('hidden');
+  renderNavDots();
+  renderTestCase(0);
+}
+
+function renderNavDots() {
+  const container = document.getElementById('nav-dots');
+  container.innerHTML = '';
+  experimentData.runs.forEach((_, i) => {
+    const dot = document.createElement('div');
+    dot.className = 'nav-dot' + (i === currentIndex ? ' current' : '');
+    dot.onclick = () => { currentIndex = i; renderTestCase(i); };
+    container.appendChild(dot);
+  });
+  updateProgress();
+}
+
+function updateProgress() {
+  const total = experimentData.runs.length;
+  const done = Object.values(ratings).filter(r => r.winner !== null).length;
+  document.getElementById('progress-text').textContent = `${done}/${total} 完了`;
+  document.getElementById('export-status').textContent = done === total
+    ? '全件評価完了 - エクスポート可能'
+    : `${done}/${total} 完了`;
+
+  // Update dots
+  const dots = document.querySelectorAll('.nav-dot');
+  experimentData.runs.forEach((run, i) => {
+    dots[i].className = 'nav-dot';
+    if (i === currentIndex) dots[i].classList.add('current');
+    if (ratings[run.test_case_id]?.winner) dots[i].classList.add('done');
+  });
+}
+
+function navigate(delta) {
+  const next = currentIndex + delta;
+  if (next >= 0 && next < experimentData.runs.length) {
+    currentIndex = next;
+    renderTestCase(currentIndex);
+  }
+}
+
+function renderTestCase(index) {
+  currentIndex = index;
+  const run = experimentData.runs[index];
+  const map = assignmentMap[run.test_case_id];
+
+  // Info
+  document.getElementById('tc-info').innerHTML = `
+    <h2><span class="domain">${run.domain}</span> ${run.test_case_id}</h2>
+    <div class="prompt">${run.prompt_text}</div>
+  `;
+
+  // Reports
+  const aReport = run[map.A]?.report;
+  const bReport = run[map.B]?.report;
+
+  document.getElementById('comparison').innerHTML = `
+    <div class="report-card">
+      <div class="report-card-header a">Analysis A</div>
+      <div class="report-content">${renderReport(aReport)}</div>
+    </div>
+    <div class="report-card">
+      <div class="report-card-header b">Analysis B</div>
+      <div class="report-content">${renderReport(bReport)}</div>
+    </div>
+  `;
+
+  // Ratings
+  renderRatings(run.test_case_id);
+  updateProgress();
+}
+
+function renderReport(report) {
+  if (!report) return '<em>レポートなし</em>';
+
+  if (report.type === 'single') {
+    return escapeHtml(report.content || 'コンテンツなし');
+  }
+
+  if (report.type === 'swarm') {
+    let html = '';
+    if (report.scenarios && report.scenarios.length > 0) {
+      report.scenarios.forEach(s => {
+        const prob = ((s.probability || s.mean_probability || 0) * 100).toFixed(1);
+        html += `<div class="scenario">
+          <span class="scenario-prob">${prob}%</span>
+          <div class="scenario-desc">${escapeHtml(s.description || s.label || '')}</div>
+        </div>`;
+      });
+    }
+    if (report.metadata?.integrated_report) {
+      html += `<hr style="border-color:var(--border);margin:1rem 0">`;
+      html += escapeHtml(report.metadata.integrated_report);
+    }
+    if (report.diversity_score != null) {
+      html += `<div style="margin-top:1rem;color:var(--text-muted);font-size:0.8rem">
+        多様性スコア: ${report.diversity_score?.toFixed(3) || 'N/A'} / エントロピー: ${report.entropy?.toFixed(3) || 'N/A'}
+      </div>`;
+    }
+    return html || '<em>レポートなし</em>';
+  }
+
+  // PM Board or unknown
+  if (typeof report === 'object') {
+    return escapeHtml(JSON.stringify(report, null, 2));
+  }
+  return escapeHtml(String(report));
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function renderRatings(tcId) {
+  const r = ratings[tcId];
+  let html = '<h3>評価</h3><div class="dimension-grid">';
+
+  DIMENSIONS.forEach(dim => {
+    html += `<div class="dimension">
+      <div class="dimension-label">${dim.label}</div>
+      <div class="dimension-desc">${dim.desc}</div>
+      <div class="score-row">
+        <span class="label a">A:</span>
+        <div class="score-btns">
+          ${[1,2,3,4,5].map(n => `<button class="score-btn ${r.a_scores[dim.key]===n?'selected':''}"
+            onclick="setScore('${tcId}','a','${dim.key}',${n})">${n}</button>`).join('')}
+        </div>
+      </div>
+      <div class="score-row">
+        <span class="label b">B:</span>
+        <div class="score-btns">
+          ${[1,2,3,4,5].map(n => `<button class="score-btn ${r.b_scores[dim.key]===n?'selected':''}"
+            onclick="setScore('${tcId}','b','${dim.key}',${n})">${n}</button>`).join('')}
+        </div>
+      </div>
+    </div>`;
+  });
+
+  html += '</div>';
+
+  // Winner
+  html += `<div class="winner-section">
+    <span>総合判定:</span>
+    <button class="winner-btn ${r.winner==='A'?'selected-a':''}" onclick="setWinner('${tcId}','A')">A が優秀</button>
+    <button class="winner-btn ${r.winner==='B'?'selected-b':''}" onclick="setWinner('${tcId}','B')">B が優秀</button>
+    <button class="winner-btn ${r.winner==='tie'?'selected-tie':''}" onclick="setWinner('${tcId}','tie')">引き分け</button>
+  </div>`;
+
+  document.getElementById('rating-section').innerHTML = html;
+}
+
+function setScore(tcId, side, dimKey, value) {
+  const key = side + '_scores';
+  ratings[tcId][key][dimKey] = value;
+  renderRatings(tcId);
+}
+
+function setWinner(tcId, winner) {
+  ratings[tcId].winner = winner;
+  renderRatings(tcId);
+  updateProgress();
+}
+
+function exportResults() {
+  const output = {
+    evaluator_name: evaluatorName,
+    experiment_id: experimentData.experiment_id,
+    evaluated_at: new Date().toISOString(),
+    assignment_map: assignmentMap,
+    ratings: experimentData.runs.map(run => ({
+      test_case_id: run.test_case_id,
+      domain: run.domain,
+      ...ratings[run.test_case_id],
+    })),
+  };
+
+  const blob = new Blob([JSON.stringify(output, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `eval_${evaluatorName}_${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>

@@ -39,20 +39,56 @@ async def generate_report(
     for section_key in sections_to_generate:
         section_display = REPORT_SECTIONS.get(section_key, section_key)
 
-        # プロンプトサイズ縮小（ローカルLLM対応）
+        # より多くのコンテキストを保持（品質重視）
         compact_state = {
-            "entities": [{"label": e.get("label"), "type": e.get("entity_type")} for e in world_state_final.get("entities", [])],
+            "entities": [
+                {
+                    "label": e.get("label"),
+                    "type": e.get("entity_type"),
+                    "importance": e.get("importance_score"),
+                    "stance": e.get("stance"),
+                    "sentiment": e.get("sentiment_score"),
+                    "description": e.get("description", "")[:100],
+                }
+                for e in world_state_final.get("entities", [])
+            ],
+            "relations": [
+                {
+                    "source": r.get("source"),
+                    "target": r.get("target"),
+                    "type": r.get("relation_type"),
+                    "weight": r.get("weight"),
+                }
+                for r in world_state_final.get("relations", [])[:15]
+            ],
             "summary": world_state_final.get("world_summary", ""),
         }
-        compact_events = [{"title": ev.get("title"), "type": ev.get("event_type")} for ev in events[:10]]
-        compact_agents = [{"name": a.get("name"), "role": a.get("role")} for a in agents.get("agents", [])]
+        compact_events = [
+            {
+                "title": ev.get("title"),
+                "type": ev.get("event_type"),
+                "description": ev.get("description", "")[:200],
+                "severity": ev.get("severity"),
+                "involved": ev.get("involved_entities", []),
+            }
+            for ev in events[:15]
+        ]
+        compact_agents = [
+            {
+                "name": a.get("name"),
+                "role": a.get("role"),
+                "goals": a.get("goals", [])[:2],
+                "strategy": a.get("strategy", "")[:100],
+            }
+            for a in agents.get("agents", [])
+        ]
 
         user_prompt = REPORT_SECTION_USER.format(
             section_name=section_key,
             section_display_name=section_display,
-            world_state_final=json.dumps(compact_state, ensure_ascii=False)[:2000],
-            events=json.dumps(compact_events, ensure_ascii=False)[:1500],
-            agents=json.dumps(compact_agents, ensure_ascii=False)[:1000],
+            world_state_final=json.dumps(compact_state, ensure_ascii=False)[:4000],
+            events=json.dumps(compact_events, ensure_ascii=False)[:3000],
+            agents=json.dumps(compact_agents, ensure_ascii=False)[:2000],
         )
 
         result, usage = await llm_client.call(

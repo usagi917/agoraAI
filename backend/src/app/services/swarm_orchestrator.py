@@ -22,6 +22,7 @@ from src.app.services.graph_projection import project_graph, compute_diff, save_
 from src.app.services.claim_extractor import extract_claims
 from src.app.services.claim_clusterer import cluster_claims
 from src.app.services.aggregator import aggregate_clusters
+from src.app.services.swarm_report_generator import generate_swarm_integrated_report
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -223,6 +224,45 @@ async def run_swarm(swarm_id: str, prompt_text: str = "") -> None:
                 "scenario_count": len(aggregation.get("scenarios", [])),
                 "diversity_score": aggregation.get("diversity_score", 0),
             })
+
+            # === 5. 統合レポート生成 ===
+            await sse_manager.publish(swarm_id, "phase_changed", {
+                "phase": "report_generation",
+            })
+
+            try:
+                integrated_report = await generate_swarm_integrated_report(
+                    session=session,
+                    swarm_id=swarm_id,
+                    prompt_text=prompt_text,
+                    colony_results=successful_results,
+                    colony_configs=colony_configs,
+                    aggregation=aggregation,
+                )
+                # AggregationResult の metadata に統合レポートを追加
+                from sqlalchemy.orm.attributes import flag_modified
+                from src.app.models.aggregation_result import AggregationResult as AggModel
+                agg_result = await session.execute(
+                    select(AggModel).where(AggModel.swarm_id == swarm_id)
+                )
+                agg_record = agg_result.scalar_one_or_none()
+                if agg_record:
+                    meta = dict(agg_record.metadata_json or {})
+                    meta["integrated_report"] = integrated_report
+                    agg_record.metadata_json = meta
+                    flag_modified(agg_record, "metadata_json")
+                    await session.commit()
+                    logger.info(f"Integrated report saved to AggregationResult metadata")
+
+                await sse_manager.publish(swarm_id, "report_completed", {
+                    "report_length": len(integrated_report),
+                })
+                logger.info(f"Integrated report generated for swarm {swarm_id}: {len(integrated_report)} chars")
+            except Exception as report_err:
+                logger.error(f"Integrated report generation failed: {report_err}", exc_info=True)
+                await sse_manager.publish(swarm_id, "report_failed", {
+                    "error": str(report_err)[:200],
+                })
 
             # === 完了 ===
             swarm_final = await session.get(Swarm, swarm_id)
