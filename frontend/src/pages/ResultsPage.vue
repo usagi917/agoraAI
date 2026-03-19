@@ -25,7 +25,6 @@ import ToMMapVisualization from '../components/ToMMapVisualization.vue'
 import SocialNetworkDynamics from '../components/SocialNetworkDynamics.vue'
 import KnowledgeGraphExplorer from '../components/KnowledgeGraphExplorer.vue'
 import { useCognitiveStore } from '../stores/cognitiveStore'
-import { useEvaluationStore } from '../stores/evaluationStore'
 
 const route = useRoute()
 const router = useRouter()
@@ -44,8 +43,7 @@ const transitionProgress = ref(0)
 const isPlaying = ref(false)
 const colonies = ref<ColonyResponse[]>([])
 const cognitiveStore = useCognitiveStore()
-const evaluationStore = useEvaluationStore()
-const activeTab = ref<'report' | 'scenarios' | 'agreement' | 'timeline' | 'cognition' | 'memory' | 'evaluation' | 'tom' | 'social' | 'kg'>('report')
+const activeTab = ref<'report' | 'scenarios' | 'agreement' | 'timeline' | 'cognition' | 'memory' | 'evaluation' | 'tom' | 'social' | 'kg' | 'pm_board'>('report')
 const isCognitiveMode = computed(() => cognitiveStore.cognitiveMode === 'advanced')
 let playbackFrame: number | null = null
 let playbackStartedAt: number | null = null
@@ -60,6 +58,7 @@ const copyState = ref<'idle' | 'success' | 'error'>('idle')
 let copyStateTimer: number | null = null
 
 const isSwarmMode = computed(() => sim.value?.mode === 'swarm' || sim.value?.mode === 'hybrid')
+const isPmBoardMode = computed(() => sim.value?.mode === 'pm_board')
 const reportText = computed(() => typeof report.value?.content === 'string' ? report.value.content : '')
 const canCopyReport = computed(() => reportText.value.trim().length > 0)
 const snapshotByRound = computed(() => new Map(graphSnapshots.value.map((snapshot) => [snapshot.round, snapshot])))
@@ -174,7 +173,9 @@ onMounted(async () => {
     report.value = reportData
     graphSnapshots.value = graphHistory
 
-    if (isSwarmMode.value) {
+    if (isPmBoardMode.value) {
+      activeTab.value = 'pm_board'
+    } else if (isSwarmMode.value) {
       colonies.value = await getSimulationColonies(simId).catch(() => [])
       activeTab.value = 'scenarios'
     }
@@ -381,6 +382,14 @@ function renderMarkdown(content: string): string {
           合意ヒートマップ
         </button>
         <button
+          v-if="isPmBoardMode"
+          class="tab-btn"
+          :class="{ active: activeTab === 'pm_board' }"
+          @click="activeTab = 'pm_board'"
+        >
+          PM Board
+        </button>
+        <button
           v-if="isCognitiveMode"
           class="tab-btn"
           :class="{ active: activeTab === 'cognition' }"
@@ -533,6 +542,165 @@ function renderMarkdown(content: string): string {
               :relations="[]"
               :communities="[]"
             />
+          </div>
+
+          <!-- PM Board tab -->
+          <div v-if="activeTab === 'pm_board' && report" class="tab-panel">
+            <div class="pm-board-result">
+              <template v-if="report.sections">
+                <div v-if="report.sections.core_question" class="pm-section">
+                  <h3 class="pm-section-title">1. 核心質問</h3>
+                  <p class="pm-section-content">{{ report.sections.core_question }}</p>
+                </div>
+
+                <div v-if="report.sections.assumptions?.length" class="pm-section">
+                  <h3 class="pm-section-title">2. 前提条件</h3>
+                  <div v-for="(a, i) in report.sections.assumptions" :key="i" class="pm-card">
+                    <div class="pm-card-header">
+                      <span class="pm-card-label">{{ a.assumption }}</span>
+                      <span class="pm-confidence" :style="{ color: a.confidence > 0.7 ? 'var(--success)' : a.confidence > 0.4 ? 'var(--warning, #f59e0b)' : 'var(--danger)' }">
+                        {{ (a.confidence * 100).toFixed(0) }}%
+                      </span>
+                    </div>
+                    <p v-if="a.evidence" class="pm-card-detail">根拠: {{ a.evidence }}</p>
+                    <p v-if="a.impact_if_wrong" class="pm-card-detail pm-risk">誤りの影響: {{ a.impact_if_wrong }}</p>
+                  </div>
+                </div>
+
+                <div v-if="report.sections.uncertainties?.length" class="pm-section">
+                  <h3 class="pm-section-title">3. 不確実性</h3>
+                  <div v-for="(u, i) in report.sections.uncertainties" :key="i" class="pm-card">
+                    <div class="pm-card-header">
+                      <span class="pm-card-label">{{ u.uncertainty }}</span>
+                      <span class="pm-risk-badge" :class="'risk-' + u.risk_level">{{ u.risk_level }}</span>
+                    </div>
+                    <p v-if="u.validation_method" class="pm-card-detail">検証方法: {{ u.validation_method }}</p>
+                  </div>
+                </div>
+
+                <div v-if="report.sections.risks?.length" class="pm-section">
+                  <h3 class="pm-section-title">4. リスク</h3>
+                  <div v-for="(r, i) in report.sections.risks" :key="i" class="pm-card">
+                    <div class="pm-card-header">
+                      <span class="pm-card-label">{{ r.risk }}</span>
+                      <span class="pm-confidence">{{ (r.probability * 100).toFixed(0) }}%</span>
+                    </div>
+                    <p v-if="r.mitigation" class="pm-card-detail">緩和策: {{ r.mitigation }}</p>
+                  </div>
+                </div>
+
+                <div v-if="report.sections.winning_hypothesis?.if_true" class="pm-section">
+                  <h3 class="pm-section-title">5. 勝利仮説</h3>
+                  <div class="pm-card pm-highlight">
+                    <p><strong>IF</strong> {{ report.sections.winning_hypothesis.if_true }}</p>
+                    <p><strong>THEN</strong> {{ report.sections.winning_hypothesis.then_do }}</p>
+                    <p><strong>TO ACHIEVE</strong> {{ report.sections.winning_hypothesis.to_achieve }}</p>
+                    <span class="pm-confidence">
+                      確信度: {{ ((report.sections.winning_hypothesis.confidence || 0) * 100).toFixed(0) }}%
+                    </span>
+                  </div>
+                </div>
+
+                <div v-if="report.sections.customer_validation_plan?.key_questions?.length" class="pm-section">
+                  <h3 class="pm-section-title">6. 顧客検証計画</h3>
+                  <div class="pm-card">
+                    <p v-if="report.sections.customer_validation_plan.target_segments?.length">
+                      <strong>ターゲット:</strong> {{ report.sections.customer_validation_plan.target_segments.join(', ') }}
+                    </p>
+                    <ul>
+                      <li v-for="(q, i) in report.sections.customer_validation_plan.key_questions" :key="i">{{ q }}</li>
+                    </ul>
+                    <p v-if="report.sections.customer_validation_plan.success_criteria">
+                      <strong>成功基準:</strong> {{ report.sections.customer_validation_plan.success_criteria }}
+                    </p>
+                  </div>
+                </div>
+
+                <div v-if="report.sections.market_view?.market_size" class="pm-section">
+                  <h3 class="pm-section-title">7. 市場/競合ビュー</h3>
+                  <div class="pm-card">
+                    <p><strong>市場規模:</strong> {{ report.sections.market_view.market_size }}</p>
+                    <p v-if="report.sections.market_view.growth_rate"><strong>成長率:</strong> {{ report.sections.market_view.growth_rate }}</p>
+                    <div v-if="report.sections.market_view.key_players?.length">
+                      <strong>主要プレイヤー:</strong>
+                      <div v-for="(p, i) in report.sections.market_view.key_players" :key="i" class="pm-player">
+                        {{ p.name }} — {{ p.position }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="report.sections.gtm_hypothesis?.value_proposition" class="pm-section">
+                  <h3 class="pm-section-title">8. GTM仮説</h3>
+                  <div class="pm-card">
+                    <p><strong>ターゲット:</strong> {{ report.sections.gtm_hypothesis.target_customer }}</p>
+                    <p><strong>価値提案:</strong> {{ report.sections.gtm_hypothesis.value_proposition }}</p>
+                    <p v-if="report.sections.gtm_hypothesis.channel"><strong>チャネル:</strong> {{ report.sections.gtm_hypothesis.channel }}</p>
+                    <p v-if="report.sections.gtm_hypothesis.pricing_model"><strong>価格モデル:</strong> {{ report.sections.gtm_hypothesis.pricing_model }}</p>
+                  </div>
+                </div>
+
+                <div v-if="report.sections.mvp_scope?.in_scope?.length" class="pm-section">
+                  <h3 class="pm-section-title">9. MVPスコープ</h3>
+                  <div class="pm-card">
+                    <div class="pm-scope-columns">
+                      <div>
+                        <strong>In Scope:</strong>
+                        <ul><li v-for="(s, i) in report.sections.mvp_scope.in_scope" :key="i">{{ s }}</li></ul>
+                      </div>
+                      <div>
+                        <strong>Out of Scope:</strong>
+                        <ul><li v-for="(s, i) in report.sections.mvp_scope.out_of_scope" :key="i">{{ s }}</li></ul>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="report.sections.plan_30_60_90?.day_30" class="pm-section">
+                  <h3 class="pm-section-title">10. 30/60/90日計画</h3>
+                  <div class="pm-timeline-grid">
+                    <div v-for="period in ['day_30', 'day_60', 'day_90']" :key="period" class="pm-card">
+                      <h4 class="pm-period-label">{{ period === 'day_30' ? '30日' : period === 'day_60' ? '60日' : '90日' }}</h4>
+                      <div v-if="report.sections.plan_30_60_90[period]?.goals?.length">
+                        <strong>目標:</strong>
+                        <ul><li v-for="(g, i) in report.sections.plan_30_60_90[period].goals" :key="i">{{ g }}</li></ul>
+                      </div>
+                      <div v-if="report.sections.plan_30_60_90[period]?.actions?.length">
+                        <strong>アクション:</strong>
+                        <ul><li v-for="(a, i) in report.sections.plan_30_60_90[period].actions" :key="i">{{ a }}</li></ul>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="report.sections.top_5_actions?.length" class="pm-section">
+                  <h3 class="pm-section-title">11. 今すぐやるべき5アクション</h3>
+                  <div v-for="(action, idx) in report.sections.top_5_actions" :key="idx" class="pm-card pm-action">
+                    <div class="pm-action-header">
+                      <span class="pm-action-number">{{ Number(idx) + 1 }}</span>
+                      <span class="pm-card-label">{{ action.action }}</span>
+                      <span v-if="action.confidence" class="pm-confidence">{{ (action.confidence * 100).toFixed(0) }}%</span>
+                    </div>
+                    <p v-if="action.owner" class="pm-card-detail">担当: {{ action.owner }}</p>
+                    <p v-if="action.deadline" class="pm-card-detail">期限: {{ action.deadline }}</p>
+                    <p v-if="action.evidence" class="pm-card-detail">根拠: {{ action.evidence }}</p>
+                  </div>
+                </div>
+              </template>
+
+              <div v-if="report.contradictions?.length" class="pm-section">
+                <h3 class="pm-section-title">矛盾検出</h3>
+                <div v-for="(c, i) in report.contradictions" :key="i" class="pm-card pm-contradiction">
+                  <p><strong>{{ c.between?.join(' vs ') }}:</strong> {{ c.issue }}</p>
+                  <p class="pm-card-detail">解決案: {{ c.resolution }}</p>
+                </div>
+              </div>
+
+              <div v-if="report.overall_confidence" class="pm-overall">
+                <span>総合確信度:</span>
+                <span class="pm-overall-score">{{ (report.overall_confidence * 100).toFixed(0) }}%</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -728,6 +896,33 @@ function renderMarkdown(content: string): string {
 .chat-input:focus { border-color: var(--accent); }
 .chat-input::placeholder { color: var(--text-muted); }
 .chat-send { width: 36px; height: 36px; padding: 0; border-radius: 50%; font-size: 1rem; }
+
+.pm-board-result { display: flex; flex-direction: column; gap: 1.5rem; }
+.pm-section { }
+.pm-section-title { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+.pm-section-content { font-size: 1.1rem; font-weight: 500; line-height: 1.6; }
+.pm-card { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.85rem 1rem; margin-bottom: 0.5rem; }
+.pm-card-header { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; margin-bottom: 0.3rem; }
+.pm-card-label { font-size: 0.88rem; font-weight: 500; }
+.pm-card-detail { font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem; }
+.pm-risk { color: var(--danger); }
+.pm-confidence { font-family: var(--font-mono); font-size: 0.78rem; font-weight: 600; color: var(--accent); }
+.pm-risk-badge { font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600; padding: 0.1rem 0.4rem; border-radius: 3px; text-transform: uppercase; }
+.pm-risk-badge.risk-high { background: rgba(239,68,68,0.15); color: var(--danger); }
+.pm-risk-badge.risk-medium { background: rgba(245,158,11,0.15); color: #f59e0b; }
+.pm-risk-badge.risk-low { background: rgba(34,197,94,0.15); color: var(--success); }
+.pm-highlight { border-color: var(--accent); background: rgba(99,102,241,0.05); }
+.pm-highlight p { margin: 0.3rem 0; font-size: 0.88rem; }
+.pm-scope-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.pm-timeline-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; }
+.pm-period-label { font-family: var(--font-mono); font-size: 0.85rem; font-weight: 600; color: var(--accent); margin-bottom: 0.5rem; }
+.pm-action { display: flex; flex-direction: column; gap: 0.2rem; }
+.pm-action-header { display: flex; align-items: center; gap: 0.5rem; }
+.pm-action-number { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: white; display: flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 700; flex-shrink: 0; }
+.pm-contradiction { border-left: 3px solid var(--danger); }
+.pm-overall { display: flex; align-items: center; gap: 0.75rem; padding: 1rem; background: rgba(99,102,241,0.08); border-radius: var(--radius-sm); font-size: 0.9rem; font-weight: 500; }
+.pm-overall-score { font-family: var(--font-mono); font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+.pm-player { font-size: 0.82rem; color: var(--text-secondary); padding-left: 0.5rem; margin: 0.2rem 0; }
 
 @media (max-width: 1200px) {
   .results-layout {

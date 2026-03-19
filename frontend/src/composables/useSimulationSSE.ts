@@ -35,6 +35,12 @@ export function useSimulationSSE(simulationId: string) {
       'aggregation_completed',
       'swarm_completed',
       'swarm_failed',
+      // PM Board モード
+      'pm_board_started',
+      'pm_analyzing',
+      'pm_analyses_completed',
+      'pm_synthesizing',
+      'pm_board_completed',
       // 統一イベント
       'simulation_completed',
       'simulation_failed',
@@ -182,6 +188,30 @@ export function useSimulationSSE(simulationId: string) {
 
       case 'swarm_failed':
         store.setError(payload.error || '不明なエラー')
+        close()
+        break
+
+      // === PM Board モード ===
+      case 'pm_board_started':
+        store.setStatus('running')
+        store.setPhase('pm_analyzing')
+        break
+
+      case 'pm_analyzing':
+        store.setPhase(`pm_analyzing_${payload.persona}`)
+        break
+
+      case 'pm_analyses_completed':
+        store.setPhase('pm_synthesizing')
+        break
+
+      case 'pm_synthesizing':
+        store.setPhase('pm_synthesizing')
+        break
+
+      case 'pm_board_completed':
+        store.setStatus('completed')
+        store.setPhase('completed')
         close()
         break
 

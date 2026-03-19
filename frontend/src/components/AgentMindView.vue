@@ -7,6 +7,20 @@ const store = useCognitiveStore()
 const agents = computed(() => store.agentList)
 const selected = computed(() => store.selectedAgent)
 
+const currentRound = computed(() => selected.value?.round ?? 0)
+
+/** Build a trust map from the selected agent's beliefs about other agents */
+const trustMap = computed(() => {
+  if (!selected.value) return []
+  const tomRelations = store.tomRelations.filter(
+    (r) => r.observer === selected.value!.agentName
+  )
+  return tomRelations.map((r) => ({
+    target: r.target,
+    trust: r.trustLevel,
+  }))
+})
+
 function selectAgent(agentId: string) {
   store.selectAgent(agentId)
 }
@@ -15,7 +29,10 @@ function selectAgent(agentId: string) {
 <template>
   <div class="agent-mind-view">
     <div class="agent-list">
-      <h3>エージェント一覧</h3>
+      <div class="sidebar-header">
+        <h3>エージェント一覧</h3>
+        <span v-if="currentRound" class="round-badge">Round {{ currentRound }}</span>
+      </div>
       <div
         v-for="agent in agents"
         :key="agent.agentId"
@@ -59,6 +76,26 @@ function selectAgent(agentId: string) {
         </div>
       </div>
 
+      <!-- 信頼マップ -->
+      <div v-if="trustMap.length > 0" class="bdi-section">
+        <h4>信頼マップ (Trust Map)</h4>
+        <div v-for="entry in trustMap" :key="entry.target" class="trust-map-item">
+          <span class="trust-target-name">{{ entry.target }}</span>
+          <span class="trust-bar-track">
+            <span
+              class="trust-bar-fill"
+              :class="{
+                'trust-high': entry.trust >= 0.7,
+                'trust-mid': entry.trust >= 0.4 && entry.trust < 0.7,
+                'trust-low': entry.trust < 0.4,
+              }"
+              :style="{ width: entry.trust * 100 + '%' }"
+            ></span>
+          </span>
+          <span class="trust-value">{{ (entry.trust * 100).toFixed(0) }}%</span>
+        </div>
+      </div>
+
       <!-- 推論チェーン -->
       <div class="bdi-section">
         <h4>推論チェーン</h4>
@@ -80,79 +117,184 @@ function selectAgent(agentId: string) {
   gap: 1rem;
   height: 100%;
 }
+
+/* ---- Sidebar ---- */
 .agent-list {
-  width: 250px;
+  width: 260px;
   overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding-right: 1rem;
 }
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+.sidebar-header h3 {
+  margin: 0;
+  color: var(--text-primary);
+}
+.round-badge {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border: 1px solid var(--border-active);
+}
+
 .agent-card {
   padding: 0.75rem;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   margin-bottom: 0.5rem;
   cursor: pointer;
+  background: var(--bg-card);
   transition: all 0.2s;
 }
 .agent-card:hover {
-  border-color: #4a90d9;
+  border-color: var(--border-active);
+  background: var(--bg-surface);
 }
 .agent-card.selected {
-  border-color: #4a90d9;
-  background: #f0f7ff;
+  border-color: var(--accent);
+  background: var(--bg-surface);
+  box-shadow: 0 0 12px var(--accent-glow);
 }
 .agent-name {
   font-weight: 600;
+  color: var(--text-primary);
 }
 .agent-action {
   font-size: 0.85rem;
-  color: #666;
+  color: var(--text-muted);
   margin-top: 0.25rem;
+  line-height: 1.4;
 }
+
+/* ---- Detail ---- */
 .agent-detail {
   flex: 1;
   overflow-y: auto;
+}
+.agent-detail h3 {
+  color: var(--text-primary);
 }
 .bdi-section {
   margin-bottom: 1.5rem;
 }
 .bdi-section h4 {
   margin-bottom: 0.5rem;
-  color: #333;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
-.belief-item, .desire-item, .intention-item {
+
+/* Belief / Desire / Intention items */
+.belief-item,
+.desire-item,
+.intention-item {
   position: relative;
-  padding: 0.5rem;
+  padding: 0.5rem 0.6rem;
   margin-bottom: 0.25rem;
-  border-radius: 4px;
-  background: #f8f8f8;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
 }
-.confidence-bar, .commitment-bar {
+
+/* Animated gradient bars */
+.confidence-bar,
+.commitment-bar {
   position: absolute;
   left: 0;
   top: 0;
   bottom: 0;
-  background: rgba(74, 144, 217, 0.1);
-  border-radius: 4px;
+  background: linear-gradient(90deg, var(--accent-glow), transparent);
+  border-radius: var(--radius-sm);
+  transition: width 0.6s ease;
 }
 .confidence-value {
   float: right;
+  font-family: var(--font-mono);
   font-size: 0.8rem;
-  color: #888;
+  color: var(--text-muted);
 }
+.belief-text {
+  position: relative;
+  z-index: 1;
+}
+
 .priority-badge {
   display: inline-block;
-  background: #4a90d9;
-  color: white;
+  background: var(--accent);
+  color: #fff;
   padding: 0.1rem 0.4rem;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
   font-size: 0.75rem;
   margin-right: 0.5rem;
 }
-.reasoning-chain, .action-taken {
+
+/* ---- Trust Map ---- */
+.trust-map-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0;
+}
+.trust-target-name {
+  min-width: 90px;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+.trust-bar-track {
+  flex: 1;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.trust-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+.trust-bar-fill.trust-high {
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success-glow);
+}
+.trust-bar-fill.trust-mid {
+  background: var(--warning);
+  box-shadow: 0 0 6px var(--warning-glow);
+}
+.trust-bar-fill.trust-low {
+  background: var(--danger);
+  box-shadow: 0 0 6px var(--danger-glow);
+}
+.trust-value {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  min-width: 36px;
+  text-align: right;
+}
+
+/* Reasoning / Action blocks */
+.reasoning-chain,
+.action-taken {
   padding: 0.75rem;
-  background: #f5f5f5;
-  border-radius: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   white-space: pre-wrap;
   font-size: 0.9rem;
   line-height: 1.5;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
 }
 </style>

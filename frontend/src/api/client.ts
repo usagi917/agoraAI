@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
 })
 
 export interface TemplateResponse {
@@ -49,7 +49,7 @@ export interface ColonyResponse {
 export interface SimulationResponse {
   id: string
   project_id: string | null
-  mode: 'single' | 'swarm' | 'hybrid'
+  mode: 'single' | 'swarm' | 'hybrid' | 'pm_board'
   prompt_text: string
   template_name: string
   execution_profile: string
@@ -87,7 +87,7 @@ export interface GraphSnapshot {
 }
 
 export async function createSimulation(
-  mode: 'single' | 'swarm' | 'hybrid',
+  mode: 'single' | 'swarm' | 'hybrid' | 'pm_board',
   options: {
     projectId?: string
     templateName?: string
@@ -142,5 +142,17 @@ export async function submitSimulationFollowup(simId: string, question: string) 
 
 export async function rerunSimulation(simId: string) {
   const { data } = await api.post(`/simulations/${simId}/rerun`)
+  return data
+}
+
+// === Sample Results API (API Key不要) ===
+
+export async function getSampleResults() {
+  const { data } = await api.get('/simulations/samples')
+  return data
+}
+
+export async function getSampleResult(sampleId: string) {
+  const { data } = await api.get(`/simulations/samples/${sampleId}`)
   return data
 }

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
-export type SimulationMode = 'single' | 'swarm' | 'hybrid'
+export type SimulationMode = 'single' | 'swarm' | 'hybrid' | 'pm_board'
 
 export interface ColonyState {
   id: string

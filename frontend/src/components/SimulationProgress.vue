@@ -18,12 +18,21 @@ const swarmPhases = [
   { key: 'completed', label: '完了' },
 ]
 
-const phases = computed(() =>
-  store.isSwarmMode ? swarmPhases : singlePhases,
-)
+const pmBoardPhases = [
+  { key: 'pm_analyzing', label: 'PM分析' },
+  { key: 'pm_synthesizing', label: 'チーフPM統合' },
+  { key: 'completed', label: '完了' },
+]
+
+const phases = computed(() => {
+  if (store.mode === 'pm_board') return pmBoardPhases
+  if (store.isSwarmMode) return swarmPhases
+  return singlePhases
+})
 
 const currentPhaseIndex = computed(() => {
-  const idx = phases.value.findIndex(p => p.key === store.phase)
+  const phase = store.phase
+  const idx = phases.value.findIndex(p => p.key === phase || phase.startsWith(p.key))
   return idx >= 0 ? idx : 0
 })
 

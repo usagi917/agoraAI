@@ -1080,6 +1080,10 @@ export function useForceGraph(containerRef: Ref<HTMLElement | null>) {
   return {
     graph,
     setFullGraph,
+    applyDiff,
+    startGraphTransition,
+    finishGraphTransition,
+    getNodeById,
     resetCamera,
   }
 }

@@ -1,5 +1,6 @@
 import pytest
 
+from src.app.config import settings
 from src.app.llm.client import LLMClient
 
 
@@ -21,6 +22,7 @@ class _FakeAsyncClient:
         self.last_url = ""
         self.last_json = None
         self.last_headers = None
+        self.is_closed = False
 
     async def post(self, url: str, json: dict, headers: dict):
         self.last_url = url
@@ -50,7 +52,7 @@ async def test_call_openai_uses_max_completion_tokens(monkeypatch: pytest.Monkey
     fake_http_client = _FakeAsyncClient()
     client._http_client = fake_http_client
 
-    monkeypatch.setattr("src.app.llm.client.settings.openai_api_key", "test-key")
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
 
     content, usage = await client._call_openai(
         model="gpt-5-nano-2025-08-07",

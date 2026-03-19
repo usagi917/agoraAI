@@ -19,6 +19,11 @@ const router = createRouter({
       name: 'results',
       component: () => import('./pages/ResultsPage.vue'),
     },
+    {
+      path: '/sample/:id',
+      name: 'sample',
+      component: () => import('./pages/SampleResultPage.vue'),
+    },
     // === レガシーリダイレクト ===
     {
       path: '/run/:id',

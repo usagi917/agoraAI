@@ -117,16 +117,18 @@ function formatScore(score: number): string {
 }
 .no-data {
   text-align: center;
-  color: #999;
+  color: var(--text-muted);
   padding: 2rem;
 }
 .score-cards {
   display: flex;
   gap: 2rem;
   align-items: flex-start;
+  flex-wrap: wrap;
 }
 .score-card {
   flex: 1;
+  min-width: 250px;
 }
 .score-item {
   display: flex;
@@ -136,43 +138,54 @@ function formatScore(score: number): string {
 }
 .score-label {
   width: 100px;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   text-align: right;
+  color: var(--text-secondary);
 }
 .score-bar-container {
   flex: 1;
-  height: 20px;
-  background: #f0f0f0;
-  border-radius: 10px;
+  height: 18px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 9px;
   overflow: hidden;
+  border: 1px solid var(--border);
 }
 .score-bar {
   height: 100%;
-  border-radius: 10px;
+  border-radius: 9px;
   transition: width 0.5s ease;
 }
 .score-value {
   width: 40px;
+  font-family: var(--font-mono);
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
 }
 .overall-score {
   text-align: center;
   padding: 1.5rem;
-  background: #f8f9fa;
-  border-radius: 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 .overall-label {
-  font-size: 0.9rem;
-  color: #666;
+  font-size: 0.85rem;
+  color: var(--text-muted);
   margin-bottom: 0.5rem;
 }
 .overall-value {
+  font-family: var(--font-mono);
   font-size: 3rem;
   font-weight: 800;
 }
 .trend-section {
   margin-top: 2rem;
+}
+.trend-section h4 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: var(--text-primary);
 }
 .trend-table table {
   width: 100%;
@@ -181,16 +194,26 @@ function formatScore(score: number): string {
 .trend-table th, .trend-table td {
   padding: 0.5rem;
   text-align: center;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
 }
 .trend-table th {
-  font-size: 0.8rem;
-  color: #888;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.trend-table td {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
 }
 .averages-section {
   margin-top: 1.5rem;
   padding: 1rem;
-  background: #f8f9fa;
-  border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  color: var(--text-secondary);
 }
 </style>

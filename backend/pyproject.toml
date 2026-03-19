@@ -1,6 +1,6 @@
 [project]
 name = "agent-ai-backend"
-version = "0.1.0"
+version = "1.0.0"
 description = "Realtime Graph Multi-Agent Simulation Report System - Backend"
 requires-python = ">=3.11"
 dependencies = [

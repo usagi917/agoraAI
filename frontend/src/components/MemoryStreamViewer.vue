@@ -83,20 +83,25 @@ function memoryTypeLabel(type: string): string {
 .no-selection {
   padding: 2rem;
   text-align: center;
-  color: #999;
+  color: var(--text-muted);
 }
 .timeline {
   position: relative;
   padding-left: 1rem;
-  border-left: 2px solid #e0e0e0;
+  border-left: 2px solid var(--border);
 }
 .memory-entry {
   padding: 0.75rem;
   margin-bottom: 0.5rem;
   margin-left: 1rem;
-  border-radius: 6px;
-  background: #f8f9fa;
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
   position: relative;
+  transition: border-color 0.2s;
+}
+.memory-entry:hover {
+  border-color: rgba(255,255,255,0.1);
 }
 .memory-entry::before {
   content: '';
@@ -106,14 +111,16 @@ function memoryTypeLabel(type: string): string {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #3498db;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow, rgba(99,102,241,0.4));
 }
 .memory-entry.reflection {
-  background: #f5f0ff;
+  background: rgba(155,89,182,0.08);
   border-left: 3px solid #9b59b6;
 }
 .memory-entry.reflection::before {
   background: #9b59b6;
+  box-shadow: 0 0 6px rgba(155,89,182,0.4);
 }
 .memory-meta {
   display: flex;
@@ -122,14 +129,16 @@ function memoryTypeLabel(type: string): string {
   margin-bottom: 0.4rem;
 }
 .round-badge {
-  font-size: 0.75rem;
-  color: #666;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
   font-weight: 600;
 }
 .type-badge {
-  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
   color: white;
-  padding: 0.1rem 0.3rem;
+  padding: 0.1rem 0.4rem;
   border-radius: 3px;
 }
 .importance-dot {
@@ -138,30 +147,43 @@ function memoryTypeLabel(type: string): string {
   border-radius: 50%;
 }
 .memory-content {
-  font-size: 0.9rem;
-  line-height: 1.4;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
 }
 .reflection-section {
   margin-top: 2rem;
 }
+.reflection-section h4 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: var(--text-primary);
+}
 .reflection-entry {
   padding: 0.75rem;
   margin-bottom: 0.5rem;
-  background: #f5f0ff;
-  border-radius: 6px;
+  background: rgba(155,89,182,0.08);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid #9b59b6;
+  border: 1px solid rgba(155,89,182,0.2);
   border-left: 3px solid #9b59b6;
 }
 .reflection-level {
-  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
   color: #9b59b6;
   font-weight: 600;
 }
 .reflection-insight {
   margin-top: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
 }
 .reflection-importance {
-  font-size: 0.8rem;
-  color: #888;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
   margin-top: 0.25rem;
 }
 </style>

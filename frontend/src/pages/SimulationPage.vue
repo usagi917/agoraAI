@@ -34,6 +34,14 @@ const entityTypeColors: Record<string, string> = {
   resource: '#4DB6AC',
 }
 
+const pmPhaseLabel = computed(() => {
+  const phase = store.phase
+  if (phase.startsWith('pm_analyzing_')) return `${phase.replace('pm_analyzing_', '')} 分析中...`
+  if (phase === 'pm_synthesizing') return 'チーフPM 統合中...'
+  if (phase === 'completed') return '完了'
+  return '準備中...'
+})
+
 const formattedTime = computed(() => {
   const m = Math.floor(elapsedTime.value / 60)
   const s = elapsedTime.value % 60
@@ -115,6 +123,12 @@ function goToResults() {
         <template v-if="store.isSwarmMode">
           <span class="status-divider">|</span>
           <span class="status-mono">{{ store.completedColonies }}/{{ store.colonies.length }} Colony</span>
+        </template>
+        <template v-if="store.mode === 'pm_board'">
+          <span class="status-divider">|</span>
+          <span class="status-mono">PM Board</span>
+          <span class="status-divider">|</span>
+          <span class="status-mono">{{ pmPhaseLabel }}</span>
         </template>
       </div>
       <div class="status-right">

@@ -173,30 +173,39 @@ function typeColor(type: string): string {
 .kg-sidebar {
   width: 300px;
   overflow-y: auto;
-  border-right: 1px solid #e0e0e0;
+  border-right: 1px solid var(--border);
   padding-right: 1rem;
 }
 .search-input {
   width: 100%;
-  padding: 0.5rem;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.3);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  outline: none;
   margin-bottom: 1rem;
 }
+.search-input:focus { border-color: var(--accent); }
+.search-input::placeholder { color: var(--text-muted); }
 .communities-section {
   margin-bottom: 1.5rem;
 }
 .community-item {
   padding: 0.5rem;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   margin-bottom: 0.25rem;
+  transition: background 0.2s;
 }
 .community-item:hover {
-  background: #f0f7ff;
+  background: rgba(255,255,255,0.04);
 }
 .community-item.selected {
-  background: #e3f2fd;
+  background: rgba(99,102,241,0.1);
+  border: 1px solid rgba(99,102,241,0.3);
 }
 .community-name {
   font-weight: 600;
@@ -204,7 +213,7 @@ function typeColor(type: string): string {
 }
 .community-summary {
   font-size: 0.8rem;
-  color: #666;
+  color: var(--text-secondary);
 }
 .entity-list {
   max-height: 400px;
@@ -217,12 +226,13 @@ function typeColor(type: string): string {
   padding: 0.4rem;
   cursor: pointer;
   border-radius: 4px;
+  transition: background 0.2s;
 }
 .entity-item:hover {
-  background: #f0f7ff;
+  background: rgba(255,255,255,0.04);
 }
 .entity-item.selected {
-  background: #e3f2fd;
+  background: rgba(99,102,241,0.1);
 }
 .entity-type-dot {
   width: 8px;
@@ -239,8 +249,9 @@ function typeColor(type: string): string {
   font-size: 0.85rem;
 }
 .entity-type-text {
-  font-size: 0.75rem;
-  color: #999;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
 }
 .kg-detail {
   flex: 1;
@@ -253,16 +264,19 @@ function typeColor(type: string): string {
   gap: 0.5rem;
 }
 .detail-type {
-  color: #666;
+  color: var(--text-secondary);
   margin-bottom: 0.5rem;
+  font-size: 0.82rem;
 }
 .detail-description {
   line-height: 1.6;
   margin-bottom: 1rem;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
 }
 .detail-label {
-  font-size: 0.85rem;
-  color: #888;
+  font-size: 0.82rem;
+  color: var(--text-muted);
 }
 .aliases {
   margin-bottom: 1rem;
@@ -270,10 +284,12 @@ function typeColor(type: string): string {
 .alias-badge, .member-badge {
   display: inline-block;
   padding: 0.15rem 0.5rem;
-  background: #f0f0f0;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 0.8rem;
   margin: 0.2rem;
+  color: var(--text-secondary);
 }
 .relations-section {
   margin-top: 1.5rem;
@@ -282,21 +298,24 @@ function typeColor(type: string): string {
   display: flex;
   gap: 0.5rem;
   padding: 0.4rem 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
 }
 .rel-type {
-  color: #888;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }
 .rel-confidence {
-  color: #999;
-  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  font-size: 0.78rem;
 }
 .no-selection {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #999;
+  color: var(--text-muted);
 }
 </style>

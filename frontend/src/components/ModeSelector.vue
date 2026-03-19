@@ -28,6 +28,12 @@ const modes = [
     desc: '深い分析 + 統計分布',
     detail: 'Deep + Shallow Colony',
   },
+  {
+    value: 'pm_board' as SimulationMode,
+    label: 'PM Board',
+    desc: '5人のPMが意思決定支援',
+    detail: '構造化11セクション出力',
+  },
 ]
 </script>
 

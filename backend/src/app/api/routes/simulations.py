@@ -1,8 +1,10 @@
 """統一 Simulation API エンドポイント"""
 
 import asyncio
+import json
 import logging
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -44,7 +46,7 @@ class SimulationCreate(BaseModel):
     project_id: str | None = None
     template_name: str = ""
     execution_profile: str = "standard"
-    mode: str = "single"  # single | swarm | hybrid
+    mode: str = "single"  # single | swarm | hybrid | pm_board
     prompt_text: str = ""
 
 
@@ -54,7 +56,7 @@ async def create_simulation(
     session: AsyncSession = Depends(get_session),
 ):
     """Simulation を作成して実行を開始する。"""
-    if body.mode not in ("single", "swarm", "hybrid"):
+    if body.mode not in ("single", "swarm", "hybrid", "pm_board"):
         raise HTTPException(status_code=400, detail=f"Invalid mode: {body.mode}")
 
     sim = Simulation(
@@ -106,6 +108,47 @@ async def list_simulations(session: AsyncSession = Depends(get_session)):
         }
         for s in sims
     ]
+
+
+SAMPLE_RESULTS_DIR = Path(__file__).resolve().parents[5] / "sample_results"
+
+
+@router.get("/samples")
+async def get_sample_results():
+    """API Key不要のサンプル結果を返す。"""
+    samples = []
+    if SAMPLE_RESULTS_DIR.is_dir():
+        for filepath in sorted(SAMPLE_RESULTS_DIR.glob("*.json")):
+            try:
+                data = json.loads(filepath.read_text(encoding="utf-8"))
+                samples.append({
+                    "id": data.get("id", filepath.stem),
+                    "mode": data.get("mode", "single"),
+                    "status": data.get("status", "completed"),
+                    "template_name": data.get("template_name", ""),
+                    "execution_profile": data.get("execution_profile", "standard"),
+                    "prompt_text": data.get("prompt_text", ""),
+                })
+            except (json.JSONDecodeError, OSError):
+                continue
+    return samples
+
+
+@router.get("/samples/{sample_id}")
+async def get_sample_result(sample_id: str):
+    """個別のサンプル結果を返す。"""
+    if not SAMPLE_RESULTS_DIR.is_dir():
+        raise HTTPException(status_code=404, detail="サンプルが見つかりません")
+
+    for filepath in SAMPLE_RESULTS_DIR.glob("*.json"):
+        try:
+            data = json.loads(filepath.read_text(encoding="utf-8"))
+            if data.get("id") == sample_id:
+                return data
+        except (json.JSONDecodeError, OSError):
+            continue
+
+    raise HTTPException(status_code=404, detail="サンプルが見つかりません")
 
 
 @router.get("/{sim_id}")
@@ -282,6 +325,10 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
             ],
             "metadata": agg.metadata_json,
         }
+
+    # PM Board モード: metadata_json に結果を保存
+    if sim.mode == "pm_board" and sim.metadata_json:
+        return sim.metadata_json
 
     raise HTTPException(status_code=404, detail="レポートが見つかりません")
 

@@ -75,7 +75,7 @@ export const useCognitiveStore = defineStore('cognitive', () => {
 
   const selectedAgentReflections = computed(() => {
     if (!selectedAgentId.value) return []
-    return reflections.value.filter(r =>
+    return reflections.value.filter((_r) =>
       memoryEntries.value.some(
         m => m.agentId === selectedAgentId.value && m.isReflection,
       ),

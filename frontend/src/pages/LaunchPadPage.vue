@@ -86,6 +86,7 @@ function getModeLabel(mode: string) {
     case 'single': return 'Single'
     case 'swarm': return 'Swarm'
     case 'hybrid': return 'Hybrid'
+    case 'pm_board': return 'PM Board'
     default: return mode
   }
 }
@@ -98,6 +99,35 @@ function getModeLabel(mode: string) {
     <section class="hero">
       <h2 class="hero-title">群生知能<br />シミュレーション</h2>
       <p class="hero-desc">プロンプトまたはドキュメントから世界モデルを構築し、エージェント群がリアルタイムで分析を実行します</p>
+    </section>
+
+    <!-- Sample Results -->
+    <section class="section">
+      <div class="section-header">
+        <h3 class="section-title">サンプルを見る</h3>
+        <span class="section-badge">API Key不要</span>
+      </div>
+      <p class="sample-desc">APIキーなしでも分析結果のデモをご覧いただけます。</p>
+      <div class="sample-grid">
+        <router-link to="/sample/sample-business-001" class="sample-card">
+          <div class="sample-card-top">
+            <span class="sample-mode-tag">SINGLE</span>
+            <span class="sample-category">ビジネス分析</span>
+          </div>
+          <h4 class="sample-card-title">EVバッテリー市場参入分析</h4>
+          <p class="sample-card-desc">市場規模・競合環境・技術トレンド・参入戦略を網羅した分析レポートと3Dナレッジグラフ</p>
+          <span class="sample-card-cta">結果を見る &rarr;</span>
+        </router-link>
+        <router-link to="/sample/sample-pmboard-001" class="sample-card">
+          <div class="sample-card-top">
+            <span class="sample-mode-tag pm">PM BOARD</span>
+            <span class="sample-category">事業検討</span>
+          </div>
+          <h4 class="sample-card-title">建設プロジェクト管理SaaS</h4>
+          <p class="sample-card-desc">前提条件・リスク・勝利仮説・GTM戦略・30/60/90日計画を含むPM Board分析</p>
+          <span class="sample-card-cta">結果を見る &rarr;</span>
+        </router-link>
+      </div>
     </section>
 
     <!-- Mode Selection -->
@@ -249,6 +279,84 @@ function getModeLabel(mode: string) {
 
 .section-title { font-size: 0.9rem; font-weight: 600; letter-spacing: -0.01em; }
 .section-badge { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); background: rgba(255,255,255,0.04); padding: 0.15rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); }
+
+.sample-desc {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.sample-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 0.75rem;
+}
+
+.sample-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--panel-padding);
+  cursor: pointer;
+  transition: border-color 0.25s, box-shadow 0.25s;
+  text-decoration: none;
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sample-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.15);
+}
+
+.sample-card-top {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sample-mode-tag {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.sample-mode-tag.pm {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.sample-category {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.sample-card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.sample-card-desc {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.sample-card-cta {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--accent);
+  font-weight: 500;
+  margin-top: auto;
+}
 
 .template-grid {
   display: grid;

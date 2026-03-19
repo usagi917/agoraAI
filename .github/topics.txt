@@ -1,0 +1,19 @@
+# GitHub Topics (リポジトリ Settings > Topics で設定)
+#
+# 以下のトピックを GitHub リポジトリに設定してください:
+#
+# multi-agent
+# bdi
+# cognitive-architecture
+# graphrag
+# simulation
+# llm
+# decision-making
+# theory-of-mind
+# knowledge-graph
+# swarm-intelligence
+# ai-agents
+# fastapi
+# vue
+# typescript
+# python

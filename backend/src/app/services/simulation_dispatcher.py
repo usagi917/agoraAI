@@ -14,6 +14,7 @@ from src.app.models.swarm import Swarm
 from src.app.models.simulation import Simulation
 from src.app.services.simulator import run_simulation, PROFILE_ROUNDS
 from src.app.services.swarm_orchestrator import run_swarm
+from src.app.services.pm_board_orchestrator import run_pm_board
 from src.app.services.colony_factory import generate_colony_configs
 from src.app.sse.manager import sse_manager
 
@@ -44,6 +45,8 @@ async def dispatch_simulation(simulation_id: str) -> None:
                 await _dispatch_single(session, sim)
             elif sim.mode in ("swarm", "hybrid"):
                 await _dispatch_swarm(session, sim)
+            elif sim.mode == "pm_board":
+                await _dispatch_pm_board(session, sim)
             else:
                 raise ValueError(f"Unknown mode: {sim.mode}")
 
@@ -174,3 +177,36 @@ async def _dispatch_swarm(session: AsyncSession, sim: Simulation) -> None:
         })
     finally:
         sse_manager.remove_alias(swarm.id)
+
+
+async def _dispatch_pm_board(session: AsyncSession, sim: Simulation) -> None:
+    """PM Board モードの委譲: PMペルソナ並列分析 + チーフPM統合。"""
+    # プロジェクト関連の文書テキストを取得
+    document_text = ""
+    if sim.project_id:
+        from sqlalchemy import select
+        from src.app.models.document import Document
+        result = await session.execute(
+            select(Document).where(Document.project_id == sim.project_id)
+        )
+        documents = result.scalars().all()
+        document_text = "\n\n---\n\n".join(d.text_content for d in documents)
+
+    pm_result = await run_pm_board(
+        simulation_id=sim.id,
+        prompt_text=sim.prompt_text,
+        document_text=document_text,
+    )
+
+    # 結果をメタデータに保存
+    sim_refreshed = await session.get(Simulation, sim.id)
+    if sim_refreshed:
+        sim_refreshed.status = "completed"
+        sim_refreshed.completed_at = datetime.utcnow()
+        sim_refreshed.metadata_json = pm_result
+        await session.commit()
+
+    await sse_manager.publish(sim.id, "simulation_completed", {
+        "simulation_id": sim.id,
+        "mode": "pm_board",
+    })
