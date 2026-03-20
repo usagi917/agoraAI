@@ -1,153 +1,82 @@
-<div align="center">
-
 # Agent AI
 
-### 1000の認知エージェントが議論し、集合知で意思決定を導く
-
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](backend/pyproject.toml)
-[![Node 20](https://img.shields.io/badge/node-20-339933.svg)](frontend/package.json)
-[![Docker Compose](https://img.shields.io/badge/docker-compose-2496ED.svg)](docker-compose.yml)
 [![English](https://img.shields.io/badge/lang-English-blue.svg)](README.en.md)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](backend/pyproject.toml)
+[![Node.js 20+](https://img.shields.io/badge/node-20%2B-339933.svg)](frontend/package.json)
+[![Docker Compose](https://img.shields.io/badge/docker-compose-2496ED.svg)](docker-compose.yml)
 
-**BDI認知アーキテクチャ × GraphRAG × SwarmMind**
-— ChatGPT に聞いても、いつも同じ視点。Agent AI は 20人以上の AI エージェントが、それぞれ独自の信念・欲求・意図を持って議論し、多角的な意思決定を支援します。
+> プロンプトや `.txt` / `.md` / `.pdf` 文書から世界モデルを構築し、ライブシミュレーション、シナリオ比較、PM 観点の統合評価、3D ナレッジグラフ可視化までを一貫して扱う FastAPI + Vue 3 アプリです。
 
-[クイックスタート](#クイックスタート) · [アーキテクチャ](#アーキテクチャ) · [機能](#機能) · [デモ](#デモ) · [ドキュメント](#ドキュメント)
+[クイックスタート](#クイックスタート) · [ローカル開発](#ローカル開発) · [フロントエンド](#フロントエンド) · [バックエンド](#バックエンド) · [設定](#設定) · [API](#api)
 
-</div>
+## 概要
 
----
+Agent AI は FastAPI バックエンドと Vue 3 + Vite フロントエンドで構成されています。起動時に `templates/ja/*.yaml` を DB に自動シードし、入力プロンプトまたはアップロード文書をもとに世界モデルを構築します。ライブ実行中は SSE で進捗とグラフ差分を配信し、結果画面ではレポート、シナリオ分布、PM Board 評価、認知状態、タイムライン、3D グラフ履歴を確認できます。
 
-## なぜ Agent AI？
+フロントエンドの通常起動導線は `pipeline` 固定です。API からは `single` / `swarm` / `hybrid` / `pm_board` を直接実行できます。
 
-| 従来のLLM | Agent AI |
-|-----------|----------|
-| 1つのモデルが1つの視点で回答 | **複数エージェントが独立した認知モデルで議論** |
-| 毎回同じ思考パターン | **BDI（信念・欲求・意図）で多様な思考を生成** |
-| 文脈を忘れる | **3層メモリ（エピソード・意味・手続き）で記憶を保持** |
-| 他者の視点を考慮しない | **Theory of Mind で互いの思考を推論** |
-| 平坦な出力 | **構造化討論 + GraphRAG で根拠のある分析** |
+### 実行モード
+
+| Mode | 用途 |
+| --- | --- |
+| `pipeline` | `single -> swarm -> pm_board` を順番に実行する既定モード |
+| `single` | 単一ランで世界モデル構築、ラウンド進行、レポート生成まで実行 |
+| `swarm` | 複数 Colony で多視点検証し、シナリオ分布と合意度を集約 |
+| `hybrid` | `swarm` と同じ統一 API で実行される多 Colony 系モード |
+| `pm_board` | PM ペルソナ群と Chief PM で事業・施策を評価 |
+
+### 実行プロファイル
+
+`config/swarm_profiles.yaml` の実値に基づく既定プロファイルです。
+
+| Profile | Single ラウンド数 | Swarm Colony 数 | Swarm ラウンド数 |
+| --- | --- | --- | --- |
+| `preview` | 2 | 3 | 2 |
+| `standard` | 4 | 5 | 4 |
+| `quality` | 6 | 8 | 6 |
 
 ## クイックスタート
 
+Docker Compose で一式起動できます。
+
 ```bash
-git clone https://github.com/yourname/agent-ai
-cd agent-ai
-cp .env.example .env   # OPENAI_API_KEY を設定
-docker compose up
+cp .env.example .env
+# .env の OPENAI_API_KEY を設定
+docker compose up --build
 ```
 
-ブラウザで `http://localhost:5173` を開く → ドキュメントをアップロード → 分析開始。
+- アプリ: `http://localhost:3000`
+- FastAPI Docs: `http://localhost:8000/docs`
+- API キー不要のサンプル結果: `http://localhost:3000/sample/sample-business-001`, `http://localhost:3000/sample/sample-pmboard-001`
 
-> API Key なしでも、同梱のサンプル結果でデモ体験できます。
-
-## アーキテクチャ
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Agent AI Platform                         │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────────────┐ │
-│  │   入力層      │   │  GraphRAG    │   │   SwarmMind          │ │
-│  │              │   │              │   │                      │ │
-│  │ .txt .md .pdf│──▶│ エンティティ  │──▶│ N個のColonyが並列実行  │ │
-│  │ プロンプト    │   │ 関係抽出      │   │ 視点多様性を担保      │ │
-│  │              │   │ コミュニティ   │   │ 主張抽出・クラスタリング│ │
-│  └──────────────┘   └──────────────┘   └──────────────────────┘ │
-│                                                                  │
-│  ┌───────────────────────────────────────────────────────────┐   │
-│  │                BDI 認知アーキテクチャ                       │   │
-│  │                                                           │   │
-│  │  ┌─────────┐  ┌─────────┐  ┌──────────┐  ┌────────────┐  │   │
-│  │  │  信念    │  │  欲求    │  │   意図    │  │ Theory of  │  │   │
-│  │  │ Beliefs │  │ Desires │  │Intentions│  │   Mind     │  │   │
-│  │  └────┬────┘  └────┬────┘  └────┬─────┘  └─────┬──────┘  │   │
-│  │       │            │            │               │         │   │
-│  │  ┌────▼────────────▼────────────▼───────────────▼──────┐  │   │
-│  │  │              3層メモリシステム                        │  │   │
-│  │  │  エピソード記憶 │ 意味記憶 │ 手続き記憶 │ 省察       │  │   │
-│  │  └────────────────────────────────────────────────────┘  │   │
-│  │                                                           │   │
-│  │  ┌──────────────────────────────────────────────────────┐ │   │
-│  │  │            構造化討論プロトコル                        │ │   │
-│  │  │  Game Master │ 因果推論 │ 社会的影響モデル            │ │   │
-│  │  └──────────────────────────────────────────────────────┘ │   │
-│  └───────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  ┌───────────────────────────────────────────────────────────┐   │
-│  │                    可視化・出力                             │   │
-│  │  3Dグラフ │ タイムライン │ シナリオ比較 │ 合意ヒートマップ   │   │
-│  │  BDI状態  │ 記憶ストリーム │ ToMマップ │ KGエクスプローラ   │   │
-│  └───────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-## 機能
-
-### 3つの実行モード
-
-| モード | 説明 |
-|--------|------|
-| **Single** | 1つのシミュレーションで深い分析 |
-| **Swarm** | 複数Colonyが並列実行、シナリオ分布を集約 |
-| **Hybrid** | Swarmの多様性 + Singleの深さを両立 |
-
-### 10の分析ビュー
-
-| ビュー | 内容 |
-|--------|------|
-| レポート | 構造化された分析レポート（11セクション） |
-| シナリオ比較 | 複数シナリオの確率分布と比較 |
-| 合意ヒートマップ | Colony間の合意度マトリクス |
-| 3Dグラフ | 時間再生可能な3Dフォースグラフ |
-| 認知状態 | エージェントのBDI状態リアルタイム表示 |
-| 記憶 | エピソード・意味・手続き記憶のストリーム |
-| 評価 | シミュレーション品質評価ダッシュボード |
-| ToMマップ | Theory of Mind 関係性ネットワーク |
-| 社会NW | 社会ネットワークダイナミクス |
-| KG探索 | ナレッジグラフエクスプローラ |
-
-### 認知アーキテクチャの深さ
-
-- **BDI エンジン**: 各エージェントが信念（Beliefs）、欲求（Desires）、意図（Intentions）を保持し、環境変化に応じて更新
-- **Theory of Mind**: エージェントが互いの目標と行動を推論し、戦略的に行動
-- **3層メモリ**: エピソード記憶（体験）、意味記憶（知識）、手続き記憶（スキル）+ 省察メカニズム
-- **構造化討論**: Game Master が矛盾を検出し、因果推論で議論を深化
-- **GraphRAG**: 文書からナレッジグラフを自動構築、コミュニティ検出で構造を把握
-
-## デモ
-
-### 最小の体験フロー
-
-1. `http://localhost:5173` を開く
-2. 実行モードで `Single` を選択
-3. `sample_inputs/business_case/market_entry.md` をアップロード
-4. テンプレート `ビジネス分析` を選択
-5. プロファイル `Preview` で実行
-6. 結果画面で 3D グラフ、レポート、認知状態を確認
-
-### サンプル入力
-
-| サンプル | 内容 |
-|---------|------|
-| [`market_entry.md`](sample_inputs/business_case/market_entry.md) | EVバッテリー市場参入分析 |
-| [`carbon_tax.md`](sample_inputs/policy_case/carbon_tax.md) | 炭素税導入の影響分析 |
-| [`ai_regulation.md`](sample_inputs/scenario_case/ai_regulation.md) | AI規制の将来シナリオ分析 |
+`frontend` コンテナは静的ビルド済みアセットを Nginx で配信します。フロントエンドをホットリロードしながら触る場合は、次のローカル開発手順を使ってください。
 
 ## ローカル開発
 
-### Backend
+前提:
+
+- Python 3.11+
+- `uv`
+- Node.js 20+
+- `pnpm`
+- Docker Desktop または Docker Compose
+
+依存サービスだけ Docker で起動する場合:
 
 ```bash
-docker compose up postgres redis   # 依存サービス起動
+docker compose up postgres redis
+```
+
+バックエンド:
+
+```bash
 cd backend
-uv sync
+uv sync --extra dev
 uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Frontend
+フロントエンド:
 
 ```bash
 cd frontend
@@ -155,65 +84,155 @@ pnpm install
 pnpm dev
 ```
 
-### テスト
+- フロントエンド開発サーバー: `http://localhost:5173`
+- Vite 開発サーバーは `/api` を `http://localhost:8000` にプロキシします
 
-```bash
-cd backend && uv run pytest
-cd frontend && pnpm build
-```
+PostgreSQL を使いたくない場合は、`.env` の `DATABASE_URL` を SQLite 用 `aiosqlite` URL に変更してください。バックエンド側で親ディレクトリは自動作成されます。
 
-## テンプレート
+## フロントエンド
 
-| テンプレート | 用途 |
-|-------------|------|
-| [`business_analysis`](templates/ja/business_analysis.yaml) | 企業・市場・競合・規制の相互作用分析 |
-| [`policy_simulation`](templates/ja/policy_simulation.yaml) | 政策に対するステークホルダー反応分析 |
-| [`scenario_exploration`](templates/ja/scenario_exploration.yaml) | 不確実性の高い将来分岐の探索 |
+フロントエンドは Vue Router + Pinia 構成で、3D グラフ表示には `3d-force-graph` と `three` を使っています。
+
+| Route | 画面 | 実装内容 |
+| --- | --- | --- |
+| `/` | LaunchPad | テンプレート選択、`preview` / `standard` / `quality` 切り替え、プロンプト入力、文書アップロード、最近の実行履歴、サンプル結果導線 |
+| `/sim/:id` | Live Simulation | SSE で進捗、Colony 状態、アクティビティログ、グラフ差分を受信して可視化 |
+| `/sim/:id/results` | Results | レポート、シナリオ比較、合意ヒートマップ、PM Board、認知ビュー、フォローアップ質問、再実行 |
+| `/sample/:id` | Sample Result | `sample_results/*.json` を API 経由で表示 |
+
+フロントエンドの API ベース URL は `VITE_API_BASE_URL` があればそれを使い、未指定時は `/api` を使います。ローカル開発では Vite proxy、Docker では `frontend/nginx.conf` のリバースプロキシが `/api` をバックエンドへ中継します。
+
+## バックエンド
+
+バックエンドは FastAPI + SQLAlchemy async 構成です。起動時に DB 初期化とテンプレート投入を行い、`POST /simulations` で作成された統一 Simulation レコードを `simulation_dispatcher.py` がモード別実行フローへ振り分けます。
+
+主な実装ポイント:
+
+- `backend/src/app/services/pipeline_orchestrator.py`
+  `single -> swarm -> pm_board` の 3 段階パイプラインを実行
+- `backend/src/app/services/simulator.py`
+  単一ランの世界モデル構築、GraphRAG、ラウンド進行、レポート生成を担当
+- `backend/src/app/services/swarm_orchestrator.py`
+  Colony 群の並列実行と集約を担当
+- `backend/src/app/services/pm_board_orchestrator.py`
+  PM ペルソナ分析と Chief PM 統合を担当
+- `config/graphrag.yaml`
+  既定で `enabled: true`。文書入力がある場合に GraphRAG パイプラインを有効化
+- `config/cognitive.yaml`
+  既定で `cognitive.mode: advanced`。認知系 SSE イベントと結果画面の認知タブに反映
 
 ## 設定
 
+### 主要な環境変数
+
+| 変数 | 用途 |
+| --- | --- |
+| `OPENAI_API_KEY` | ライブ実行時の LLM 呼び出しに必須 |
+| `LLM_MODEL` | `config/models.yaml` に明示設定がない場合の既定モデル |
+| `DATABASE_URL` | 既定は PostgreSQL。SQLite (`aiosqlite`) も利用可能 |
+| `BACKEND_HOST` / `BACKEND_PORT` | 手動で `uvicorn` を起動する時の待受設定 |
+| `VITE_API_BASE_URL` | フロントエンドが明示的に使う API ベース URL。未指定時は `/api` |
+| `MAX_CONCURRENT_COLONIES` | Swarm 実行時の Colony 並列数上限 |
+| `MAX_CONCURRENT_AGENTS` | LLM クライアント側の同時実行上限。Game Master 側は主に `config/cognitive.yaml` を参照 |
+| `COGNITIVE_MODE` | `config/cognitive.yaml` に値がない場合のフォールバック |
+| `MAX_ACTIVE_AGENTS` | `.env.example` にはあるが、現行の Game Master 設定は主に `config/cognitive.yaml` を参照 |
+| `REDIS_URL` | `.env.example` と Docker Compose にはあるが、現行コードでは直接参照されていない |
+
+### 主要な設定ファイル
+
 | ファイル | 内容 |
-|---------|------|
-| [`.env.example`](.env.example) | API キー、DB、Redis 設定 |
-| [`config/models.yaml`](config/models.yaml) | LLM プロバイダ・タスク別モデル設定 |
-| [`config/cognitive.yaml`](config/cognitive.yaml) | BDI認知モード、Game Master、ToM設定 |
-| [`config/graphrag.yaml`](config/graphrag.yaml) | GraphRAG パイプライン設定 |
-| [`config/swarm_profiles.yaml`](config/swarm_profiles.yaml) | Colony数、ラウンド数、温度分布 |
-| [`config/perspectives.yaml`](config/perspectives.yaml) | Colony視点フレーム定義 |
+| --- | --- |
+| `.env.example` | 環境変数テンプレート |
+| `config/models.yaml` | タスク別モデルルーティング |
+| `config/cognitive.yaml` | BDI、Memory、ToM、Game Master、スケジューリング設定 |
+| `config/graphrag.yaml` | GraphRAG の抽出・重複解決・コミュニティ設定 |
+| `config/swarm_profiles.yaml` | プロファイルごとの Colony 数とラウンド数 |
+| `config/perspectives.yaml` | Colony に割り当てる視点定義 |
+| `templates/ja/*.yaml` | ユーザー向け分析テンプレート |
+| `templates/ja/pm_board/*.yaml` | PM Board 用ペルソナ別テンプレート |
 
 ## API
 
-統一 `simulations` API を使用してください。
+通常は統一された `/simulations` API を使う想定です。
 
-```
-POST /simulations              # シミュレーション作成・実行
-GET  /simulations              # 一覧取得
-GET  /simulations/{id}         # 詳細取得
-GET  /simulations/{id}/stream  # SSE ストリーミング
-GET  /simulations/{id}/graph   # グラフデータ
-GET  /simulations/{id}/report  # レポート取得
-POST /simulations/{id}/followups  # フォローアップ質問
+```text
+GET  /health
+GET  /templates
+POST /projects
+GET  /projects/{project_id}
+POST /projects/{project_id}/documents
+GET  /projects/{project_id}/documents
+
+POST /simulations
+GET  /simulations
+GET  /simulations/samples
+GET  /simulations/samples/{sample_id}
+GET  /simulations/{sim_id}
+GET  /simulations/{sim_id}/stream
+GET  /simulations/{sim_id}/graph
+GET  /simulations/{sim_id}/graph/history
+GET  /simulations/{sim_id}/report
+GET  /simulations/{sim_id}/colonies
+GET  /simulations/{sim_id}/timeline
+POST /simulations/{sim_id}/followups
+POST /simulations/{sim_id}/feedback
+POST /simulations/{sim_id}/rerun
+
+GET  /admin/costs
 ```
 
-詳細は `http://localhost:8000/docs`（OpenAPI）を参照。
+後方互換用に `/runs` と `/swarms` ルーターも残っていますが、新規利用は `/simulations` を推奨します。
+
+作成例:
+
+```bash
+curl -X POST http://localhost:8000/simulations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "template_name": "business_analysis",
+    "execution_profile": "standard",
+    "mode": "pipeline",
+    "prompt_text": "EVバッテリー市場への新規参入戦略を分析する"
+  }'
+```
+
+## 開発時の確認
+
+バックエンド:
+
+```bash
+cd backend
+uv run pytest
+```
+
+フロントエンド:
+
+```bash
+cd frontend
+pnpm build
+```
+
+現状、専用のフロントエンドテストスイートは見当たらず、README 更新時点ではビルド確認が最小の検証手段です。
 
 ## プロジェクト構成
 
-```
+```text
 .
-├── backend/           # FastAPI + SQLAlchemy + BDI認知エンジン + GraphRAG
-├── frontend/          # Vue 3 + Vite + 3D Force Graph + 10ビューダッシュボード
-├── config/            # モデル、認知、GraphRAG、Swarm設定
-├── templates/ja/      # 分析テンプレート（YAML）
-├── sample_inputs/     # サンプル入力文書
-├── docker-compose.yml # PostgreSQL / Redis / Backend / Frontend
-└── .env.example       # 環境変数テンプレート
+├── backend/              # FastAPI, SQLAlchemy, orchestration, tests
+├── frontend/             # Vue 3, Vite, Pinia, 3D graph UI
+├── config/               # models / cognition / GraphRAG / swarm profiles
+├── templates/ja/         # 分析テンプレートと PM Board テンプレート
+├── sample_inputs/        # 入力用サンプル文書
+├── sample_results/       # API キー不要の結果サンプル
+├── data/                 # SQLite 利用時のローカルデータ置き場
+├── docker-compose.yml
+└── README.en.md
 ```
 
 ## Contributing
 
-[CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
+開発フローとツール方針は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
 
 ## License
 
-[AGPL-3.0](LICENSE) — OSSとして自由に使用できます。商用利用についてはお問い合わせください。
+このプロジェクトは [AGPL-3.0](LICENSE) の下で提供されています。

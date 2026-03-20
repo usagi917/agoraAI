@@ -1,16 +1,23 @@
 import { onUnmounted } from 'vue'
 import { useSimulationStore, type ColonyState } from '../stores/simulationStore'
 import { useGraphStore } from '../stores/graphStore'
+import { useActivityStore } from '../stores/activityStore'
 import { useCognitiveSSE } from './useCognitiveSSE'
+
+function getSimulationStreamUrl(simulationId: string) {
+  const base = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '')
+  return `${base}/simulations/${simulationId}/stream`
+}
 
 export function useSimulationSSE(simulationId: string) {
   const store = useSimulationStore()
   const graphStore = useGraphStore()
+  const activity = useActivityStore()
   const { handleCognitiveEvent } = useCognitiveSSE()
   let source: EventSource | null = null
 
   function start() {
-    const url = `/api/simulations/${simulationId}/stream`
+    const url = getSimulationStreamUrl(simulationId)
     source = new EventSource(url)
 
     const eventTypes = [
@@ -23,6 +30,7 @@ export function useSimulationSSE(simulationId: string) {
       'timeline_event',
       'report_started',
       'report_section_done',
+      'report_failed',
       'run_completed',
       'run_failed',
       // Swarm モード
@@ -33,6 +41,7 @@ export function useSimulationSSE(simulationId: string) {
       'colony_completed',
       'colonies_completed',
       'aggregation_completed',
+      'report_completed',
       'swarm_completed',
       'swarm_failed',
       // PM Board モード
@@ -41,6 +50,10 @@ export function useSimulationSSE(simulationId: string) {
       'pm_analyses_completed',
       'pm_synthesizing',
       'pm_board_completed',
+      // パイプラインイベント
+      'pipeline_stage_started',
+      'pipeline_stage_completed',
+      'pipeline_completed',
       // 統一イベント
       'simulation_completed',
       'simulation_failed',
@@ -77,6 +90,37 @@ export function useSimulationSSE(simulationId: string) {
 
   function handleEvent(eventType: string, payload: Record<string, any>) {
     switch (eventType) {
+      // === パイプライン イベント ===
+      case 'pipeline_stage_started':
+        store.setPipelineStage(payload.stage)
+        store.setPhase(payload.stage)
+        store.setStatus('running')
+        activity.addEntry('phase', '▶', `パイプライン Stage: ${payload.stage} 開始`, {
+          track: 'phase',
+          status: 'running',
+        })
+        break
+
+      case 'pipeline_stage_completed':
+        store.setStageProgress({
+          ...store.stageProgress,
+          [payload.stage]: 'completed',
+        })
+        break
+
+      case 'pipeline_completed':
+        store.setStatus('completed')
+        store.setPhase('completed')
+        store.setPipelineStage('completed')
+        store.setReportReady(true)
+        store.setReportError('')
+        activity.addEntry('phase', '✓', 'パイプライン完了', {
+          track: 'phase',
+          status: 'completed',
+        })
+        close()
+        break
+
       // === Single モード ===
       case 'run_started':
         store.setStatus('running')
@@ -84,6 +128,10 @@ export function useSimulationSSE(simulationId: string) {
         if (payload.total_rounds) {
           store.setRound(0, payload.total_rounds)
         }
+        activity.addEntry('phase', '◈', `シミュレーション開始 (${payload.total_rounds || '?'} ラウンド)`, {
+          track: 'phase',
+          status: 'running',
+        })
         break
 
       case 'world_initialized':
@@ -91,53 +139,137 @@ export function useSimulationSSE(simulationId: string) {
         if (payload.graph_diff) {
           graphStore.applyDiff(payload.graph_diff)
         }
+        activity.addEntry('event', '◇', '世界モデル構築完了', {
+          detail: payload.graph_diff ? `${payload.graph_diff.added_nodes?.length || 0} nodes` : undefined,
+          track: 'graph',
+          status: 'completed',
+        })
         break
 
       case 'agents_built':
+        activity.addEntry('event', '⊕', `エージェント構築完了 (${payload.agent_count || '?'}体)`, {
+          track: 'agent',
+          status: 'completed',
+        })
         break
 
-      case 'round_completed':
+      case 'round_completed': {
+        const round = payload.round || 0
         if (!payload.colony_id) {
-          // Single モードのラウンド
-          store.setRound(payload.round || 0)
+          store.setRound(round)
+          activity.addEntry('event', '⟳', `Round ${round} 完了`, {
+            detail: payload.summary || undefined,
+            round,
+            track: 'timeline',
+            status: 'completed',
+          })
+          // エージェントアクションをログに追加（先頭5件）
+          if (payload.events?.length) {
+            for (const evt of payload.events.slice(0, 5)) {
+              activity.addEntry('agent', '●', evt.description || evt.action || 'action', {
+                agentName: evt.agent_name || evt.agent_id,
+                round,
+                track: 'agent',
+                status: 'completed',
+              })
+            }
+          }
         } else {
-          // Swarm Colony のラウンド
           store.updateColonyStatus(payload.colony_id, 'running', {
-            currentRound: payload.round || 0,
+            currentRound: round,
           } as Partial<ColonyState>)
+          activity.addEntry('event', '⟳', `Colony ${payload.colony_id.slice(0, 6)} Round ${round}`, {
+            round,
+            track: 'swarm',
+            status: 'running',
+          })
         }
         break
+      }
 
       case 'graph_diff':
         graphStore.applyDiff(payload)
+        activity.addEntry('info', '◎', `グラフ更新: +${payload.added_nodes?.length || 0} nodes, +${payload.added_edges?.length || 0} edges`, {
+          track: 'graph',
+          status: 'completed',
+        })
         break
 
       case 'timeline_event':
+        activity.addEntry('event', '◌', payload.title || payload.event_type || 'timeline', {
+          detail: payload.description || undefined,
+          round: payload.round,
+          track: 'timeline',
+          status: 'completed',
+        })
         break
 
       case 'report_started':
         store.setStatus('generating_report')
         store.setPhase('report')
+        store.setReportSections(payload.sections || [])
+        store.setReportError('')
+        activity.addEntry('phase', '▣', 'レポート生成開始', {
+          detail: payload.sections ? `${payload.sections.length} セクション` : undefined,
+          track: 'report',
+          status: 'running',
+        })
         break
 
       case 'report_section_done':
+        store.completeReportSection(payload.index ?? payload.section)
+        activity.addEntry('info', '▪', `セクション完了: ${payload.section || ''}`, {
+          track: 'report',
+          status: 'completed',
+        })
+        break
+
+      case 'report_completed':
+        store.setReportError('')
+        store.setStatus('running')
+        activity.addEntry('event', '▣', 'レポート生成完了', {
+          track: 'report',
+          status: 'completed',
+        })
+        break
+
+      case 'report_failed':
+        store.setStatus('running')
+        store.setReportError(payload.error || 'レポート生成に失敗しました')
+        activity.addEntry('error', '✗', 'レポート生成失敗', {
+          detail: payload.error || undefined,
+          track: 'report',
+          status: 'failed',
+        })
         break
 
       case 'run_completed':
-        store.setStatus('completed')
-        store.setPhase('completed')
-        close()
+        // パイプラインモードでは run_completed は Stage 1 完了を意味する（全体完了ではない）
+        if (!store.isPipelineMode) {
+          store.setStatus('completed')
+          store.setPhase('completed')
+          close()
+        }
         break
 
       case 'run_failed':
         store.setError(payload.error || '不明なエラー')
-        close()
+        activity.addEntry('error', '✗', `エラー: ${payload.error || '不明なエラー'}`)
+        if (!store.isPipelineMode) {
+          close()
+        }
         break
 
       // === Swarm モード ===
       case 'swarm_started':
-        store.setStatus('running')
+        if (!store.isPipelineMode) {
+          store.setStatus('running')
+        }
         store.setPhase('world_building')
+        activity.addEntry('phase', '⬡', 'Swarm シミュレーション開始', {
+          track: 'phase',
+          status: 'running',
+        })
         break
 
       case 'phase_changed':
@@ -164,12 +296,22 @@ export function useSimulationSSE(simulationId: string) {
 
       case 'colony_started':
         store.updateColonyStatus(payload.colony_id, 'running')
+        activity.addEntry('event', '⬡', `Colony ${payload.colony_id.slice(0, 6)} 開始`, {
+          detail: payload.perspective || undefined,
+          track: 'swarm',
+          status: 'running',
+        })
         break
 
       case 'colony_completed':
         store.updateColonyStatus(payload.colony_id, 'completed', {
           eventCount: payload.event_count || 0,
         } as Partial<ColonyState>)
+        activity.addEntry('event', '⬡', `Colony ${payload.colony_id.slice(0, 6)} 完了`, {
+          detail: `${payload.event_count || 0} events`,
+          track: 'swarm',
+          status: 'completed',
+        })
         break
 
       case 'colonies_completed':
@@ -181,24 +323,40 @@ export function useSimulationSSE(simulationId: string) {
         break
 
       case 'swarm_completed':
-        store.setStatus('completed')
-        store.setPhase('completed')
-        close()
+        // パイプラインモードでは swarm_completed は Stage 2 完了を意味する
+        if (!store.isPipelineMode) {
+          store.setStatus('completed')
+          store.setPhase('completed')
+          close()
+        }
         break
 
       case 'swarm_failed':
         store.setError(payload.error || '不明なエラー')
-        close()
+        if (!store.isPipelineMode) {
+          close()
+        }
         break
 
       // === PM Board モード ===
       case 'pm_board_started':
-        store.setStatus('running')
+        if (!store.isPipelineMode) {
+          store.setStatus('running')
+        }
         store.setPhase('pm_analyzing')
+        activity.addEntry('phase', '◉', 'PM Board 分析開始', {
+          track: 'phase',
+          status: 'running',
+        })
         break
 
       case 'pm_analyzing':
         store.setPhase(`pm_analyzing_${payload.persona}`)
+        activity.addEntry('agent', '◉', `${payload.persona} 分析中...`, {
+          agentName: payload.persona,
+          track: 'agent',
+          status: 'running',
+        })
         break
 
       case 'pm_analyses_completed':
@@ -210,20 +368,25 @@ export function useSimulationSSE(simulationId: string) {
         break
 
       case 'pm_board_completed':
-        store.setStatus('completed')
-        store.setPhase('completed')
-        close()
+        if (!store.isPipelineMode) {
+          store.setStatus('completed')
+          store.setPhase('completed')
+          close()
+        }
         break
 
       // === 統一イベント ===
       case 'simulation_completed':
         store.setStatus('completed')
         store.setPhase('completed')
+        store.setReportReady(true)
+        store.setReportError('')
         close()
         break
 
       case 'simulation_failed':
         store.setError(payload.error || '不明なエラー')
+        activity.addEntry('error', '✗', `シミュレーション失敗: ${payload.error || '不明なエラー'}`)
         close()
         break
 
@@ -231,6 +394,26 @@ export function useSimulationSSE(simulationId: string) {
       default:
         // 認知関連イベントは専用ハンドラーに委譲
         handleCognitiveEvent(eventType, payload)
+        if (eventType === 'graphrag_started') {
+          store.setPhase('graphrag')
+          activity.addEntry('phase', '◈', 'GraphRAG 構築開始', {
+            track: 'graph',
+            status: 'running',
+          })
+        } else if (eventType === 'graphrag_completed') {
+          store.setPhase('world_building')
+          activity.addEntry('event', '◈', 'GraphRAG 構築完了', {
+            track: 'graph',
+            status: 'completed',
+          })
+        } else if (eventType === 'agent_state_updated') {
+          activity.addEntry('agent', '●', `${payload.agent_name || payload.agent_id} ${payload.action_taken || ''}`, {
+            agentName: payload.agent_name || payload.agent_id,
+            round: payload.round,
+            track: 'agent',
+            status: 'completed',
+          })
+        }
         break
     }
   }

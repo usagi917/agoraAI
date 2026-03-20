@@ -23,10 +23,24 @@ export interface GraphEdge {
   status: string
 }
 
+export interface GraphStoreSnapshot {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+}
+
 export const useGraphStore = defineStore('graph', () => {
   const nodes = ref<GraphNode[]>([])
   const edges = ref<GraphEdge[]>([])
+  const pendingDiffs = ref<any[]>([])
+
+  function consumePendingDiffs() {
+    const diffs = [...pendingDiffs.value]
+    pendingDiffs.value = []
+    return diffs
+  }
+
   function applyDiff(diff: any) {
+    pendingDiffs.value.push(diff)
     // Remove nodes
     if (diff.removed_nodes?.length) {
       const removeIds = new Set(diff.removed_nodes.map((n: any) => n.id))
@@ -85,9 +99,22 @@ export const useGraphStore = defineStore('graph', () => {
   }
 
   function setFullState(graphNodes: GraphNode[], graphEdges: GraphEdge[]) {
-    nodes.value = graphNodes
-    edges.value = graphEdges
+    nodes.value = graphNodes.map((node) => ({ ...node }))
+    edges.value = graphEdges.map((edge) => ({ ...edge }))
   }
 
-  return { nodes, edges, applyDiff, setFullState }
+  function toSnapshot(): GraphStoreSnapshot {
+    return {
+      nodes: nodes.value.map((node) => ({ ...node })),
+      edges: edges.value.map((edge) => ({ ...edge })),
+    }
+  }
+
+  function reset() {
+    nodes.value = []
+    edges.value = []
+    pendingDiffs.value = []
+  }
+
+  return { nodes, edges, pendingDiffs, applyDiff, consumePendingDiffs, setFullState, toSnapshot, reset }
 })

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import String, DateTime, Text, Float, Integer, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,4 +21,4 @@ class KGEdge(Base):
     evidence_text: Mapped[str] = mapped_column(Text, default="")
     valid_from_round: Mapped[int] = mapped_column(Integer, default=0)
     valid_to_round: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

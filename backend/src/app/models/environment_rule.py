@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import String, DateTime, Text, Float, Integer, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,4 +18,4 @@ class EnvironmentRule(Base):
     probability: Mapped[float] = mapped_column(Float, default=1.0)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_triggered_round: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

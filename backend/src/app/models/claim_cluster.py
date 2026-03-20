@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import String, DateTime, Text, Float, Integer, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,4 +18,4 @@ class ClaimCluster(Base):
     agreement_ratio: Mapped[float] = mapped_column(Float, default=0.0)
     mean_confidence: Mapped[float] = mapped_column(Float, default=0.0)
     centroid_embedding: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

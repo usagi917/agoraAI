@@ -12,9 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.llm.client import llm_client
 from src.app.llm.prompts import SWARM_REPORT_SYSTEM, SWARM_REPORT_USER
 from src.app.services.cost_tracker import record_usage
+from src.app.services.simulation_live_state import update_report_progress
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
+FORCE_REPORT_FAILURE_TOKEN = "[[FAIL_REPORT]]"
 
 
 def _summarize_colony(colony_result: dict, config) -> str:
@@ -128,25 +130,55 @@ async def generate_swarm_integrated_report(
         agreement_summary=agreement_summary[:1000],
     )
 
+    section_name = "統合レポート"
     await sse_manager.publish(swarm_id, "report_started", {
         "message": "統合レポート生成を開始します",
         "colony_count": len(colony_results),
         "scenario_count": len(scenarios),
+        "sections": [section_name],
     })
-
-    result, usage = await llm_client.call(
-        task_name="report_generate",
-        system_prompt=SWARM_REPORT_SYSTEM,
-        user_prompt=user_prompt,
+    await update_report_progress(
+        session,
+        swarm_id=swarm_id,
+        status="running",
+        scope="swarm",
+        sections=[section_name],
+        completed_sections=[],
+        last_error="",
     )
-    await record_usage(session, swarm_id, "swarm_integrated_report", usage)
 
-    report_text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+    try:
+        if FORCE_REPORT_FAILURE_TOKEN in prompt_text:
+            raise RuntimeError("Forced report failure via [[FAIL_REPORT]] marker")
 
-    await sse_manager.publish(swarm_id, "report_section_done", {
-        "section": "integrated_report",
-        "display_name": "統合レポート",
-        "content": report_text,
-    })
+        result, usage = await llm_client.call(
+            task_name="report_generate",
+            system_prompt=SWARM_REPORT_SYSTEM,
+            user_prompt=user_prompt,
+        )
+        await record_usage(session, swarm_id, "swarm_integrated_report", usage)
 
-    return report_text
+        report_text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+
+        await sse_manager.publish(swarm_id, "report_section_done", {
+            "section": section_name,
+            "display_name": section_name,
+            "key": "integrated_report",
+            "content": report_text,
+        })
+        await update_report_progress(
+            session,
+            swarm_id=swarm_id,
+            status="running",
+            completed_sections=[section_name],
+        )
+
+        return report_text
+    except Exception as exc:
+        await update_report_progress(
+            session,
+            swarm_id=swarm_id,
+            status="failed",
+            last_error=str(exc)[:200],
+        )
+        raise

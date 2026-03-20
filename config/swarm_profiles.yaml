@@ -8,6 +8,10 @@ profiles:
     temperatures: [0.3, 0.5, 0.7]
     ensure_adversarial: true
     diversity_mode: minimal
+    cognitive_mode: legacy
+    single_rounds: 2
+    swarm_colony_count: 3
+    swarm_rounds: 2
 
   standard:
     colony_count: 5
@@ -16,6 +20,10 @@ profiles:
     temperatures: [0.2, 0.4, 0.5, 0.6, 0.8]
     ensure_adversarial: true
     diversity_mode: balanced
+    cognitive_mode: legacy
+    single_rounds: 4
+    swarm_colony_count: 5
+    swarm_rounds: 4
 
   quality:
     colony_count: 8
@@ -24,6 +32,10 @@ profiles:
     temperatures: [0.2, 0.3, 0.4, 0.5, 0.5, 0.6, 0.7, 0.8]
     ensure_adversarial: true
     diversity_mode: maximum
+    cognitive_mode: advanced
+    single_rounds: 6
+    swarm_colony_count: 8
+    swarm_rounds: 6
 
   hybrid_standard:
     colony_count: 5

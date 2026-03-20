@@ -43,8 +43,9 @@ const transitionProgress = ref(0)
 const isPlaying = ref(false)
 const colonies = ref<ColonyResponse[]>([])
 const cognitiveStore = useCognitiveStore()
-const activeTab = ref<'report' | 'scenarios' | 'agreement' | 'timeline' | 'cognition' | 'memory' | 'evaluation' | 'tom' | 'social' | 'kg' | 'pm_board'>('report')
+const activeTab = ref<'report' | 'scenarios' | 'pm_evaluation' | 'graph'>('report')
 const isCognitiveMode = computed(() => cognitiveStore.cognitiveMode === 'advanced')
+const cognitiveSubTab = ref<'mind' | 'memory' | 'evaluation' | 'tom' | 'social' | 'kg'>('mind')
 let playbackFrame: number | null = null
 let playbackStartedAt: number | null = null
 
@@ -57,9 +58,26 @@ const isFollowupLoading = ref(false)
 const copyState = ref<'idle' | 'success' | 'error'>('idle')
 let copyStateTimer: number | null = null
 
-const isSwarmMode = computed(() => sim.value?.mode === 'swarm' || sim.value?.mode === 'hybrid')
-const isPmBoardMode = computed(() => sim.value?.mode === 'pm_board')
-const reportText = computed(() => typeof report.value?.content === 'string' ? report.value.content : '')
+const isPipelineMode = computed(() => sim.value?.mode === 'pipeline')
+const hasScenarios = computed(() => report.value?.scenarios?.length > 0)
+const hasPmBoard = computed(() => {
+  if (isPipelineMode.value) return !!report.value?.pm_board
+  return sim.value?.mode === 'pm_board' && report.value?.sections
+})
+const reportFailureMessage = computed(() => {
+  const progress = sim.value?.metadata?.report_progress
+  if (progress?.status !== 'failed') return ''
+  return progress?.last_error || 'レポート生成に失敗しました。シナリオ結果は引き続き参照できます。'
+})
+const pmBoardData = computed(() => {
+  if (isPipelineMode.value) return report.value?.pm_board || null
+  return report.value
+})
+
+const reportText = computed(() => {
+  if (typeof report.value?.content === 'string') return report.value.content
+  return ''
+})
 const canCopyReport = computed(() => reportText.value.trim().length > 0)
 const snapshotByRound = computed(() => new Map(graphSnapshots.value.map((snapshot) => [snapshot.round, snapshot])))
 const sliderDisplayValue = computed(() => {
@@ -173,11 +191,27 @@ onMounted(async () => {
     report.value = reportData
     graphSnapshots.value = graphHistory
 
-    if (isPmBoardMode.value) {
-      activeTab.value = 'pm_board'
-    } else if (isSwarmMode.value) {
-      colonies.value = await getSimulationColonies(simId).catch(() => [])
+    // レポートが未取得かつシミュレーション完了済みなら数秒後にリトライ
+    if (!reportData && sim.value?.status === 'completed') {
+      setTimeout(async () => {
+        try {
+          report.value = await getSimulationReport(simId)
+        } catch { /* ignore */ }
+      }, 3000)
+    }
+
+    // デフォルトタブ設定
+    if (isPipelineMode.value) {
+      activeTab.value = 'report'
+    } else if (sim.value.mode === 'pm_board') {
+      activeTab.value = 'pm_evaluation'
+    } else if (sim.value.mode === 'swarm' || sim.value.mode === 'hybrid') {
       activeTab.value = 'scenarios'
+    }
+
+    // Colony データ取得
+    if (hasScenarios.value || sim.value.swarm_id) {
+      colonies.value = await getSimulationColonies(simId).catch(() => [])
     }
 
     // 最新グラフ表示
@@ -324,7 +358,6 @@ function renderMarkdown(content: string): string {
         <div class="header-left">
           <h2>Analysis Results</h2>
           <span v-if="sim" class="header-meta">
-            <span class="mode-tag">{{ sim.mode.toUpperCase() }}</span>
             {{ sim.template_name || 'プロンプト実行' }} · {{ sim.execution_profile }}
           </span>
         </div>
@@ -335,9 +368,12 @@ function renderMarkdown(content: string): string {
       </div>
 
       <div v-if="error" class="error-banner">{{ error }}</div>
+      <div v-if="reportFailureMessage" class="error-banner">
+        {{ reportFailureMessage }}
+      </div>
 
-      <!-- Stats (swarm/hybrid) -->
-      <div v-if="isSwarmMode && report" class="stats-row">
+      <!-- Stats -->
+      <div v-if="hasScenarios && report" class="stats-row">
         <div class="stat-card">
           <span class="stat-label">多様性スコア</span>
           <span class="stat-value">{{ ((report.diversity_score || 0) * 100).toFixed(0) }}%</span>
@@ -356,86 +392,37 @@ function renderMarkdown(content: string): string {
         </div>
       </div>
 
-      <!-- Tabs -->
+      <!-- Tabs: 4タブ構成 -->
       <div class="tab-bar">
         <button
           class="tab-btn"
           :class="{ active: activeTab === 'report' }"
           @click="activeTab = 'report'"
         >
-          {{ isSwarmMode ? '統合レポート' : 'レポート' }}
+          統合レポート
         </button>
         <button
-          v-if="isSwarmMode"
+          v-if="hasScenarios"
           class="tab-btn"
           :class="{ active: activeTab === 'scenarios' }"
           @click="activeTab = 'scenarios'"
         >
-          シナリオ比較
+          シナリオ分析
         </button>
         <button
-          v-if="isSwarmMode"
+          v-if="hasPmBoard"
           class="tab-btn"
-          :class="{ active: activeTab === 'agreement' }"
-          @click="activeTab = 'agreement'"
+          :class="{ active: activeTab === 'pm_evaluation' }"
+          @click="activeTab = 'pm_evaluation'"
         >
-          合意ヒートマップ
+          PM評価
         </button>
         <button
-          v-if="isPmBoardMode"
           class="tab-btn"
-          :class="{ active: activeTab === 'pm_board' }"
-          @click="activeTab = 'pm_board'"
+          :class="{ active: activeTab === 'graph' }"
+          @click="activeTab = 'graph'"
         >
-          PM Board
-        </button>
-        <button
-          v-if="isCognitiveMode"
-          class="tab-btn"
-          :class="{ active: activeTab === 'cognition' }"
-          @click="activeTab = 'cognition'"
-        >
-          認知状態
-        </button>
-        <button
-          v-if="isCognitiveMode"
-          class="tab-btn"
-          :class="{ active: activeTab === 'memory' }"
-          @click="activeTab = 'memory'"
-        >
-          記憶
-        </button>
-        <button
-          v-if="isCognitiveMode"
-          class="tab-btn"
-          :class="{ active: activeTab === 'evaluation' }"
-          @click="activeTab = 'evaluation'"
-        >
-          評価
-        </button>
-        <button
-          v-if="isCognitiveMode"
-          class="tab-btn"
-          :class="{ active: activeTab === 'tom' }"
-          @click="activeTab = 'tom'"
-        >
-          ToM
-        </button>
-        <button
-          v-if="isCognitiveMode"
-          class="tab-btn"
-          :class="{ active: activeTab === 'social' }"
-          @click="activeTab = 'social'"
-        >
-          社会NW
-        </button>
-        <button
-          v-if="isCognitiveMode"
-          class="tab-btn"
-          :class="{ active: activeTab === 'kg' }"
-          @click="activeTab = 'kg'"
-        >
-          KG探索
+          ナレッジグラフ
         </button>
       </div>
 
@@ -444,9 +431,9 @@ function renderMarkdown(content: string): string {
         <div class="results-main">
           <!-- Report tab -->
           <div v-if="activeTab === 'report'" class="tab-panel">
-            <div v-if="report?.content" class="report-panel">
+            <div v-if="reportText" class="report-panel">
               <div class="report-toolbar">
-                <p class="report-toolbar-note">分析レポート本文をプレーンテキストでコピーできます。</p>
+                <p class="report-toolbar-note">統合分析レポートをプレーンテキストでコピーできます。</p>
                 <button
                   class="btn btn-ghost report-copy-btn"
                   :disabled="!canCopyReport"
@@ -461,9 +448,9 @@ function renderMarkdown(content: string): string {
                   }}
                 </button>
               </div>
-              <div class="report-content" v-html="renderMarkdown(report.content)"></div>
+              <div class="report-content" v-html="renderMarkdown(reportText)"></div>
             </div>
-            <div v-else-if="isSwarmMode && report?.scenarios">
+            <div v-else-if="hasScenarios && report?.scenarios">
               <h3 class="content-title">シナリオ確率分布</h3>
               <ProbabilityChart :scenarios="report.scenarios.map((s: any) => ({
                 description: s.description,
@@ -487,75 +474,49 @@ function renderMarkdown(content: string): string {
               totalColonies: s.total_colonies,
               claimCount: s.claim_count,
             }))" />
+
+            <div v-if="report?.agreement_matrix?.matrix?.length" class="mt-section">
+              <h3 class="content-title">合意ヒートマップ</h3>
+              <AgreementHeatmap
+                :matrix="report.agreement_matrix"
+                :colonies="colonies.map((c: any) => ({
+                  id: c.id,
+                  colonyIndex: c.colony_index,
+                  perspectiveId: c.perspective_id,
+                  perspectiveLabel: c.perspective_label,
+                  temperature: c.temperature,
+                  adversarial: c.adversarial,
+                  status: c.status,
+                  currentRound: c.current_round,
+                  totalRounds: c.total_rounds,
+                  eventCount: 0,
+                }))"
+              />
+            </div>
+
+            <div class="mt-section">
+              <h3 class="content-title">確率分布チャート</h3>
+              <ProbabilityChart :scenarios="report.scenarios.map((s: any) => ({
+                description: s.description,
+                probability: s.probability,
+                ci: s.ci,
+                agreementRatio: s.agreement_ratio,
+              }))" />
+            </div>
           </div>
 
-          <!-- Agreement tab -->
-          <div v-if="activeTab === 'agreement'" class="tab-panel">
-            <AgreementHeatmap
-              v-if="report?.agreement_matrix?.matrix?.length"
-              :matrix="report.agreement_matrix"
-              :colonies="colonies.map((c: any) => ({
-                id: c.id,
-                colonyIndex: c.colony_index,
-                perspectiveId: c.perspective_id,
-                perspectiveLabel: c.perspective_label,
-                temperature: c.temperature,
-                adversarial: c.adversarial,
-                status: c.status,
-                currentRound: c.current_round,
-                totalRounds: c.total_rounds,
-                eventCount: 0,
-              }))"
-            />
-            <div v-else class="empty-state">合意データがありません</div>
-          </div>
-
-          <!-- Cognition tab -->
-          <div v-if="activeTab === 'cognition'" class="tab-panel">
-            <AgentMindView />
-          </div>
-
-          <!-- Memory tab -->
-          <div v-if="activeTab === 'memory'" class="tab-panel">
-            <MemoryStreamViewer />
-          </div>
-
-          <!-- Evaluation tab -->
-          <div v-if="activeTab === 'evaluation'" class="tab-panel">
-            <EvaluationDashboard />
-          </div>
-
-          <!-- ToM tab -->
-          <div v-if="activeTab === 'tom'" class="tab-panel">
-            <ToMMapVisualization />
-          </div>
-
-          <!-- Social Network tab -->
-          <div v-if="activeTab === 'social'" class="tab-panel">
-            <SocialNetworkDynamics />
-          </div>
-
-          <!-- Knowledge Graph tab -->
-          <div v-if="activeTab === 'kg'" class="tab-panel">
-            <KnowledgeGraphExplorer
-              :entities="[]"
-              :relations="[]"
-              :communities="[]"
-            />
-          </div>
-
-          <!-- PM Board tab -->
-          <div v-if="activeTab === 'pm_board' && report" class="tab-panel">
+          <!-- PM Evaluation tab -->
+          <div v-if="activeTab === 'pm_evaluation' && pmBoardData" class="tab-panel">
             <div class="pm-board-result">
-              <template v-if="report.sections">
-                <div v-if="report.sections.core_question" class="pm-section">
+              <template v-if="pmBoardData.sections">
+                <div v-if="pmBoardData.sections.core_question" class="pm-section">
                   <h3 class="pm-section-title">1. 核心質問</h3>
-                  <p class="pm-section-content">{{ report.sections.core_question }}</p>
+                  <p class="pm-section-content">{{ pmBoardData.sections.core_question }}</p>
                 </div>
 
-                <div v-if="report.sections.assumptions?.length" class="pm-section">
+                <div v-if="pmBoardData.sections.assumptions?.length" class="pm-section">
                   <h3 class="pm-section-title">2. 前提条件</h3>
-                  <div v-for="(a, i) in report.sections.assumptions" :key="i" class="pm-card">
+                  <div v-for="(a, i) in pmBoardData.sections.assumptions" :key="i" class="pm-card">
                     <div class="pm-card-header">
                       <span class="pm-card-label">{{ a.assumption }}</span>
                       <span class="pm-confidence" :style="{ color: a.confidence > 0.7 ? 'var(--success)' : a.confidence > 0.4 ? 'var(--warning, #f59e0b)' : 'var(--danger)' }">
@@ -567,9 +528,9 @@ function renderMarkdown(content: string): string {
                   </div>
                 </div>
 
-                <div v-if="report.sections.uncertainties?.length" class="pm-section">
+                <div v-if="pmBoardData.sections.uncertainties?.length" class="pm-section">
                   <h3 class="pm-section-title">3. 不確実性</h3>
-                  <div v-for="(u, i) in report.sections.uncertainties" :key="i" class="pm-card">
+                  <div v-for="(u, i) in pmBoardData.sections.uncertainties" :key="i" class="pm-card">
                     <div class="pm-card-header">
                       <span class="pm-card-label">{{ u.uncertainty }}</span>
                       <span class="pm-risk-badge" :class="'risk-' + u.risk_level">{{ u.risk_level }}</span>
@@ -578,9 +539,9 @@ function renderMarkdown(content: string): string {
                   </div>
                 </div>
 
-                <div v-if="report.sections.risks?.length" class="pm-section">
+                <div v-if="pmBoardData.sections.risks?.length" class="pm-section">
                   <h3 class="pm-section-title">4. リスク</h3>
-                  <div v-for="(r, i) in report.sections.risks" :key="i" class="pm-card">
+                  <div v-for="(r, i) in pmBoardData.sections.risks" :key="i" class="pm-card">
                     <div class="pm-card-header">
                       <span class="pm-card-label">{{ r.risk }}</span>
                       <span class="pm-confidence">{{ (r.probability * 100).toFixed(0) }}%</span>
@@ -589,93 +550,93 @@ function renderMarkdown(content: string): string {
                   </div>
                 </div>
 
-                <div v-if="report.sections.winning_hypothesis?.if_true" class="pm-section">
+                <div v-if="pmBoardData.sections.winning_hypothesis?.if_true" class="pm-section">
                   <h3 class="pm-section-title">5. 勝利仮説</h3>
                   <div class="pm-card pm-highlight">
-                    <p><strong>IF</strong> {{ report.sections.winning_hypothesis.if_true }}</p>
-                    <p><strong>THEN</strong> {{ report.sections.winning_hypothesis.then_do }}</p>
-                    <p><strong>TO ACHIEVE</strong> {{ report.sections.winning_hypothesis.to_achieve }}</p>
+                    <p><strong>IF</strong> {{ pmBoardData.sections.winning_hypothesis.if_true }}</p>
+                    <p><strong>THEN</strong> {{ pmBoardData.sections.winning_hypothesis.then_do }}</p>
+                    <p><strong>TO ACHIEVE</strong> {{ pmBoardData.sections.winning_hypothesis.to_achieve }}</p>
                     <span class="pm-confidence">
-                      確信度: {{ ((report.sections.winning_hypothesis.confidence || 0) * 100).toFixed(0) }}%
+                      確信度: {{ ((pmBoardData.sections.winning_hypothesis.confidence || 0) * 100).toFixed(0) }}%
                     </span>
                   </div>
                 </div>
 
-                <div v-if="report.sections.customer_validation_plan?.key_questions?.length" class="pm-section">
+                <div v-if="pmBoardData.sections.customer_validation_plan?.key_questions?.length" class="pm-section">
                   <h3 class="pm-section-title">6. 顧客検証計画</h3>
                   <div class="pm-card">
-                    <p v-if="report.sections.customer_validation_plan.target_segments?.length">
-                      <strong>ターゲット:</strong> {{ report.sections.customer_validation_plan.target_segments.join(', ') }}
+                    <p v-if="pmBoardData.sections.customer_validation_plan.target_segments?.length">
+                      <strong>ターゲット:</strong> {{ pmBoardData.sections.customer_validation_plan.target_segments.join(', ') }}
                     </p>
                     <ul>
-                      <li v-for="(q, i) in report.sections.customer_validation_plan.key_questions" :key="i">{{ q }}</li>
+                      <li v-for="(q, i) in pmBoardData.sections.customer_validation_plan.key_questions" :key="i">{{ q }}</li>
                     </ul>
-                    <p v-if="report.sections.customer_validation_plan.success_criteria">
-                      <strong>成功基準:</strong> {{ report.sections.customer_validation_plan.success_criteria }}
+                    <p v-if="pmBoardData.sections.customer_validation_plan.success_criteria">
+                      <strong>成功基準:</strong> {{ pmBoardData.sections.customer_validation_plan.success_criteria }}
                     </p>
                   </div>
                 </div>
 
-                <div v-if="report.sections.market_view?.market_size" class="pm-section">
+                <div v-if="pmBoardData.sections.market_view?.market_size" class="pm-section">
                   <h3 class="pm-section-title">7. 市場/競合ビュー</h3>
                   <div class="pm-card">
-                    <p><strong>市場規模:</strong> {{ report.sections.market_view.market_size }}</p>
-                    <p v-if="report.sections.market_view.growth_rate"><strong>成長率:</strong> {{ report.sections.market_view.growth_rate }}</p>
-                    <div v-if="report.sections.market_view.key_players?.length">
+                    <p><strong>市場規模:</strong> {{ pmBoardData.sections.market_view.market_size }}</p>
+                    <p v-if="pmBoardData.sections.market_view.growth_rate"><strong>成長率:</strong> {{ pmBoardData.sections.market_view.growth_rate }}</p>
+                    <div v-if="pmBoardData.sections.market_view.key_players?.length">
                       <strong>主要プレイヤー:</strong>
-                      <div v-for="(p, i) in report.sections.market_view.key_players" :key="i" class="pm-player">
+                      <div v-for="(p, i) in pmBoardData.sections.market_view.key_players" :key="i" class="pm-player">
                         {{ p.name }} — {{ p.position }}
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div v-if="report.sections.gtm_hypothesis?.value_proposition" class="pm-section">
+                <div v-if="pmBoardData.sections.gtm_hypothesis?.value_proposition" class="pm-section">
                   <h3 class="pm-section-title">8. GTM仮説</h3>
                   <div class="pm-card">
-                    <p><strong>ターゲット:</strong> {{ report.sections.gtm_hypothesis.target_customer }}</p>
-                    <p><strong>価値提案:</strong> {{ report.sections.gtm_hypothesis.value_proposition }}</p>
-                    <p v-if="report.sections.gtm_hypothesis.channel"><strong>チャネル:</strong> {{ report.sections.gtm_hypothesis.channel }}</p>
-                    <p v-if="report.sections.gtm_hypothesis.pricing_model"><strong>価格モデル:</strong> {{ report.sections.gtm_hypothesis.pricing_model }}</p>
+                    <p><strong>ターゲット:</strong> {{ pmBoardData.sections.gtm_hypothesis.target_customer }}</p>
+                    <p><strong>価値提案:</strong> {{ pmBoardData.sections.gtm_hypothesis.value_proposition }}</p>
+                    <p v-if="pmBoardData.sections.gtm_hypothesis.channel"><strong>チャネル:</strong> {{ pmBoardData.sections.gtm_hypothesis.channel }}</p>
+                    <p v-if="pmBoardData.sections.gtm_hypothesis.pricing_model"><strong>価格モデル:</strong> {{ pmBoardData.sections.gtm_hypothesis.pricing_model }}</p>
                   </div>
                 </div>
 
-                <div v-if="report.sections.mvp_scope?.in_scope?.length" class="pm-section">
+                <div v-if="pmBoardData.sections.mvp_scope?.in_scope?.length" class="pm-section">
                   <h3 class="pm-section-title">9. MVPスコープ</h3>
                   <div class="pm-card">
                     <div class="pm-scope-columns">
                       <div>
                         <strong>In Scope:</strong>
-                        <ul><li v-for="(s, i) in report.sections.mvp_scope.in_scope" :key="i">{{ s }}</li></ul>
+                        <ul><li v-for="(s, i) in pmBoardData.sections.mvp_scope.in_scope" :key="i">{{ s }}</li></ul>
                       </div>
                       <div>
                         <strong>Out of Scope:</strong>
-                        <ul><li v-for="(s, i) in report.sections.mvp_scope.out_of_scope" :key="i">{{ s }}</li></ul>
+                        <ul><li v-for="(s, i) in pmBoardData.sections.mvp_scope.out_of_scope" :key="i">{{ s }}</li></ul>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div v-if="report.sections.plan_30_60_90?.day_30" class="pm-section">
+                <div v-if="pmBoardData.sections.plan_30_60_90?.day_30" class="pm-section">
                   <h3 class="pm-section-title">10. 30/60/90日計画</h3>
                   <div class="pm-timeline-grid">
                     <div v-for="period in ['day_30', 'day_60', 'day_90']" :key="period" class="pm-card">
                       <h4 class="pm-period-label">{{ period === 'day_30' ? '30日' : period === 'day_60' ? '60日' : '90日' }}</h4>
-                      <div v-if="report.sections.plan_30_60_90[period]?.goals?.length">
+                      <div v-if="pmBoardData.sections.plan_30_60_90[period]?.goals?.length">
                         <strong>目標:</strong>
-                        <ul><li v-for="(g, i) in report.sections.plan_30_60_90[period].goals" :key="i">{{ g }}</li></ul>
+                        <ul><li v-for="(g, i) in pmBoardData.sections.plan_30_60_90[period].goals" :key="i">{{ g }}</li></ul>
                       </div>
-                      <div v-if="report.sections.plan_30_60_90[period]?.actions?.length">
+                      <div v-if="pmBoardData.sections.plan_30_60_90[period]?.actions?.length">
                         <strong>アクション:</strong>
-                        <ul><li v-for="(a, i) in report.sections.plan_30_60_90[period].actions" :key="i">{{ a }}</li></ul>
+                        <ul><li v-for="(a, i) in pmBoardData.sections.plan_30_60_90[period].actions" :key="i">{{ a }}</li></ul>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div v-if="report.sections.top_5_actions?.length" class="pm-section">
+                <div v-if="pmBoardData.sections.top_5_actions?.length" class="pm-section">
                   <h3 class="pm-section-title">11. 今すぐやるべき5アクション</h3>
-                  <div v-for="(action, idx) in report.sections.top_5_actions" :key="idx" class="pm-card pm-action">
+                  <div v-for="(action, idx) in pmBoardData.sections.top_5_actions" :key="idx" class="pm-card pm-action">
                     <div class="pm-action-header">
                       <span class="pm-action-number">{{ Number(idx) + 1 }}</span>
                       <span class="pm-card-label">{{ action.action }}</span>
@@ -688,17 +649,61 @@ function renderMarkdown(content: string): string {
                 </div>
               </template>
 
-              <div v-if="report.contradictions?.length" class="pm-section">
+              <div v-if="pmBoardData.contradictions?.length" class="pm-section">
                 <h3 class="pm-section-title">矛盾検出</h3>
-                <div v-for="(c, i) in report.contradictions" :key="i" class="pm-card pm-contradiction">
+                <div v-for="(c, i) in pmBoardData.contradictions" :key="i" class="pm-card pm-contradiction">
                   <p><strong>{{ c.between?.join(' vs ') }}:</strong> {{ c.issue }}</p>
                   <p class="pm-card-detail">解決案: {{ c.resolution }}</p>
                 </div>
               </div>
 
-              <div v-if="report.overall_confidence" class="pm-overall">
+              <div v-if="pmBoardData.overall_confidence" class="pm-overall">
                 <span>総合確信度:</span>
-                <span class="pm-overall-score">{{ (report.overall_confidence * 100).toFixed(0) }}%</span>
+                <span class="pm-overall-score">{{ (pmBoardData.overall_confidence * 100).toFixed(0) }}%</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Graph tab -->
+          <div v-if="activeTab === 'graph'" class="tab-panel">
+            <div class="graph-tab-layout">
+              <div ref="graphContainer" class="graph-snapshot-large"></div>
+              <TemporalSlider
+                v-if="graphSnapshots.length > 1"
+                :total-rounds="totalRounds"
+                :model-value="currentRound"
+                :display-value="sliderDisplayValue"
+                :playing="isPlaying"
+                @update:model-value="onRoundChange"
+                @update:playing="onPlayingChange"
+              />
+
+              <!-- Cognitive sub-tabs (quality profile) -->
+              <div v-if="isCognitiveMode" class="cognitive-subtabs">
+                <button
+                  v-for="sub in [
+                    { key: 'mind', label: '認知状態' },
+                    { key: 'memory', label: '記憶' },
+                    { key: 'evaluation', label: '評価' },
+                    { key: 'tom', label: 'ToM' },
+                    { key: 'social', label: '社会NW' },
+                    { key: 'kg', label: 'KG探索' },
+                  ]"
+                  :key="sub.key"
+                  class="subtab-btn"
+                  :class="{ active: cognitiveSubTab === sub.key }"
+                  @click="cognitiveSubTab = sub.key as any"
+                >
+                  {{ sub.label }}
+                </button>
+              </div>
+              <div v-if="isCognitiveMode" class="cognitive-content">
+                <AgentMindView v-if="cognitiveSubTab === 'mind'" />
+                <MemoryStreamViewer v-if="cognitiveSubTab === 'memory'" />
+                <EvaluationDashboard v-if="cognitiveSubTab === 'evaluation'" />
+                <ToMMapVisualization v-if="cognitiveSubTab === 'tom'" />
+                <SocialNetworkDynamics v-if="cognitiveSubTab === 'social'" />
+                <KnowledgeGraphExplorer v-if="cognitiveSubTab === 'kg'" :entities="[]" :relations="[]" :communities="[]" />
               </div>
             </div>
           </div>
@@ -706,8 +711,8 @@ function renderMarkdown(content: string): string {
 
         <!-- Right: Side Panel -->
         <div class="results-side">
-          <!-- 3D Graph with Temporal Replay -->
-          <div class="side-card">
+          <!-- 3D Graph (when not in graph tab) -->
+          <div v-if="activeTab !== 'graph'" class="side-card">
             <div class="side-header">
               <h3>3D Graph</h3>
             </div>
@@ -809,7 +814,6 @@ function renderMarkdown(content: string): string {
   flex-wrap: wrap;
 }
 
-.mode-tag { font-family: var(--font-mono); font-size: 0.6rem; font-weight: 700; padding: 0.1rem 0.35rem; border-radius: 3px; background: var(--accent-subtle); color: var(--accent); }
 .header-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
 .btn-ghost { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.5rem 1rem; background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); font-family: var(--font-sans); font-size: 0.82rem; font-weight: 500; cursor: pointer; text-decoration: none; transition: all 0.2s; }
 .btn-ghost:hover { border-color: rgba(255,255,255,0.12); color: var(--text-primary); }
@@ -847,6 +851,7 @@ function renderMarkdown(content: string): string {
 }
 
 .tab-panel { animation: fade-in 0.3s ease; }
+.mt-section { margin-top: 2rem; }
 
 .report-panel { display: flex; flex-direction: column; gap: 1rem; }
 .report-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
@@ -863,6 +868,19 @@ function renderMarkdown(content: string): string {
 
 .content-title { font-size: 0.9rem; font-weight: 600; margin-bottom: 1.25rem; }
 .empty-state { text-align: center; padding: 3rem; color: var(--text-muted); font-size: 0.85rem; }
+
+.graph-tab-layout { display: flex; flex-direction: column; gap: 1rem; }
+.graph-snapshot-large {
+  height: clamp(20rem, 40vw, 32rem);
+  background: radial-gradient(ellipse at 30% 40%, #0d0d2b 0%, #060614 50%, #020208 100%);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(100,100,255,0.12);
+}
+
+.cognitive-subtabs { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.5rem; }
+.subtab-btn { padding: 0.4rem 0.8rem; background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-muted); font-family: var(--font-sans); font-size: 0.75rem; cursor: pointer; transition: all 0.2s; }
+.subtab-btn.active { background: var(--accent-subtle); color: var(--accent); border-color: var(--accent); }
+.cognitive-content { margin-top: 0.5rem; }
 
 .results-side { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
 .side-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--panel-padding); }

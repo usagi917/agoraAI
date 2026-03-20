@@ -273,6 +273,14 @@ class GameMaster:
                 involved_entities=event_data["involved_entities"],
             )
             session.add(event)
+            await sse_manager.publish(channel, "timeline_event", {
+                "round": round_number,
+                "event_type": "decision",
+                "title": event_data["title"],
+                "description": event_data["description"],
+                "severity": 0.5,
+                "involved_entities": event_data["involved_entities"],
+            })
 
         # 一貫性検証
         if self.consistency_checker.should_check(round_number):

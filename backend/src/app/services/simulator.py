@@ -6,7 +6,7 @@ run_simulation: 後方互換の単体実行エントリーポイント
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -111,6 +111,7 @@ class SingleRunSimulator:
                 round_result = await process_round(
                     session, run_id, round_num, world_state, agents, round_prompt,
                     prompt_text=prompt_text,
+                    sse_channel=channel,
                 )
             await session.commit()
 
@@ -160,19 +161,30 @@ class SingleRunSimulator:
         return f"{injection}\n\n{base_prompt}"
 
 
-async def run_simulation(run_id: str, prompt_text: str = "") -> None:
-    """シミュレーション全体を実行する（後方互換エントリーポイント）。"""
+async def run_simulation(
+    run_id: str,
+    prompt_text: str = "",
+    initial_world_state: dict | None = None,
+    return_result: bool = False,
+) -> dict | None:
+    """シミュレーション全体を実行する（後方互換エントリーポイント）。
+
+    Args:
+        initial_world_state: 指定時は build_world() をスキップし、渡された world_state を使用
+        return_result: True の場合、world_state/events/agents/report の dict を返す
+    """
     logger.info(f"Starting simulation for run {run_id}")
+    pipeline_result = None
 
     async with async_session() as session:
         try:
             run = await session.get(Run, run_id)
             if not run:
                 logger.error(f"Run {run_id} not found")
-                return
+                return None
 
             run.status = "running"
-            run.started_at = datetime.utcnow()
+            run.started_at = datetime.now(timezone.utc)
             await session.commit()
 
             await sse_manager.publish(run_id, "run_started", {
@@ -205,37 +217,43 @@ async def run_simulation(run_id: str, prompt_text: str = "") -> None:
             template = result.scalar_one_or_none()
             template_prompts = template.prompts if template else {}
 
-            # GraphRAG フェーズ（advanced モード時）
-            knowledge_graph = None
-            graphrag_config = settings.load_graphrag_config()
-            cognitive_config = settings.load_cognitive_config()
-            cognitive_mode = cognitive_config.get("cognitive", {}).get("mode", settings.cognitive_mode)
-
-            if graphrag_config.get("enabled", False) and document_text.strip():
-                from src.app.services.graphrag.pipeline import GraphRAGPipeline
-
-                await sse_manager.publish(run_id, "graphrag_started", {
-                    "message": "GraphRAGパイプラインを開始します",
+            # 世界構築（initial_world_state が渡された場合はスキップ）
+            if initial_world_state is not None:
+                world_state = initial_world_state
+                await sse_manager.publish(run_id, "world_initialized", {
+                    "entity_count": len(world_state.get("entities", [])),
+                    "relation_count": len(world_state.get("relations", [])),
+                    "graph_diff": {},
                 })
+            else:
+                # GraphRAG フェーズ（advanced モード時）
+                knowledge_graph = None
+                graphrag_config = settings.load_graphrag_config()
 
-                pipeline = GraphRAGPipeline()
-                knowledge_graph = await pipeline.run(session, run_id, document_text)
+                if graphrag_config.get("enabled", False) and document_text.strip():
+                    from src.app.services.graphrag.pipeline import GraphRAGPipeline
+
+                    await sse_manager.publish(run_id, "graphrag_started", {
+                        "message": "GraphRAGパイプラインを開始します",
+                    })
+
+                    pipeline = GraphRAGPipeline()
+                    knowledge_graph = await pipeline.run(session, run_id, document_text)
+                    await session.commit()
+
+                    await sse_manager.publish(run_id, "graphrag_completed", {
+                        "entity_count": len(knowledge_graph.entities),
+                        "relation_count": len(knowledge_graph.relations),
+                        "community_count": len(knowledge_graph.communities),
+                    })
+
+                world_state = await build_world(
+                    session, run_id, document_text,
+                    template_prompts.get("world_build", ""),
+                    prompt_text=prompt_text,
+                    knowledge_graph=knowledge_graph,
+                )
                 await session.commit()
-
-                await sse_manager.publish(run_id, "graphrag_completed", {
-                    "entity_count": len(knowledge_graph.entities),
-                    "relation_count": len(knowledge_graph.relations),
-                    "community_count": len(knowledge_graph.communities),
-                })
-
-            # 世界構築
-            world_state = await build_world(
-                session, run_id, document_text,
-                template_prompts.get("world_build", ""),
-                prompt_text=prompt_text,
-                knowledge_graph=knowledge_graph,
-            )
-            await session.commit()
 
             # 初期グラフ投影
             graph = project_graph(world_state)
@@ -243,11 +261,16 @@ async def run_simulation(run_id: str, prompt_text: str = "") -> None:
             await save_graph_state(session, run_id, 0, graph, diff, "世界モデル初期化")
             await session.commit()
 
-            await sse_manager.publish(run_id, "world_initialized", {
-                "entity_count": len(world_state.get("entities", [])),
-                "relation_count": len(world_state.get("relations", [])),
-                "graph_diff": diff,
-            })
+            if initial_world_state is None:
+                await sse_manager.publish(run_id, "world_initialized", {
+                    "entity_count": len(world_state.get("entities", [])),
+                    "relation_count": len(world_state.get("relations", [])),
+                    "graph_diff": diff,
+                })
+
+            # cognitive_mode 判定
+            cognitive_config = settings.load_cognitive_config()
+            cognitive_mode = cognitive_config.get("cognitive", {}).get("mode", settings.cognitive_mode)
 
             # SingleRunSimulator でラウンド実行
             simulator = SingleRunSimulator()
@@ -274,7 +297,7 @@ async def run_simulation(run_id: str, prompt_text: str = "") -> None:
 
             # 完了
             run.status = "completed"
-            run.completed_at = datetime.utcnow()
+            run.completed_at = datetime.now(timezone.utc)
             await session.commit()
 
             await sse_manager.publish(run_id, "run_completed", {
@@ -284,6 +307,21 @@ async def run_simulation(run_id: str, prompt_text: str = "") -> None:
             })
 
             logger.info(f"Simulation completed for run {run_id}")
+
+            if return_result:
+                # レポート内容を取得
+                from src.app.models.report import Report as ReportModel
+                report_result = await session.execute(
+                    select(ReportModel).where(ReportModel.run_id == run_id)
+                )
+                report_record = report_result.scalar_one_or_none()
+                pipeline_result = {
+                    "world_state": result["world_state"],
+                    "events": result["events"],
+                    "agents": result["agents"],
+                    "report_content": report_record.content if report_record else "",
+                    "report_sections": report_record.sections if report_record else {},
+                }
 
         except Exception as e:
             error_msg = f"{type(e).__name__}: {e}"
@@ -302,3 +340,5 @@ async def run_simulation(run_id: str, prompt_text: str = "") -> None:
                 "run_id": run_id,
                 "error": str(e),
             })
+
+    return pipeline_result

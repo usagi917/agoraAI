@@ -25,6 +25,11 @@ from src.app.models.world_state import WorldState
 from src.app.models.followup import Followup
 from src.app.services.calibrator import record_feedback
 from src.app.services.followup_handler import handle_followup
+from src.app.services.pipeline_fallbacks import (
+    build_pipeline_report_fallback,
+    build_pm_board_fallback,
+    pm_board_has_substance,
+)
 from src.app.services.simulation_dispatcher import dispatch_simulation
 from src.app.services.simulator import PROFILE_ROUNDS
 from src.app.sse.manager import sse_manager
@@ -46,7 +51,7 @@ class SimulationCreate(BaseModel):
     project_id: str | None = None
     template_name: str = ""
     execution_profile: str = "standard"
-    mode: str = "single"  # single | swarm | hybrid | pm_board
+    mode: str = "pipeline"  # pipeline | single | swarm | hybrid | pm_board
     prompt_text: str = ""
 
 
@@ -56,7 +61,8 @@ async def create_simulation(
     session: AsyncSession = Depends(get_session),
 ):
     """Simulation を作成して実行を開始する。"""
-    if body.mode not in ("single", "swarm", "hybrid", "pm_board"):
+    valid_modes = ("pipeline", "single", "swarm", "hybrid", "pm_board")
+    if body.mode not in valid_modes:
         raise HTTPException(status_code=400, detail=f"Invalid mode: {body.mode}")
 
     sim = Simulation(
@@ -101,6 +107,7 @@ async def list_simulations(session: AsyncSession = Depends(get_session)):
             "template_name": s.template_name,
             "execution_profile": s.execution_profile,
             "colony_count": s.colony_count,
+            "pipeline_stage": s.pipeline_stage,
             "run_id": s.run_id,
             "swarm_id": s.swarm_id,
             "created_at": s.created_at.isoformat(),
@@ -168,6 +175,8 @@ async def get_simulation(sim_id: str, session: AsyncSession = Depends(get_sessio
         "deep_colony_count": sim.deep_colony_count,
         "status": sim.status,
         "error_message": sim.error_message,
+        "pipeline_stage": sim.pipeline_stage,
+        "stage_progress": sim.stage_progress,
         "run_id": sim.run_id,
         "swarm_id": sim.swarm_id,
         "metadata": sim.metadata_json,
@@ -276,6 +285,91 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
     sim = await session.get(Simulation, sim_id)
     if not sim:
         raise HTTPException(status_code=404, detail="Simulation が見つかりません")
+
+    # Pipeline モード: Report (統合) + AggregationResult + PM Board
+    if sim.mode == "pipeline":
+        response: dict = {"type": "pipeline"}
+        single_report = ""
+        swarm_report = ""
+        scenarios: list[dict] = []
+
+        if sim.run_id:
+            result = await session.execute(select(Report).where(Report.run_id == sim.run_id))
+            report = result.scalar_one_or_none()
+            if report:
+                response["id"] = report.id
+                response["run_id"] = report.run_id
+                response["status"] = report.status
+                response["sections"] = report.sections
+                response["content"] = report.content
+
+                if isinstance(report.sections, dict):
+                    single_report = (
+                        str(report.sections.get("single_report", "") or "").strip()
+                        or str(report.content or "").strip()
+                    )
+                else:
+                    single_report = str(report.content or "").strip()
+
+        if sim.swarm_id:
+            result = await session.execute(
+                select(AggregationResult).where(AggregationResult.swarm_id == sim.swarm_id)
+            )
+            agg = result.scalar_one_or_none()
+            if agg:
+                response["scenarios"] = agg.scenarios
+                response["diversity_score"] = agg.diversity_score
+                response["entropy"] = agg.entropy
+                response["agreement_matrix"] = agg.colony_agreement_matrix
+                response["swarm_metadata"] = agg.metadata_json
+                scenarios = list(agg.scenarios or [])
+                if isinstance(agg.metadata_json, dict):
+                    swarm_report = str(agg.metadata_json.get("integrated_report", "") or "").strip()
+
+            colony_result = await session.execute(
+                select(
+                    Colony.id, Colony.perspective_label, Colony.temperature,
+                    Colony.adversarial, Colony.status,
+                )
+                .where(Colony.swarm_id == sim.swarm_id)
+                .order_by(Colony.colony_index)
+            )
+            response["colonies"] = [
+                {
+                    "id": row.id,
+                    "perspective": row.perspective_label,
+                    "temperature": row.temperature,
+                    "adversarial": row.adversarial,
+                    "status": row.status,
+                }
+                for row in colony_result
+            ]
+
+        pm_board = sim.metadata_json or {}
+        if not pm_board_has_substance(pm_board):
+            pm_board = build_pm_board_fallback(
+                prompt_text=sim.prompt_text,
+                scenario_candidates=scenarios,
+                context_excerpt="\n\n".join(filter(None, [single_report, swarm_report])),
+            )
+        response["pm_board"] = pm_board
+
+        if not str(response.get("content", "") or "").strip():
+            response["content"] = build_pipeline_report_fallback(
+                prompt_text=sim.prompt_text,
+                single_report=single_report,
+                swarm_report=swarm_report,
+                scenarios=scenarios,
+                pm_result=pm_board,
+            )
+            response["sections"] = response.get("sections") or {
+                "type": "pipeline_final",
+                "generated_with_fallback": True,
+            }
+            response["status"] = response.get("status") or "completed"
+
+        if response.get("content") or response.get("scenarios") or response.get("pm_board"):
+            return response
 
     if sim.run_id:
         result = await session.execute(select(Report).where(Report.run_id == sim.run_id))
@@ -409,6 +503,7 @@ async def get_simulation_timeline(sim_id: str, session: AsyncSession = Depends(g
             "description": e.description,
             "severity": e.severity,
             "involved_entities": e.involved_entities,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
         }
         for e in events
     ]

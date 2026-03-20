@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import String, DateTime, Text, Float, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
@@ -17,5 +17,5 @@ class CalibrationData(Base):
     actual_outcome: Mapped[float | None] = mapped_column(Float, nullable=True)
     feedback_text: Mapped[str] = mapped_column(Text, default="")
     brier_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

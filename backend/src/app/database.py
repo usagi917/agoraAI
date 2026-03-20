@@ -45,6 +45,17 @@ async def _apply_sqlite_compatibility_migrations(conn: AsyncConnection) -> None:
                 text("ALTER TABLE projects ADD COLUMN prompt_text TEXT NOT NULL DEFAULT ''")
             )
 
+    if "simulations" in existing_tables:
+        sim_columns = await _get_sqlite_columns(conn, "simulations")
+        if "pipeline_stage" not in sim_columns:
+            await conn.execute(
+                text("ALTER TABLE simulations ADD COLUMN pipeline_stage VARCHAR(20) DEFAULT 'pending'")
+            )
+        if "stage_progress" not in sim_columns:
+            await conn.execute(
+                text("ALTER TABLE simulations ADD COLUMN stage_progress TEXT DEFAULT '{}'")
+            )
+
 
 async def init_db():
     _ensure_sqlite_database_dir()

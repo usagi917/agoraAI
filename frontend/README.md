@@ -1,5 +1,21 @@
-# Vue 3 + TypeScript + Vite
+# Agent AI Frontend
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+This directory contains the Vue 3 + Vite frontend for Agent AI.
 
-Learn more about the recommended Project Setup and IDE Support in the [Vue Docs TypeScript Guide](https://vuejs.org/guide/typescript/overview.html#project-setup).
+- Project overview: [`../README.md`](../README.md)
+- English README: [`../README.en.md`](../README.en.md)
+
+## Local development
+
+```bash
+pnpm install
+pnpm dev
+```
+
+The dev server runs on `http://localhost:5173` and proxies `/api` to `http://localhost:8000`.
+
+## Build
+
+```bash
+pnpm build
+```

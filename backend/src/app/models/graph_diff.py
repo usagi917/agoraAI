@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import String, DateTime, Integer, ForeignKey, JSON, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,4 +21,4 @@ class GraphDiff(Base):
     removed_edges: Mapped[dict] = mapped_column(JSON, default=list)
     highlights: Mapped[dict] = mapped_column(JSON, default=list)
     event_summary: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

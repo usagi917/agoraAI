@@ -10,25 +10,22 @@ import {
   type TemplateResponse,
   type SimulationListItem,
 } from '../api/client'
-import type { SimulationMode } from '../stores/simulationStore'
 import InputPanel from '../components/InputPanel.vue'
-import ModeSelector from '../components/ModeSelector.vue'
 
 const router = useRouter()
 
 const templates = ref<TemplateResponse[]>([])
 const selectedTemplate = ref('')
 const selectedProfile = ref('standard')
-const selectedMode = ref<SimulationMode>('single')
 const promptText = ref('')
 const files = ref<File[]>([])
 const isLoading = ref(false)
 const recentSimulations = ref<SimulationListItem[]>([])
 
 const profiles = [
-  { value: 'preview', label: 'Preview', desc: '高速確認', detail: '2 ラウンド / 3 Colony' },
-  { value: 'standard', label: 'Standard', desc: '標準分析', detail: '4 ラウンド / 5 Colony' },
-  { value: 'quality', label: 'Quality', desc: '詳細分析', detail: '6 ラウンド / 8 Colony' },
+  { value: 'preview', label: 'Preview', desc: '高速確認', detail: '因果推論2R → 多視点3C → PM評価' },
+  { value: 'standard', label: 'Standard', desc: '標準分析', detail: '因果推論4R → 多視点5C → PM評価' },
+  { value: 'quality', label: 'Quality', desc: '詳細分析', detail: '因果推論6R → 多視点8C → PM評価' },
 ]
 
 onMounted(async () => {
@@ -56,7 +53,7 @@ async function handleLaunch() {
       }
     }
 
-    const sim = await createSimulation(selectedMode.value, {
+    const sim = await createSimulation({
       projectId,
       templateName: selectedTemplate.value,
       executionProfile: selectedProfile.value,
@@ -81,13 +78,13 @@ function getStatusColor(status: string) {
   }
 }
 
-function getModeLabel(mode: string) {
-  switch (mode) {
-    case 'single': return 'Single'
-    case 'swarm': return 'Swarm'
-    case 'hybrid': return 'Hybrid'
-    case 'pm_board': return 'PM Board'
-    default: return mode
+function getPipelineStageLabel(stage: string) {
+  switch (stage) {
+    case 'single': return 'Stage 1'
+    case 'swarm': return 'Stage 2'
+    case 'pm_board': return 'Stage 3'
+    case 'completed': return '完了'
+    default: return stage
   }
 }
 
@@ -98,7 +95,7 @@ function getModeLabel(mode: string) {
     <!-- Hero -->
     <section class="hero">
       <h2 class="hero-title">群生知能<br />シミュレーション</h2>
-      <p class="hero-desc">プロンプトまたはドキュメントから世界モデルを構築し、エージェント群がリアルタイムで分析を実行します</p>
+      <p class="hero-desc">プロンプトまたはドキュメントから世界モデルを構築し、因果推論・多視点検証・PM評価の3段階パイプラインで分析を実行します</p>
     </section>
 
     <!-- Sample Results -->
@@ -111,7 +108,7 @@ function getModeLabel(mode: string) {
       <div class="sample-grid">
         <router-link to="/sample/sample-business-001" class="sample-card">
           <div class="sample-card-top">
-            <span class="sample-mode-tag">SINGLE</span>
+            <span class="sample-mode-tag">PIPELINE</span>
             <span class="sample-category">ビジネス分析</span>
           </div>
           <h4 class="sample-card-title">EVバッテリー市場参入分析</h4>
@@ -120,7 +117,7 @@ function getModeLabel(mode: string) {
         </router-link>
         <router-link to="/sample/sample-pmboard-001" class="sample-card">
           <div class="sample-card-top">
-            <span class="sample-mode-tag pm">PM BOARD</span>
+            <span class="sample-mode-tag">PIPELINE</span>
             <span class="sample-category">事業検討</span>
           </div>
           <h4 class="sample-card-title">建設プロジェクト管理SaaS</h4>
@@ -128,14 +125,6 @@ function getModeLabel(mode: string) {
           <span class="sample-card-cta">結果を見る &rarr;</span>
         </router-link>
       </div>
-    </section>
-
-    <!-- Mode Selection -->
-    <section class="section">
-      <div class="section-header">
-        <h3 class="section-title">実行モード</h3>
-      </div>
-      <ModeSelector v-model="selectedMode" />
     </section>
 
     <!-- Input Panel -->
@@ -203,7 +192,7 @@ function getModeLabel(mode: string) {
         @click="handleLaunch"
       >
         <span v-if="isLoading" class="spinner"></span>
-        {{ isLoading ? '起動中...' : `${getModeLabel(selectedMode)} シミュレーション実行` }}
+        {{ isLoading ? '起動中...' : 'シミュレーション実行' }}
       </button>
     </section>
 
@@ -224,12 +213,13 @@ function getModeLabel(mode: string) {
             <span class="status-dot" :class="getStatusColor(sim.status)"></span>
             <div class="history-info">
               <span class="history-template">
-                <span class="mode-tag">{{ getModeLabel(sim.mode) }}</span>
                 {{ sim.template_name || 'プロンプト実行' }}
               </span>
               <span class="history-meta">
                 {{ sim.execution_profile }}
-                <template v-if="sim.colony_count > 1"> · {{ sim.colony_count }} Colony</template>
+                <template v-if="sim.pipeline_stage && sim.pipeline_stage !== 'pending' && sim.status === 'running'">
+                  · {{ getPipelineStageLabel(sim.pipeline_stage) }}
+                </template>
               </span>
             </div>
           </div>
@@ -326,11 +316,6 @@ function getModeLabel(mode: string) {
   background: var(--accent-subtle);
   color: var(--accent);
   text-transform: uppercase;
-}
-
-.sample-mode-tag.pm {
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
 }
 
 .sample-category {
@@ -457,7 +442,6 @@ function getModeLabel(mode: string) {
   min-width: 0;
 }
 
-.mode-tag { font-family: var(--font-mono); font-size: 0.6rem; font-weight: 700; padding: 0.1rem 0.35rem; border-radius: 3px; background: var(--accent-subtle); color: var(--accent); text-transform: uppercase; }
 .history-meta { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); word-break: break-word; }
 
 .history-right {

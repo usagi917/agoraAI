@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import String, DateTime, Integer, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,4 +18,4 @@ class GraphState(Base):
     focus_entities: Mapped[dict] = mapped_column(JSON, default=list)
     highlights: Mapped[dict] = mapped_column(JSON, default=list)
     event_refs: Mapped[dict] = mapped_column(JSON, default=list)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

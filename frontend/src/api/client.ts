@@ -46,10 +46,12 @@ export interface ColonyResponse {
 
 // === Simulation API (統一) ===
 
+export type PipelineStage = 'pending' | 'single' | 'swarm' | 'pm_board' | 'completed'
+
 export interface SimulationResponse {
   id: string
   project_id: string | null
-  mode: 'single' | 'swarm' | 'hybrid' | 'pm_board'
+  mode: string
   prompt_text: string
   template_name: string
   execution_profile: string
@@ -57,6 +59,8 @@ export interface SimulationResponse {
   deep_colony_count: number
   status: string
   error_message: string
+  pipeline_stage: PipelineStage
+  stage_progress: Record<string, string>
   run_id: string | null
   swarm_id: string | null
   metadata: Record<string, any>
@@ -73,6 +77,7 @@ export interface SimulationListItem {
   template_name: string
   execution_profile: string
   colony_count: number
+  pipeline_stage: PipelineStage
   run_id: string | null
   swarm_id: string | null
   created_at: string
@@ -86,20 +91,31 @@ export interface GraphSnapshot {
   focus_entities?: string[]
 }
 
+export interface SimulationTimelineEvent {
+  id: string
+  round_number: number
+  event_type: string
+  title: string
+  description: string
+  severity: number
+  involved_entities: string[]
+  created_at?: string | null
+}
+
 export async function createSimulation(
-  mode: 'single' | 'swarm' | 'hybrid' | 'pm_board',
   options: {
     projectId?: string
     templateName?: string
     executionProfile?: string
     promptText?: string
+    mode?: string
   } = {},
 ): Promise<SimulationResponse> {
   const { data } = await api.post('/simulations', {
     project_id: options.projectId || null,
     template_name: options.templateName || '',
     execution_profile: options.executionProfile || 'standard',
-    mode,
+    mode: options.mode || 'pipeline',
     prompt_text: options.promptText || '',
   })
   return data
@@ -132,6 +148,11 @@ export async function getSimulationReport(simId: string) {
 
 export async function getSimulationColonies(simId: string): Promise<ColonyResponse[]> {
   const { data } = await api.get(`/simulations/${simId}/colonies`)
+  return data
+}
+
+export async function getSimulationTimeline(simId: string): Promise<SimulationTimelineEvent[]> {
+  const { data } = await api.get(`/simulations/${simId}/timeline`)
   return data
 }
 

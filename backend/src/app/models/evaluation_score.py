@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import String, DateTime, Float, Integer, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
@@ -22,4 +22,4 @@ class EvaluationScore(Base):
     emergent_complexity: Mapped[float] = mapped_column(Float, default=0.0)
     overall_score: Mapped[float] = mapped_column(Float, default=0.0)
     details: Mapped[dict] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

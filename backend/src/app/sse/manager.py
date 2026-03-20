@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import AsyncGenerator
 
 logger = logging.getLogger(__name__)
@@ -13,7 +13,7 @@ class SSEEvent:
     def __init__(self, event_type: str, run_id: str, payload: dict, sequence_no: int = 0):
         self.event_type = event_type
         self.run_id = run_id
-        self.timestamp = datetime.utcnow().isoformat()
+        self.timestamp = datetime.now(timezone.utc).isoformat()
         self.sequence_no = sequence_no
         self.payload = payload
 
@@ -79,7 +79,11 @@ class SSEManager:
             while True:
                 event = await queue.get()
                 yield event.to_sse()
-                if event.event_type in ("run_completed", "run_failed", "swarm_completed", "swarm_failed"):
+                if event.event_type in (
+                    "run_completed", "run_failed",
+                    "swarm_completed", "swarm_failed",
+                    "pipeline_completed", "simulation_completed", "simulation_failed",
+                ):
                     break
         finally:
             if run_id in self._channels:

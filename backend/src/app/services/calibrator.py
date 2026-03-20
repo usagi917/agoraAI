@@ -1,7 +1,7 @@
 """校正エンジン: Brier score による予測精度の評価"""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,7 +33,7 @@ async def record_feedback(
         actual_outcome=actual_outcome,
         feedback_text=feedback_text,
         brier_score=score,
-        resolved_at=datetime.utcnow(),
+        resolved_at=datetime.now(timezone.utc),
     )
     session.add(calibration)
     await session.flush()

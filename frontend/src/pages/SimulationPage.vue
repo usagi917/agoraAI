@@ -1,29 +1,54 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getSimulation, getSimulationGraph, type SimulationResponse } from '../api/client'
-import { useSimulationStore } from '../stores/simulationStore'
+import {
+  getSimulation,
+  getSimulationColonies,
+  getSimulationGraph,
+  getSimulationTimeline,
+  type ColonyResponse,
+  type SimulationResponse,
+  type SimulationTimelineEvent,
+} from '../api/client'
+import {
+  useSimulationStore,
+  type ColonyState,
+  type SimulationStoreSnapshot,
+} from '../stores/simulationStore'
 import { useSimulationSSE } from '../composables/useSimulationSSE'
-import { useGraphStore } from '../stores/graphStore'
+import { useGraphStore, type GraphStoreSnapshot } from '../stores/graphStore'
+import { useActivityStore, type ActivityEntry } from '../stores/activityStore'
 import { useForceGraph } from '../composables/useForceGraph'
+import type { ThinkingVisualMode } from '../composables/useThinkingParticles'
 import SimulationProgress from '../components/SimulationProgress.vue'
 import ColonyGrid from '../components/ColonyGrid.vue'
+import ActivityFeed from '../components/ActivityFeed.vue'
+
+const LIVE_SESSION_VERSION = 1
+
+interface PersistedSimulationLiveState {
+  version: number
+  savedAt: number
+  store: SimulationStoreSnapshot
+  graph: GraphStoreSnapshot
+  activity: ActivityEntry[]
+}
 
 const route = useRoute()
 const router = useRouter()
 const simId = route.params.id as string
 
 const sim = ref<SimulationResponse | null>(null)
-const graphContainer = ref<HTMLElement | null>(null)
+const graphCanvas = ref<HTMLElement | null>(null)
 const selectedEntity = ref<any>(null)
 const elapsedTime = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
+let persistTimer: ReturnType<typeof setTimeout> | null = null
 
 const store = useSimulationStore()
 const graphStore = useGraphStore()
-const { graph, setFullGraph, resetCamera } = useForceGraph(graphContainer)
-
-let sse: ReturnType<typeof useSimulationSSE> | null = null
+const activityStore = useActivityStore()
+const sse = useSimulationSSE(simId)
 
 const entityTypeColors: Record<string, string> = {
   organization: '#4FC3F7',
@@ -34,12 +59,42 @@ const entityTypeColors: Record<string, string> = {
   resource: '#4DB6AC',
 }
 
-const pmPhaseLabel = computed(() => {
+const showColonyGrid = computed(() => {
+  if (store.isPipelineMode) {
+    return store.pipelineStage === 'swarm' && store.colonies.length > 0
+  }
+  return (store.mode === 'swarm' || store.mode === 'hybrid') && store.colonies.length > 0
+})
+
+const thinkingMode = computed<ThinkingVisualMode>(() => {
+  if (store.phase === 'graphrag') return 'graphrag'
+  if (store.phase === 'report' || store.status === 'generating_report') return 'report'
+  if (showColonyGrid.value || store.pipelineStage === 'swarm') return 'swarm'
+  if (store.status === 'running' || store.phase === 'world_building' || store.phase === 'simulation') {
+    return 'simulation'
+  }
+  return 'idle'
+})
+
+const { graph, setFullGraph, applyDiff: applyGraphDiff, resetCamera } = useForceGraph(graphCanvas, thinkingMode)
+
+const stageLabel = computed(() => {
+  if (store.phase === 'graphrag') return 'GraphRAG 構築中'
+  if (store.phase === 'report' || store.status === 'generating_report') return 'レポート生成中'
+  if (store.isPipelineMode) {
+    switch (store.pipelineStage) {
+      case 'single': return 'Stage 1: 因果推論'
+      case 'swarm': return 'Stage 2: 多視点検証'
+      case 'pm_board': return 'Stage 3: PM評価'
+      case 'completed': return '完了'
+      default: return '準備中...'
+    }
+  }
   const phase = store.phase
   if (phase.startsWith('pm_analyzing_')) return `${phase.replace('pm_analyzing_', '')} 分析中...`
   if (phase === 'pm_synthesizing') return 'チーフPM 統合中...'
   if (phase === 'completed') return '完了'
-  return '準備中...'
+  return store.phase
 })
 
 const formattedTime = computed(() => {
@@ -48,43 +103,325 @@ const formattedTime = computed(() => {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
 })
 
-onMounted(async () => {
-  sim.value = await getSimulation(simId)
-  store.init(simId, sim.value.mode as any, sim.value.prompt_text)
+const phaseOverlay = computed(() => {
+  const s = store.status
+  if (s !== 'running' && s !== 'generating_report' && s !== 'connecting') return null
+  const phase = store.phase
+  const stage = store.pipelineStage
+  if (phase === 'completed') return null
 
-  if (sim.value.status === 'completed') {
-    store.setStatus('completed')
-    store.setPhase('completed')
-    const graphData = await getSimulationGraph(simId)
-    if (graphData.nodes?.length) {
-      graphStore.setFullState(graphData.nodes, graphData.edges)
-      await nextTick()
-      setFullGraph(graphData.nodes, graphData.edges)
-    }
-    return
+  if (phase === 'graphrag') return { icon: '◈', label: 'GraphRAG 構築中...' }
+  if (phase === 'world_building') return { icon: '◇', label: '世界モデル構築中...' }
+  if (phase === 'simulation' && store.totalRounds > 0) {
+    return { icon: '⟳', label: `Round ${store.currentRound}/${store.totalRounds} 推論中...` }
   }
+  if (stage === 'swarm' && store.colonies.length > 0) {
+    return { icon: '⬡', label: `Colony ${store.completedColonies}/${store.colonies.length} 実行中` }
+  }
+  if (phase.startsWith('pm_analyzing_')) {
+    const persona = phase.replace('pm_analyzing_', '')
+    return { icon: '◉', label: `${persona} 分析中...` }
+  }
+  if (phase === 'pm_synthesizing') return { icon: '◉', label: 'チーフPM 統合中...' }
+  if (phase === 'pm_analyzing') return { icon: '◉', label: 'PM Board 分析中...' }
+  if (phase === 'report' || s === 'generating_report') return { icon: '▣', label: 'レポート生成中...' }
+  if (stage === 'single') return { icon: '◈', label: '因果推論 実行中...' }
+  if (stage === 'swarm') return { icon: '⬡', label: 'Swarm 実行中...' }
+  if (stage === 'pm_board') return { icon: '◉', label: 'PM Board 実行中...' }
 
-  sse = useSimulationSSE(simId)
-  sse.start()
-  timer = setInterval(() => { elapsedTime.value++ }, 1000)
+  return { icon: '◈', label: '処理中...' }
 })
 
-// SSE イベントの監視
+const emptyState = computed(() => {
+  if (store.phase === 'graphrag') {
+    return {
+      eyebrow: 'Knowledge Extraction',
+      title: 'GraphRAG が関係性を抽出しています',
+      detail: '文書とプロンプトからエンティティとリンクを組み立てています。',
+    }
+  }
+  if (store.phase === 'report' || store.status === 'generating_report') {
+    return {
+      eyebrow: 'Report Workflow',
+      title: 'レポート骨子を組み立てています',
+      detail: 'セクション単位で要約と統合を進めています。',
+    }
+  }
+  if (showColonyGrid.value || store.pipelineStage === 'swarm') {
+    return {
+      eyebrow: 'Swarm Execution',
+      title: '複数 Colony が仮説を検証しています',
+      detail: '視点ごとのイベントと合意差分を集約中です。',
+    }
+  }
+  return {
+    eyebrow: 'Simulation Live',
+    title: '世界モデルの初期状態を構築しています',
+    detail: '最初のノードが現れるとグラフをそのまま追跡できます。',
+  }
+})
+
+const graphContainerClass = computed(() => `tone-${thinkingMode.value}`)
+
+function liveStateKey(id: string) {
+  return `agent-ai:live:${id}`
+}
+
+function parseServerDate(value?: string | null) {
+  if (!value) return null
+  const normalized = /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`
+  const timestamp = Date.parse(normalized)
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+function stopElapsedTimer() {
+  if (timer) {
+    clearInterval(timer)
+    timer = null
+  }
+}
+
+function startElapsedTimer(startedAt?: string | null) {
+  stopElapsedTimer()
+  const startedMs = parseServerDate(startedAt) ?? Date.now()
+  const update = () => {
+    elapsedTime.value = Math.max(0, Math.floor((Date.now() - startedMs) / 1000))
+  }
+  update()
+  if (store.status !== 'completed' && store.status !== 'failed') {
+    timer = setInterval(update, 1000)
+  }
+}
+
+function mapColonyResponse(colony: ColonyResponse): ColonyState {
+  return {
+    id: colony.id,
+    colonyIndex: colony.colony_index,
+    perspectiveId: colony.perspective_id,
+    perspectiveLabel: colony.perspective_label,
+    temperature: colony.temperature,
+    adversarial: colony.adversarial,
+    status: colony.status,
+    currentRound: colony.current_round,
+    totalRounds: colony.total_rounds,
+    eventCount: 0,
+  }
+}
+
+function timelineToEntries(events: SimulationTimelineEvent[]): ActivityEntry[] {
+  return events.map((event, index) => ({
+    id: index,
+    timestamp: parseServerDate(event.created_at) ?? Date.now() + index,
+    level: 'event',
+    icon: '◌',
+    message: event.title || event.event_type || 'timeline',
+    detail: event.description || undefined,
+    round: event.round_number,
+    track: 'timeline',
+    status: 'completed',
+  }))
+}
+
+function clearLiveSurface() {
+  sim.value = null
+  sse.close()
+  stopElapsedTimer()
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+  }
+  graphStore.reset()
+  activityStore.clear()
+  selectedEntity.value = null
+  elapsedTime.value = 0
+}
+
+function readPersistedLiveState(id: string): PersistedSimulationLiveState | null {
+  try {
+    const raw = window.sessionStorage.getItem(liveStateKey(id))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as PersistedSimulationLiveState
+    if (parsed.version !== LIVE_SESSION_VERSION) return null
+    if (parsed.store?.simulationId && parsed.store.simulationId !== id) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function restorePersistedLiveState(snapshot: PersistedSimulationLiveState | null, simulation: SimulationResponse) {
+  if (!snapshot || simulation.status === 'completed' || simulation.status === 'failed') return
+
+  const allowStatusRestore = snapshot.store.status === 'generating_report' || snapshot.store.status === 'disconnected'
+  const allowPhaseRestore = snapshot.store.phase === 'report' || snapshot.store.phase === 'graphrag'
+
+  store.restoreSnapshot(snapshot.store, {
+    preserveStatus: !allowStatusRestore,
+    preservePhase: !allowPhaseRestore,
+    preservePipelineStage: true,
+  })
+
+  if (!graphStore.nodes.length && snapshot.graph?.nodes?.length) {
+    graphStore.setFullState(snapshot.graph.nodes, snapshot.graph.edges)
+  }
+  if (activityStore.entries.length === 0 && snapshot.activity?.length) {
+    activityStore.replaceEntries(snapshot.activity)
+  }
+}
+
+function persistLiveState() {
+  persistTimer = null
+  const payload: PersistedSimulationLiveState = {
+    version: LIVE_SESSION_VERSION,
+    savedAt: Date.now(),
+    store: store.toSnapshot(),
+    graph: graphStore.toSnapshot(),
+    activity: activityStore.toSnapshot(),
+  }
+  window.sessionStorage.setItem(liveStateKey(simId), JSON.stringify(payload))
+}
+
+function schedulePersist() {
+  if (!sim.value || typeof window === 'undefined') return
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+  }
+  persistTimer = setTimeout(() => {
+    persistLiveState()
+  }, 120)
+}
+
+function clearPersistedLiveState(id = simId) {
+  window.sessionStorage.removeItem(liveStateKey(id))
+}
+
+function applySimulationState(simulation: SimulationResponse) {
+  store.init(simId, simulation.mode, simulation.prompt_text)
+
+  if (simulation.pipeline_stage) {
+    store.setPipelineStage(simulation.pipeline_stage as any)
+  }
+  if (simulation.stage_progress) {
+    store.setStageProgress(simulation.stage_progress)
+  }
+
+  const reportProgress = simulation.metadata?.report_progress as {
+    status?: string
+    sections?: string[]
+    completed_sections?: string[]
+    last_error?: string
+  } | undefined
+
+  if (simulation.status === 'completed') {
+    store.setStatus('completed')
+    store.setPhase('completed')
+    store.setPipelineStage('completed')
+  } else if (simulation.status === 'failed') {
+    store.setError(simulation.error_message || '不明なエラー')
+  } else if (simulation.status === 'generating_report') {
+    store.setStatus('generating_report')
+    store.setPhase('report')
+  } else {
+    store.setStatus(simulation.status || 'running')
+    if (simulation.mode === 'pipeline' && simulation.pipeline_stage && simulation.pipeline_stage !== 'pending') {
+      store.setPhase(simulation.pipeline_stage)
+    } else if (simulation.status === 'running') {
+      store.setPhase('world_building')
+    }
+  }
+
+  if (reportProgress?.sections?.length) {
+    const completed = new Set(reportProgress.completed_sections || [])
+    store.setReportSectionsState(
+      reportProgress.sections.map((name) => ({
+        name,
+        done: completed.has(name),
+      })),
+    )
+    store.setReportError(reportProgress.last_error || '')
+  }
+
+  if (reportProgress?.status === 'running' && simulation.status !== 'completed') {
+    store.setStatus('generating_report')
+    store.setPhase('report')
+  }
+  if (reportProgress?.status === 'failed') {
+    store.setPhase('report')
+    store.setReportError(reportProgress.last_error || store.reportError)
+  }
+}
+
+async function hydrateLiveData(simulation: SimulationResponse) {
+  const [graphData, colonyData, timelineData] = await Promise.all([
+    getSimulationGraph(simId).catch(() => null),
+    simulation.swarm_id ? getSimulationColonies(simId).catch(() => []) : Promise.resolve([]),
+    simulation.run_id ? getSimulationTimeline(simId).catch(() => []) : Promise.resolve([]),
+  ])
+
+  if (colonyData.length > 0) {
+    store.setColonies(colonyData.map(mapColonyResponse))
+  }
+
+  if (activityStore.entries.length === 0 && timelineData.length > 0) {
+    activityStore.replaceEntries(timelineToEntries(timelineData))
+  }
+
+  if (graphData?.nodes?.length) {
+    graphStore.setFullState(graphData.nodes, graphData.edges)
+  }
+
+  if (graphStore.nodes.length > 0) {
+    await nextTick()
+    setFullGraph(graphStore.nodes, graphStore.edges)
+  }
+}
+
+async function bootstrapSimulation() {
+  clearLiveSurface()
+  const persisted = readPersistedLiveState(simId)
+
+  sim.value = await getSimulation(simId)
+  applySimulationState(sim.value)
+  restorePersistedLiveState(persisted, sim.value)
+  startElapsedTimer(sim.value.started_at)
+  await hydrateLiveData(sim.value)
+
+  if (sim.value.status !== 'completed' && sim.value.status !== 'failed') {
+    sse.start()
+  }
+}
+
+onMounted(async () => {
+  await bootstrapSimulation()
+})
+
+onUnmounted(() => {
+  clearLiveSurface()
+  graphStore.reset()
+  activityStore.clear()
+  selectedEntity.value = null
+})
+
 watch(
   () => store.status,
   (newStatus) => {
     if (newStatus === 'completed' || newStatus === 'failed') {
-      if (timer) { clearInterval(timer); timer = null }
+      stopElapsedTimer()
+    }
+    if (newStatus === 'completed') {
+      clearPersistedLiveState()
+      router.push(`/sim/${simId}/results`)
     }
   },
 )
 
-// グラフの差分適用を監視
 watch(
-  () => graphStore.nodes.length + graphStore.edges.length,
+  () => graphStore.pendingDiffs.length,
   () => {
-    if (graphStore.nodes.length > 0 && graph.value) {
-      setFullGraph(graphStore.nodes, graphStore.edges)
+    if (!graph.value || graphStore.pendingDiffs.length === 0) return
+    const diffs = graphStore.consumePendingDiffs()
+    for (const diff of diffs) {
+      applyGraphDiff(diff)
     }
   },
 )
@@ -104,6 +441,10 @@ watch(graph, (fg) => {
   })
 })
 
+watch(() => store.toSnapshot(), schedulePersist, { deep: true })
+watch(() => graphStore.toSnapshot(), schedulePersist, { deep: true })
+watch(() => activityStore.entries, schedulePersist, { deep: true })
+
 function goToResults() {
   router.push(`/sim/${simId}/results`)
 }
@@ -120,15 +461,11 @@ function goToResults() {
         <span class="status-mono">{{ graphStore.nodes.length }} nodes / {{ graphStore.edges.length }} edges</span>
         <span class="status-divider">|</span>
         <span class="status-mono">{{ formattedTime }}</span>
-        <template v-if="store.isSwarmMode">
+        <span class="status-divider">|</span>
+        <span class="status-mono">{{ stageLabel }}</span>
+        <template v-if="showColonyGrid">
           <span class="status-divider">|</span>
           <span class="status-mono">{{ store.completedColonies }}/{{ store.colonies.length }} Colony</span>
-        </template>
-        <template v-if="store.mode === 'pm_board'">
-          <span class="status-divider">|</span>
-          <span class="status-mono">PM Board</span>
-          <span class="status-divider">|</span>
-          <span class="status-mono">{{ pmPhaseLabel }}</span>
         </template>
       </div>
       <div class="status-right">
@@ -158,10 +495,25 @@ function goToResults() {
               <span class="metric"><span class="metric-val">{{ graphStore.edges.length }}</span> edges</span>
             </div>
           </div>
-          <div ref="graphContainer" class="graph-container">
-            <div v-if="graphStore.nodes.length === 0" class="graph-empty">
-              <div class="loading-dots"><span></span><span></span><span></span></div>
-              <p>グラフデータ待機中...</p>
+          <div class="graph-container" :class="graphContainerClass">
+            <div ref="graphCanvas" class="graph-canvas-host"></div>
+            <div v-if="graphStore.nodes.length === 0" class="graph-empty" :class="graphContainerClass">
+              <div class="graph-empty-backdrop"></div>
+              <div class="graph-empty-shell">
+                <div class="graph-empty-eyebrow">{{ emptyState.eyebrow }}</div>
+                <div class="graph-empty-title">{{ emptyState.title }}</div>
+                <p class="graph-empty-detail">{{ emptyState.detail }}</p>
+                <div class="loading-dots"><span></span><span></span><span></span></div>
+                <div class="graph-empty-pills">
+                  <span class="graph-pill">{{ stageLabel }}</span>
+                  <span v-if="store.totalRounds > 0" class="graph-pill">Round {{ store.currentRound }}/{{ store.totalRounds }}</span>
+                  <span v-if="store.reportSections.length > 0" class="graph-pill">Report {{ store.completedReportSections }}/{{ store.reportSections.length }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-if="phaseOverlay" class="phase-overlay">
+              <span class="phase-icon">{{ phaseOverlay.icon }}</span>
+              <span class="phase-label">{{ phaseOverlay.label }}</span>
             </div>
           </div>
           <button v-if="graphStore.nodes.length > 0" class="reset-camera-btn" @click="resetCamera" title="中心に戻す">&#8962;</button>
@@ -173,8 +525,8 @@ function goToResults() {
           </div>
         </div>
 
-        <!-- Colony Grid (swarm/hybrid only) -->
-        <div v-if="store.isSwarmMode && store.colonies.length > 0" class="colony-overlay">
+        <!-- Colony Grid (swarm stage in pipeline, or standalone swarm/hybrid) -->
+        <div v-if="showColonyGrid" class="colony-overlay">
           <div class="panel-header">
             <h3>Colony Grid</h3>
             <span class="panel-count">{{ store.completedColonies }}/{{ store.colonies.length }}</span>
@@ -209,23 +561,35 @@ function goToResults() {
         </div>
 
         <!-- Prompt Info -->
-        <div v-if="sim?.prompt_text" class="panel-card">
+        <div v-if="store.promptText" class="panel-card">
           <div class="panel-header"><h3>Prompt</h3></div>
-          <p class="prompt-text">{{ sim.prompt_text }}</p>
+          <p class="prompt-text">{{ store.promptText }}</p>
         </div>
 
-        <!-- Console -->
-        <div class="panel-card console-panel">
+        <!-- Report Progress (WP6) -->
+        <div v-if="store.reportSections.length > 0" class="panel-card">
           <div class="panel-header">
-            <h3>Console</h3>
-            <span class="panel-count" :class="{ live: store.status === 'running' }">
-              {{ store.status === 'running' ? 'LIVE' : store.status.toUpperCase() }}
-            </span>
+            <h3>Report Progress</h3>
+            <span class="panel-count">{{ store.completedReportSections }}/{{ store.reportSections.length }}</span>
           </div>
-          <div class="console-output">
-            <div v-if="store.status === 'running' || store.status === 'generating_report'" class="console-cursor">&#9608;</div>
+          <div v-if="store.reportError" class="report-error-banner">
+            {{ store.reportError }}
+          </div>
+          <div class="report-sections">
+            <div
+              v-for="(sec, i) in store.reportSections"
+              :key="i"
+              class="report-section-item"
+              :class="{ done: sec.done }"
+            >
+              <span class="section-check">{{ sec.done ? '✓' : '…' }}</span>
+              <span class="section-name">{{ sec.name }}</span>
+            </div>
           </div>
         </div>
+
+        <!-- Activity Feed -->
+        <ActivityFeed :status="store.status" />
       </div>
     </div>
   </div>
@@ -311,11 +675,95 @@ function goToResults() {
   overflow: hidden;
 }
 
-.graph-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; color: var(--text-muted); font-size: 0.82rem; }
+.graph-canvas-host {
+  position: absolute;
+  inset: 0;
+}
+
+.graph-container.tone-graphrag { background: radial-gradient(ellipse at 30% 30%, rgba(15, 60, 54, 0.88) 0%, #041118 48%, #02070b 100%); }
+.graph-container.tone-report { background: radial-gradient(ellipse at 30% 35%, rgba(72, 36, 20, 0.9) 0%, #170a08 45%, #040405 100%); }
+.graph-container.tone-swarm { background: radial-gradient(ellipse at 30% 35%, rgba(38, 25, 72, 0.92) 0%, #0b0618 48%, #020208 100%); }
+.graph-container.tone-simulation { background: radial-gradient(ellipse at 30% 40%, rgba(29, 38, 82, 0.92) 0%, #070714 48%, #020208 100%); }
+
+.graph-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  z-index: 1;
+}
+
+.graph-empty-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(255,255,255,0.08), transparent 36%),
+    linear-gradient(135deg, rgba(255,255,255,0.03), transparent 50%);
+  opacity: 0.7;
+  animation: breathe 5s ease-in-out infinite;
+}
+
+.graph-empty-shell {
+  position: relative;
+  z-index: 1;
+  max-width: 24rem;
+  padding: 1.4rem 1.5rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(8, 10, 22, 0.56);
+  backdrop-filter: blur(12px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  text-align: center;
+}
+
+.graph-empty-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(200, 220, 255, 0.72);
+}
+
+.graph-empty-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: rgba(245, 247, 255, 0.94);
+}
+
+.graph-empty-detail {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: rgba(208, 214, 235, 0.72);
+}
+
 .loading-dots { display: flex; gap: 4px; }
 .loading-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: typing-dot 1.4s ease-in-out infinite; }
 .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
 .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+.graph-empty-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
+.graph-pill {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: rgba(220, 226, 245, 0.86);
+  padding: 0.24rem 0.52rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.08);
+}
 
 .reset-camera-btn { position: absolute; top: 12px; right: 12px; z-index: 10; width: 32px; height: 32px; border-radius: 6px; border: 1px solid rgba(100,100,255,0.2); background: rgba(10,10,30,0.75); backdrop-filter: blur(8px); color: rgba(200,200,255,0.7); font-size: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
 .reset-camera-btn:hover { background: rgba(30,30,80,0.85); color: #fff; border-color: rgba(100,100,255,0.4); }
@@ -367,20 +815,95 @@ function goToResults() {
 
 .prompt-text { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.6; white-space: pre-wrap; }
 
-.console-panel { flex: 1; min-height: 0; }
-.console-output {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  line-height: 1.7;
-  max-height: min(14rem, 38vh);
-  overflow-y: auto;
-  background: rgba(0,0,0,0.3);
-  border-radius: var(--radius-sm);
-  padding: 0.75rem;
-  border: 1px solid var(--border);
+/* Phase Overlay */
+.phase-overlay {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 1rem;
+  background: rgba(10, 10, 40, 0.82);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(100, 100, 255, 0.2);
+  border-radius: 20px;
+  pointer-events: none;
 }
 
-.console-cursor { color: var(--text-muted); animation: breathe 1s step-end infinite; font-size: 0.72rem; }
+.phase-icon {
+  font-size: 0.9rem;
+  animation: breathe 2s ease-in-out infinite;
+}
+
+.phase-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: rgba(200, 200, 255, 0.9);
+  white-space: nowrap;
+}
+
+.phase-fade-enter-active,
+.phase-fade-leave-active {
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+.phase-fade-enter-from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+.phase-fade-leave-to { opacity: 0; transform: translateX(-50%) translateY(8px); }
+
+/* Report Sections (WP6) */
+.report-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.report-section-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  padding: 0.2rem 0;
+}
+
+.report-section-item.done {
+  color: var(--success);
+}
+
+.report-error-banner {
+  margin-bottom: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid rgba(239,68,68,0.2);
+  background: rgba(239,68,68,0.08);
+  color: var(--danger);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.section-check {
+  width: 1.2em;
+  text-align: center;
+}
+
+.section-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes typing-dot {
+  0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-4px); }
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 0.95; transform: scale(1.02); }
+}
 
 @media (max-width: 1200px) {
   .sim-layout {

@@ -2,6 +2,7 @@ import { ref, onMounted, onUnmounted, watch, type Ref } from 'vue'
 import ForceGraph3D, { type ForceGraph3DInstance } from '3d-force-graph'
 import * as THREE from 'three'
 import type { GraphNode, GraphEdge } from '../stores/graphStore'
+import { startThinkingAnimation, type ThinkingVisualMode } from './useThinkingParticles'
 
 const TYPE_COLORS: Record<string, string> = {
   organization: '#4FC3F7',
@@ -289,14 +290,38 @@ function updateInternalNode(node: InternalNode, next: GraphNode) {
   node.opacity = DEFAULT_NODE_OPACITY
 }
 
-export function useForceGraph(containerRef: Ref<HTMLElement | null>) {
+export function useForceGraph(
+  containerRef: Ref<HTMLElement | null>,
+  thinkingModeRef?: Ref<ThinkingVisualMode>,
+) {
   const graph = ref<ForceGraph3DInstance | null>(null)
   let resizeObserver: ResizeObserver | null = null
   let mountedContainer: HTMLElement | null = null
   let activeTransition: GraphTransitionState | null = null
+  let sceneRef: THREE.Scene | null = null
 
   const internalNodes: InternalNode[] = []
   const internalLinks: InternalLink[] = []
+  let thinkingCleanup: (() => void) | null = null
+
+  function restartThinkingAnimation() {
+    if (!sceneRef || internalNodes.length > 0) return
+
+    if (thinkingCleanup) {
+      thinkingCleanup()
+      thinkingCleanup = null
+    }
+
+    thinkingCleanup = startThinkingAnimation(sceneRef, {
+      mode: thinkingModeRef?.value ?? 'idle',
+    })
+  }
+
+  function stopThinkingAnimation() {
+    if (!thinkingCleanup) return
+    thinkingCleanup()
+    thinkingCleanup = null
+  }
 
   function createNodeThreeObject(node: InternalNode): THREE.Object3D {
     const group = new THREE.Group()
@@ -500,6 +525,7 @@ export function useForceGraph(containerRef: Ref<HTMLElement | null>) {
     camera.updateProjectionMatrix()
 
     const scene = fg.scene()
+    sceneRef = scene
     scene.fog = new THREE.FogExp2(0x020210, 0.0008)
 
     const ambientLight = new THREE.AmbientLight(0x080820, 1.2)
@@ -548,6 +574,9 @@ export function useForceGraph(containerRef: Ref<HTMLElement | null>) {
     graph.value = fg
     syncGraphData()
 
+    // Start thinking particles if no nodes yet
+    restartThinkingAnimation()
+
     resizeObserver?.disconnect()
     resizeObserver = new ResizeObserver(() => {
       if (!containerRef.value || !graph.value) return
@@ -576,6 +605,26 @@ export function useForceGraph(containerRef: Ref<HTMLElement | null>) {
     graph.value.refresh()
   }
 
+  function animateGrowIn(node: InternalNode) {
+    const targetSize = node.size
+    const targetOpacity = node.opacity
+    node.size = 0.1
+    node.opacity = 0
+    const startTime = performance.now()
+    const duration = 400
+
+    function tick() {
+      const elapsed = performance.now() - startTime
+      const t = Math.min(elapsed / duration, 1)
+      const eased = 1 - (1 - t) * (1 - t) // easeOutQuad
+      node.size = lerp(0.1, targetSize, eased)
+      node.opacity = lerp(0, targetOpacity, eased)
+      applyNodeThreeObjectVisuals(node)
+      if (t < 1) requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  }
+
   function applyDiff(diff: any) {
     activeTransition = null
 
@@ -601,28 +650,29 @@ export function useForceGraph(containerRef: Ref<HTMLElement | null>) {
       }
     }
 
+    const newNodes: InternalNode[] = []
     if (diff.added_nodes?.length) {
       const existing = new Set(internalNodes.map((n) => n.id))
       for (const n of diff.added_nodes) {
         if (!existing.has(n.id)) {
-          internalNodes.push(
-            buildInternalNode(
-              n,
-              resolveSpawnPosition(
-                n.id,
-                (diff.added_edges || []).map((edge: any) => ({
-                  id: edge.id,
-                  source: edge.source,
-                  target: edge.target,
-                  relation_type: edge.relation_type || 'unknown',
-                  weight: edge.weight || 0.5,
-                  direction: edge.direction || 'directed',
-                  status: edge.status || 'active',
-                })),
-                new Map(internalNodes.map((node) => [node.id, node])),
-              ),
+          const node = buildInternalNode(
+            n,
+            resolveSpawnPosition(
+              n.id,
+              (diff.added_edges || []).map((edge: any) => ({
+                id: edge.id,
+                source: edge.source,
+                target: edge.target,
+                relation_type: edge.relation_type || 'unknown',
+                weight: edge.weight || 0.5,
+                direction: edge.direction || 'directed',
+                status: edge.status || 'active',
+              })),
+              new Map(internalNodes.map((node) => [node.id, node])),
             ),
           )
+          internalNodes.push(node)
+          newNodes.push(node)
         }
       }
     }
@@ -676,10 +726,24 @@ export function useForceGraph(containerRef: Ref<HTMLElement | null>) {
     }
 
     syncGraphData({ reheat: true })
+
+    // Grow-in animation for new nodes
+    for (const node of newNodes) {
+      animateGrowIn(node)
+    }
+
+    // Stop thinking particles on first nodes
+    if (newNodes.length > 0) {
+      stopThinkingAnimation()
+    }
   }
 
   function setFullGraph(nodes: GraphNode[], edges: GraphEdge[]) {
     activeTransition = null
+
+    if (nodes.length > 0) {
+      stopThinkingAnimation()
+    }
 
     const nodeMap = new Map(internalNodes.map((node) => [node.id, node]))
 
@@ -715,6 +779,10 @@ export function useForceGraph(containerRef: Ref<HTMLElement | null>) {
     internalLinks.push(...nextLinks)
 
     syncGraphData({ reheat: true })
+
+    if (nodes.length === 0) {
+      restartThinkingAnimation()
+    }
   }
 
   function buildTransitionNodeFrameFromInternal(node: InternalNode, position?: Position): TransitionNodeFrame {
@@ -1069,12 +1137,25 @@ export function useForceGraph(containerRef: Ref<HTMLElement | null>) {
     },
   )
 
+  if (thinkingModeRef) {
+    watch(
+      () => thinkingModeRef.value,
+      () => {
+        if (internalNodes.length === 0) {
+          restartThinkingAnimation()
+        }
+      },
+    )
+  }
+
   onUnmounted(() => {
     resizeObserver?.disconnect()
+    stopThinkingAnimation()
     graph.value?._destructor?.()
     graph.value = null
     mountedContainer = null
     activeTransition = null
+    sceneRef = null
   })
 
   return {

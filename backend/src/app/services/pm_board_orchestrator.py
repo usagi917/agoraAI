@@ -8,6 +8,7 @@ import yaml
 
 from src.app.config import settings
 from src.app.llm.client import LLMClient
+from src.app.services.pipeline_fallbacks import build_pm_board_fallback, pm_board_has_substance
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ async def run_pm_board(
     simulation_id: str,
     prompt_text: str,
     document_text: str = "",
+    scenario_candidates: list[dict] | None = None,
 ) -> dict:
     """PM Board モードを実行する。
 
@@ -177,6 +179,22 @@ async def run_pm_board(
             "synthesis": synthesis,
             "usage": total_usage,
         }
+
+        if not pm_board_has_substance(output):
+            logger.warning(
+                "PM Board output was empty for simulation %s. Using fallback synthesis.",
+                simulation_id,
+            )
+            output = build_pm_board_fallback(
+                prompt_text=prompt_text,
+                scenario_candidates=scenario_candidates,
+                context_excerpt=document_text,
+                pm_analyses=[
+                    {"persona": r["persona"], "display_name": r["display_name"], "analysis": r["analysis"]}
+                    for r in successful_results
+                ],
+                usage=total_usage,
+            )
 
         await sse_manager.publish(simulation_id, "pm_board_completed", {
             "simulation_id": simulation_id,

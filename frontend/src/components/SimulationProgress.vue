@@ -4,6 +4,13 @@ import { useSimulationStore } from '../stores/simulationStore'
 
 const store = useSimulationStore()
 
+const pipelinePhases = [
+  { key: 'single', label: 'Stage 1: 因果推論' },
+  { key: 'swarm', label: 'Stage 2: 多視点検証' },
+  { key: 'pm_board', label: 'Stage 3: PM評価' },
+  { key: 'completed', label: '完了' },
+]
+
 const singlePhases = [
   { key: 'world_building', label: 'モデル構築' },
   { key: 'simulation', label: 'シミュレーション' },
@@ -25,18 +32,45 @@ const pmBoardPhases = [
 ]
 
 const phases = computed(() => {
+  if (store.isPipelineMode) return pipelinePhases
   if (store.mode === 'pm_board') return pmBoardPhases
-  if (store.isSwarmMode) return swarmPhases
+  if (store.mode === 'swarm' || store.mode === 'hybrid') return swarmPhases
   return singlePhases
 })
 
 const currentPhaseIndex = computed(() => {
+  if (store.isPipelineMode) {
+    const idx = pipelinePhases.findIndex(p => p.key === store.pipelineStage)
+    return idx >= 0 ? idx : 0
+  }
   const phase = store.phase
   const idx = phases.value.findIndex(p => p.key === phase || phase.startsWith(p.key))
   return idx >= 0 ? idx : 0
 })
 
 const progressPercent = computed(() => store.progress * 100)
+
+const progressInfo = computed(() => {
+  if (store.status === 'generating_report' && store.reportSections.length > 0) {
+    return `Report ${store.completedReportSections}/${store.reportSections.length}`
+  }
+  if (store.isPipelineMode) {
+    if (store.pipelineStage === 'single') {
+      return `Round ${store.currentRound}/${store.totalRounds || '?'}`
+    }
+    if (store.pipelineStage === 'swarm' && store.colonies.length > 0) {
+      return `${store.completedColonies}/${store.colonies.length} Colony`
+    }
+    if (store.pipelineStage === 'pm_board') {
+      return 'PM分析中'
+    }
+    return ''
+  }
+  if (store.mode === 'swarm' || store.mode === 'hybrid') {
+    return `${store.completedColonies}/${store.colonies.length} Colony`
+  }
+  return `Round ${store.currentRound}/${store.totalRounds || '?'}`
+})
 </script>
 
 <template>
@@ -62,12 +96,7 @@ const progressPercent = computed(() => store.progress * 100)
         <span class="status-dot"></span>
         {{ store.status }}
       </span>
-      <template v-if="!store.isSwarmMode">
-        <span class="progress-info">Round {{ store.currentRound }}/{{ store.totalRounds || '?' }}</span>
-      </template>
-      <template v-else>
-        <span class="progress-info">{{ store.completedColonies }}/{{ store.colonies.length }} Colony</span>
-      </template>
+      <span v-if="progressInfo" class="progress-info">{{ progressInfo }}</span>
     </div>
   </div>
 </template>
@@ -143,7 +172,9 @@ const progressPercent = computed(() => store.progress * 100)
   background: var(--text-muted);
 }
 
-.progress-status.running .status-dot {
+.progress-status.generating_report .status-dot,
+.progress-status.running .status-dot,
+.progress-status.connecting .status-dot {
   background: var(--accent);
   box-shadow: 0 0 6px var(--accent-glow);
   animation: pulse-dot 2s infinite;
@@ -157,4 +188,9 @@ const progressPercent = computed(() => store.progress * 100)
 .progress-status.failed .status-dot { background: var(--danger); }
 
 .progress-info { color: var(--text-muted); }
+
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.25); opacity: 0.65; }
+}
 </style>

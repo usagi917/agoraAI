@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import String, DateTime, Text, Integer, Float, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,4 +18,4 @@ class TimelineEvent(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     severity: Mapped[float] = mapped_column(Float, default=0.5)
     involved_entities: Mapped[dict] = mapped_column(JSON, default=list)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

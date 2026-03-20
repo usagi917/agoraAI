@@ -17,6 +17,7 @@ from src.app.models.relation import Relation
 from src.app.models.timeline_event import TimelineEvent
 from src.app.models.world_state import WorldState
 from src.app.services.cost_tracker import record_usage
+from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +49,11 @@ async def process_round(
     agents: dict,
     template_prompt: str,
     prompt_text: str = "",
+    sse_channel: str | None = None,
 ) -> dict:
     """1ラウンド分のシミュレーションを実行する。"""
+
+    channel = sse_channel or run_id
 
     # プロンプトサイズ縮小
     compact_state = {
@@ -122,6 +126,14 @@ async def process_round(
             involved_entities=event_data.get("involved_entities", []),
         )
         session.add(event)
+        await sse_manager.publish(channel, "timeline_event", {
+            "round": round_number,
+            "event_type": event_data.get("event_type", "unknown"),
+            "title": event_data.get("title", ""),
+            "description": event_data.get("description", ""),
+            "severity": float(event_data.get("severity", 0.5)),
+            "involved_entities": event_data.get("involved_entities", []),
+        })
 
     # 更新された world_state を保存
     updated_world_state = {

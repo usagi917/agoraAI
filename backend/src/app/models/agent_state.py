@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import String, DateTime, Text, Integer, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,4 +21,4 @@ class AgentState(Base):
     mental_models: Mapped[dict] = mapped_column(JSON, default=dict)
     action_taken: Mapped[str] = mapped_column(Text, default="")
     reasoning_chain: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))

@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +15,7 @@ from src.app.models.simulation import Simulation
 from src.app.services.simulator import run_simulation, PROFILE_ROUNDS
 from src.app.services.swarm_orchestrator import run_swarm
 from src.app.services.pm_board_orchestrator import run_pm_board
+from src.app.services.pipeline_orchestrator import run_pipeline
 from src.app.services.colony_factory import generate_colony_configs
 from src.app.sse.manager import sse_manager
 
@@ -33,7 +34,7 @@ async def dispatch_simulation(simulation_id: str) -> None:
                 return
 
             sim.status = "running"
-            sim.started_at = datetime.utcnow()
+            sim.started_at = datetime.now(timezone.utc)
             await session.commit()
 
             # プロジェクト確保（prompt_text のみの場合は自動生成）
@@ -41,7 +42,9 @@ async def dispatch_simulation(simulation_id: str) -> None:
             sim.project_id = project_id
             await session.commit()
 
-            if sim.mode == "single":
+            if sim.mode == "pipeline":
+                await run_pipeline(sim.id)
+            elif sim.mode == "single":
                 await _dispatch_single(session, sim)
             elif sim.mode in ("swarm", "hybrid"):
                 await _dispatch_swarm(session, sim)
@@ -115,7 +118,7 @@ async def _dispatch_single(session: AsyncSession, sim: Simulation) -> None:
         sim_refreshed = await session.get(Simulation, sim.id)
         if sim_refreshed:
             sim_refreshed.status = "completed"
-            sim_refreshed.completed_at = datetime.utcnow()
+            sim_refreshed.completed_at = datetime.now(timezone.utc)
             await session.commit()
 
         await sse_manager.publish(sim.id, "simulation_completed", {
@@ -168,7 +171,7 @@ async def _dispatch_swarm(session: AsyncSession, sim: Simulation) -> None:
         sim_refreshed = await session.get(Simulation, sim.id)
         if sim_refreshed:
             sim_refreshed.status = "completed"
-            sim_refreshed.completed_at = datetime.utcnow()
+            sim_refreshed.completed_at = datetime.now(timezone.utc)
             await session.commit()
 
         await sse_manager.publish(sim.id, "simulation_completed", {
@@ -202,7 +205,7 @@ async def _dispatch_pm_board(session: AsyncSession, sim: Simulation) -> None:
     sim_refreshed = await session.get(Simulation, sim.id)
     if sim_refreshed:
         sim_refreshed.status = "completed"
-        sim_refreshed.completed_at = datetime.utcnow()
+        sim_refreshed.completed_at = datetime.now(timezone.utc)
         sim_refreshed.metadata_json = pm_result
         await session.commit()
 

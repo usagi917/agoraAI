@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import String, DateTime, Integer, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
@@ -14,4 +14,4 @@ class WorldState(Base):
     run_id: Mapped[str] = mapped_column(String(36), ForeignKey("runs.id"))
     round_number: Mapped[int] = mapped_column(Integer, default=0)
     state_data: Mapped[dict] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
