@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
+  getHealth,
   getTemplates,
   listSimulations,
   createProject,
   uploadDocument,
   createSimulation,
+  type HealthResponse,
   type TemplateResponse,
   type SimulationListItem,
 } from '../api/client'
@@ -21,6 +23,8 @@ const promptText = ref('')
 const files = ref<File[]>([])
 const isLoading = ref(false)
 const recentSimulations = ref<SimulationListItem[]>([])
+const runtimeHealth = ref<HealthResponse | null>(null)
+const bootstrapError = ref('')
 
 const profiles = [
   { value: 'preview', label: 'Preview', desc: '高速確認', detail: '因果推論2R → 多視点3C → PM評価' },
@@ -28,16 +32,37 @@ const profiles = [
   { value: 'quality', label: 'Quality', desc: '詳細分析', detail: '因果推論6R → 多視点8C → PM評価' },
 ]
 
+const canLaunchLive = computed(() => {
+  if (bootstrapError.value) return false
+  return runtimeHealth.value?.live_simulation_available ?? false
+})
+const launchDisabled = computed(() => {
+  if (!canLaunchLive.value) return true
+  return (!promptText.value.trim() && files.value.length === 0) || isLoading.value
+})
+const launchLabel = computed(() => {
+  if (isLoading.value) return '起動中...'
+  if (!canLaunchLive.value) return 'ライブ実行は利用不可'
+  return 'シミュレーション実行'
+})
+
 onMounted(async () => {
-  const [tmpl, sims] = await Promise.all([getTemplates(), listSimulations()])
-  templates.value = tmpl
-  recentSimulations.value = sims
-  if (templates.value.length > 0) {
-    selectedTemplate.value = templates.value[0].name
+  try {
+    const [health, tmpl, sims] = await Promise.all([getHealth(), getTemplates(), listSimulations()])
+    runtimeHealth.value = health
+    templates.value = tmpl
+    recentSimulations.value = sims
+    if (templates.value.length > 0) {
+      selectedTemplate.value = templates.value[0].name
+    }
+  } catch (error) {
+    console.error('Bootstrap error:', error)
+    bootstrapError.value = 'バックエンドへの接続に失敗しました。コンテナ起動直後は数秒待って再読み込みしてください。'
   }
 })
 
 async function handleLaunch() {
+  if (!canLaunchLive.value) return
   if (!promptText.value.trim() && files.value.length === 0) return
   if (!selectedTemplate.value && files.value.length > 0) return
 
@@ -96,6 +121,16 @@ function getPipelineStageLabel(stage: string) {
     <section class="hero">
       <h2 class="hero-title">群生知能<br />シミュレーション</h2>
       <p class="hero-desc">プロンプトまたはドキュメントから世界モデルを構築し、因果推論・多視点検証・PM評価の3段階パイプラインで分析を実行します</p>
+    </section>
+
+    <section v-if="bootstrapError || (runtimeHealth && !runtimeHealth.live_simulation_available)" class="runtime-notice" :class="{ warning: runtimeHealth && !runtimeHealth.live_simulation_available, error: bootstrapError }">
+      <h3 class="section-title">{{ bootstrapError ? '接続待機中' : 'ライブ実行は未設定です' }}</h3>
+      <p class="runtime-copy">
+        {{ bootstrapError || runtimeHealth?.live_simulation_message }}
+      </p>
+      <p v-if="runtimeHealth && !runtimeHealth.live_simulation_available" class="runtime-hint">
+        `docker compose up --build` だけでサンプル結果は見られます。ライブ実行を有効にするには、`OPENAI_API_KEY` を `.env` またはシェル環境変数で渡してください。
+      </p>
     </section>
 
     <!-- Sample Results -->
@@ -188,11 +223,11 @@ function getPipelineStageLabel(stage: string) {
       <button
         class="btn btn-primary launch-button"
         :class="{ loading: isLoading }"
-        :disabled="(!promptText.trim() && files.length === 0) || isLoading"
+        :disabled="launchDisabled"
         @click="handleLaunch"
       >
         <span v-if="isLoading" class="spinner"></span>
-        {{ isLoading ? '起動中...' : 'シミュレーション実行' }}
+        {{ launchLabel }}
       </button>
     </section>
 
@@ -257,6 +292,36 @@ function getPipelineStageLabel(stage: string) {
   font-size: clamp(0.88rem, 0.4vw + 0.8rem, 0.98rem);
   color: var(--text-secondary);
   max-width: 42rem;
+}
+
+.runtime-notice {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--panel-padding);
+  background: var(--bg-card);
+}
+
+.runtime-notice.warning {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.runtime-notice.error {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.runtime-copy {
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.runtime-hint {
+  margin-top: 0.6rem;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  line-height: 1.6;
 }
 
 .section-header {

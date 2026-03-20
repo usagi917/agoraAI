@@ -4,7 +4,15 @@ import yaml
 from pydantic_settings import BaseSettings
 
 
-_project_root = Path(__file__).resolve().parents[3]
+def _resolve_project_root(start: Path | None = None) -> Path:
+    current = (start or Path(__file__)).resolve()
+    for candidate in current.parents:
+        if (candidate / "config").is_dir() and (candidate / "templates").is_dir():
+            return candidate
+    return current.parents[min(3, len(current.parents) - 1)]
+
+
+_project_root = _resolve_project_root()
 
 
 class Settings(BaseSettings):
@@ -17,6 +25,7 @@ class Settings(BaseSettings):
     config_dir: Path = _project_root / "config"
     templates_dir: Path = _project_root / "templates"
     data_dir: Path = _project_root / "data"
+    sample_results_dir: Path = _project_root / "sample_results"
 
     # Swarm settings
     max_concurrent_colonies: int = 5
@@ -35,6 +44,19 @@ class Settings(BaseSettings):
             with open(config_path) as f:
                 return yaml.safe_load(f)
         return {"default_model": self.llm_model, "tasks": {}}
+
+    def llm_provider(self) -> str:
+        return self.load_model_config().get("provider", "openai")
+
+    def live_simulation_available(self) -> bool:
+        return self.llm_provider() != "openai" or bool(self.openai_api_key)
+
+    def live_simulation_message(self) -> str:
+        if self.live_simulation_available():
+            return "Live simulation is available."
+        if self.llm_provider() == "openai":
+            return "OPENAI_API_KEY is not configured. Sample results are still available."
+        return f"LLM provider '{self.llm_provider()}' is not available."
 
     def load_graphrag_config(self) -> dict:
         config_path = self.config_dir / "graphrag.yaml"

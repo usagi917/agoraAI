@@ -41,14 +41,21 @@ Agent AI は FastAPI バックエンドと Vue 3 + Vite フロントエンドで
 Docker Compose で一式起動できます。
 
 ```bash
-cp .env.example .env
-# .env の OPENAI_API_KEY を設定
 docker compose up --build
 ```
 
 - アプリ: `http://localhost:3000`
 - FastAPI Docs: `http://localhost:8000/docs`
 - API キー不要のサンプル結果: `http://localhost:3000/sample/sample-business-001`, `http://localhost:3000/sample/sample-pmboard-001`
+- `OPENAI_API_KEY` 未設定でも起動できます。その場合はサンプル閲覧のみ有効で、ライブ実行ボタンは無効化されます
+
+ライブ実行も使う場合:
+
+```bash
+OPENAI_API_KEY=sk-... docker compose up --build
+```
+
+またはリポジトリ直下に `.env` を置いて `OPENAI_API_KEY=...` を設定してください。Docker Compose はシェル環境変数または `.env` を自動で拾います。
 
 `frontend` コンテナは静的ビルド済みアセットを Nginx で配信します。フロントエンドをホットリロードしながら触る場合は、次のローカル開発手順を使ってください。
 

@@ -1,9 +1,10 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import event, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, Session
 
 from src.app.config import settings
 
@@ -15,6 +16,27 @@ class Base(DeclarativeBase):
 # PostgreSQL uses asyncpg; SQLite uses aiosqlite (for local dev fallback)
 engine = create_async_engine(settings.database_url, echo=False)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+def utcnow_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _normalize_aware_datetime(value: object) -> object:
+    if isinstance(value, datetime) and value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+@event.listens_for(AsyncSession.sync_session_class, "before_flush")
+def _normalize_model_datetimes(session: Session, flush_context, instances) -> None:
+    for obj in set(session.new).union(session.dirty):
+        mapper = inspect(obj).mapper
+        for attr in mapper.column_attrs:
+            value = getattr(obj, attr.key, None)
+            normalized = _normalize_aware_datetime(value)
+            if normalized is not value:
+                setattr(obj, attr.key, normalized)
 
 
 def _ensure_sqlite_database_dir() -> None:

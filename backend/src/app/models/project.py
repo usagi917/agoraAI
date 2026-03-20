@@ -1,10 +1,10 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import String, DateTime, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.app.database import Base
+from src.app.database import Base, utcnow_naive
 
 
 class Project(Base):
@@ -14,8 +14,8 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str] = mapped_column(Text, default="")
     prompt_text: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     documents: Mapped[list["Document"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     runs: Mapped[list["Run"]] = relationship(back_populates="project", cascade="all, delete-orphan")

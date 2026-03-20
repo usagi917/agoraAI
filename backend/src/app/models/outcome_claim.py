@@ -1,10 +1,10 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import String, DateTime, Text, Float, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.app.database import Base
+from src.app.database import Base, utcnow_naive
 
 
 class OutcomeClaim(Base):
@@ -20,4 +20,4 @@ class OutcomeClaim(Base):
     entities_involved: Mapped[dict] = mapped_column(JSON, default=list)
     embedding: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     cluster_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("claim_clusters.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)

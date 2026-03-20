@@ -1,10 +1,10 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import String, DateTime, Text, Float, Integer, Boolean, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.app.database import Base
+from src.app.database import Base, utcnow_naive
 
 
 class MemoryEntry(Base):
@@ -23,4 +23,4 @@ class MemoryEntry(Base):
     is_reflection: Mapped[bool] = mapped_column(Boolean, default=False)
     reflection_level: Mapped[int] = mapped_column(Integer, default=0)
     source_memory_ids: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)

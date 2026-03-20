@@ -1,10 +1,10 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import String, DateTime, Text, Integer, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.app.database import Base
+from src.app.database import Base, utcnow_naive
 
 
 class Community(Base):
@@ -17,4 +17,4 @@ class Community(Base):
     member_node_ids: Mapped[dict] = mapped_column(JSON, default=list)
     parent_community_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     level: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)

@@ -1,10 +1,11 @@
+from datetime import datetime, timezone
 import uuid
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from src.app.database import _apply_sqlite_compatibility_migrations
+from src.app.database import _apply_sqlite_compatibility_migrations, _normalize_aware_datetime
 from src.app.models.project import Project
 
 
@@ -44,3 +45,12 @@ async def test_sqlite_compatibility_migration_adds_project_prompt_text(tmp_path)
         await session.commit()
 
     await engine.dispose()
+
+
+def test_normalize_aware_datetime_strips_timezone_for_db():
+    value = datetime(2026, 3, 20, 9, 0, tzinfo=timezone.utc)
+
+    normalized = _normalize_aware_datetime(value)
+
+    assert normalized == datetime(2026, 3, 20, 9, 0)
+    assert normalized.tzinfo is None

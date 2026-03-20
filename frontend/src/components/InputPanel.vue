@@ -32,8 +32,10 @@ function handleFileSelect(event: Event) {
   <div class="input-panel">
     <!-- Prompt textarea -->
     <div class="prompt-section">
-      <label class="input-label">分析プロンプト</label>
+      <label class="input-label" for="simulation-prompt">分析プロンプト</label>
       <textarea
+        id="simulation-prompt"
+        name="simulation-prompt"
         class="prompt-textarea"
         :value="modelValue"
         @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
@@ -44,10 +46,10 @@ function handleFileSelect(event: Event) {
 
     <!-- File drop zone -->
     <div class="file-section">
-      <label class="input-label">
+      <div class="input-label">
         データ入力
         <span v-if="files.length > 0" class="file-count">{{ files.length }} ファイル</span>
-      </label>
+      </div>
       <div
         class="upload-area"
         :class="{ 'drag-over': isDragOver, 'has-files': files.length > 0 }"
@@ -57,6 +59,7 @@ function handleFileSelect(event: Event) {
       >
         <input
           type="file"
+          name="sim-file-upload"
           multiple
           accept=".txt,.md,.pdf"
           @change="handleFileSelect"

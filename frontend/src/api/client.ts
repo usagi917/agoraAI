@@ -12,6 +12,14 @@ export interface TemplateResponse {
   category: string
 }
 
+export interface HealthResponse {
+  status: string
+  version: string
+  llm_provider: string
+  live_simulation_available: boolean
+  live_simulation_message: string
+}
+
 export async function createProject(name: string) {
   const { data } = await api.post(`/projects?name=${encodeURIComponent(name)}`)
   return data
@@ -26,6 +34,11 @@ export async function uploadDocument(projectId: string, file: File) {
 
 export async function getTemplates(): Promise<TemplateResponse[]> {
   const { data } = await api.get('/templates')
+  return data
+}
+
+export async function getHealth(): Promise<HealthResponse> {
+  const { data } = await api.get('/health')
   return data
 }
 

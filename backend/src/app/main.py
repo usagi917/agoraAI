@@ -71,4 +71,10 @@ app.include_router(api_router)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "0.1.0"}
+    return {
+        "status": "ok",
+        "version": "0.1.0",
+        "llm_provider": settings.llm_provider(),
+        "live_simulation_available": settings.live_simulation_available(),
+        "live_simulation_message": settings.live_simulation_message(),
+    }

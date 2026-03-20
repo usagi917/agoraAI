@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from src.app.config import Settings
+from src.app.config import Settings, _resolve_project_root
 
 
 def test_settings_defaults():
@@ -59,3 +59,37 @@ def test_load_cognitive_config_missing_file():
     )
     config = s.load_cognitive_config()
     assert config == {}
+
+
+def test_resolve_project_root_finds_repo_root(tmp_path):
+    repo_root = tmp_path / "repo"
+    target = repo_root / "backend" / "src" / "app" / "config.py"
+    (repo_root / "config").mkdir(parents=True)
+    (repo_root / "templates").mkdir(parents=True)
+    target.parent.mkdir(parents=True)
+    target.touch()
+
+    assert _resolve_project_root(target) == repo_root
+
+
+def test_live_simulation_unavailable_without_openai_key(monkeypatch):
+    monkeypatch.setattr(Settings, "load_model_config", lambda self: {"provider": "openai"})
+    s = Settings(
+        openai_api_key="",
+        _env_file=None,
+    )
+
+    assert s.llm_provider() == "openai"
+    assert s.live_simulation_available() is False
+    assert "OPENAI_API_KEY" in s.live_simulation_message()
+
+
+def test_live_simulation_available_for_non_openai_provider(monkeypatch):
+    monkeypatch.setattr(Settings, "load_model_config", lambda self: {"provider": "ollama"})
+    s = Settings(
+        openai_api_key="",
+        _env_file=None,
+    )
+
+    assert s.llm_provider() == "ollama"
+    assert s.live_simulation_available() is True

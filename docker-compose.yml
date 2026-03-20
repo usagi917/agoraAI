@@ -38,16 +38,30 @@ services:
       - ./config:/app/config
       - ./templates:/app/templates
       - ./data:/app/data
-    env_file:
-      - .env
+      - ./sample_results:/app/sample_results
     environment:
-      - DATABASE_URL=postgresql+asyncpg://agentai:agentai@postgres:5432/agentai
-      - REDIS_URL=redis://redis:6379/0
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o}
+      COGNITIVE_MODE: ${COGNITIVE_MODE:-advanced}
+      MAX_ACTIVE_AGENTS: ${MAX_ACTIVE_AGENTS:-100}
+      MAX_CONCURRENT_AGENTS: ${MAX_CONCURRENT_AGENTS:-30}
+      MAX_CONCURRENT_COLONIES: ${MAX_CONCURRENT_COLONIES:-5}
+      LLM_CACHE_TTL: ${LLM_CACHE_TTL:-3600}
+      DATABASE_URL: postgresql+asyncpg://agentai:agentai@postgres:5432/agentai
+      REDIS_URL: redis://redis:6379/0
+      BACKEND_HOST: 0.0.0.0
+      BACKEND_PORT: 8000
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,sys,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health')); sys.exit(0 if data.get('status') == 'ok' else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
 
   frontend:
     build:
@@ -56,7 +70,8 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   pgdata:

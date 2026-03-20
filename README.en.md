@@ -41,14 +41,21 @@ Default profile values are taken from `config/swarm_profiles.yaml`.
 Bring up the full stack with Docker Compose.
 
 ```bash
-cp .env.example .env
-# set OPENAI_API_KEY in .env
 docker compose up --build
 ```
 
 - App: `http://localhost:3000`
 - FastAPI docs: `http://localhost:8000/docs`
 - Built-in sample results without an API key: `http://localhost:3000/sample/sample-business-001`, `http://localhost:3000/sample/sample-pmboard-001`
+- The stack also starts without `OPENAI_API_KEY`. In that case sample browsing still works, but live simulation stays disabled in the UI
+
+To enable live simulation as well:
+
+```bash
+OPENAI_API_KEY=sk-... docker compose up --build
+```
+
+Or create a repo-local `.env` with `OPENAI_API_KEY=...`. Docker Compose automatically picks up either the shell environment or `.env`.
 
 The `frontend` container serves a static production-style bundle through Nginx. For hot-reload frontend work, use the local development flow below instead.
 

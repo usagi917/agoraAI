@@ -1,10 +1,10 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import String, DateTime, Text, Integer, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.app.database import Base
+from src.app.database import Base, utcnow_naive
 
 
 class Document(Base):
@@ -16,7 +16,7 @@ class Document(Base):
     content_type: Mapped[str] = mapped_column(String(50))
     text_content: Mapped[str] = mapped_column(Text, default="")
     char_count: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
 
     project: Mapped["Project"] = relationship(back_populates="documents")
 

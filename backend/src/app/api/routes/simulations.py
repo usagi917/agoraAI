@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import uuid
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -13,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
 from src.app.api.deps import get_session
+from src.app.config import settings
 from src.app.models.aggregation_result import AggregationResult
 from src.app.models.colony import Colony
 from src.app.models.graph_state import GraphState
@@ -64,6 +64,8 @@ async def create_simulation(
     valid_modes = ("pipeline", "single", "swarm", "hybrid", "pm_board")
     if body.mode not in valid_modes:
         raise HTTPException(status_code=400, detail=f"Invalid mode: {body.mode}")
+    if not settings.live_simulation_available():
+        raise HTTPException(status_code=400, detail=settings.live_simulation_message())
 
     sim = Simulation(
         id=str(uuid.uuid4()),
@@ -117,7 +119,7 @@ async def list_simulations(session: AsyncSession = Depends(get_session)):
     ]
 
 
-SAMPLE_RESULTS_DIR = Path(__file__).resolve().parents[5] / "sample_results"
+SAMPLE_RESULTS_DIR = settings.sample_results_dir
 
 
 @router.get("/samples")
