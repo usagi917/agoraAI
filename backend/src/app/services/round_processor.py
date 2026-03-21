@@ -7,6 +7,7 @@ import json
 import logging
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.llm.client import llm_client
@@ -14,12 +15,95 @@ from src.app.llm.prompts import ROUND_PROCESS_SYSTEM, ROUND_PROCESS_USER
 from src.app.llm.validator import validate_round_result
 from src.app.models.entity import Entity
 from src.app.models.relation import Relation
+from src.app.models.run import Run
 from src.app.models.timeline_event import TimelineEvent
 from src.app.models.world_state import WorldState
 from src.app.services.cost_tracker import record_usage
+from src.app.services.quality import build_evidence_bundle
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
+
+
+async def _resolve_project_id(session: AsyncSession, run_id: str) -> str | None:
+    result = await session.execute(select(Run.project_id).where(Run.id == run_id))
+    return result.scalar_one_or_none()
+
+
+def _select_salient_world_state(
+    world_state: dict,
+    *,
+    max_entities: int = 20,
+    max_relations: int = 24,
+) -> dict:
+    entities = sorted(
+        world_state.get("entities", []),
+        key=lambda entity: (
+            float(entity.get("importance_score", 0.0) or 0.0),
+            float(entity.get("activity_score", 0.0) or 0.0),
+        ),
+        reverse=True,
+    )[:max_entities]
+    selected_entity_ids = {entity.get("id") for entity in entities}
+
+    relations = sorted(
+        [
+            relation
+            for relation in world_state.get("relations", [])
+            if relation.get("source") in selected_entity_ids
+            or relation.get("target") in selected_entity_ids
+        ],
+        key=lambda relation: float(relation.get("weight", 0.0) or 0.0),
+        reverse=True,
+    )[:max_relations]
+
+    return {
+        "entities": [
+            {
+                "id": entity["id"],
+                "label": entity.get("label"),
+                "type": entity.get("entity_type"),
+                "importance": entity.get("importance_score"),
+                "stance": entity.get("stance"),
+                "activity": entity.get("activity_score"),
+                "status": entity.get("status"),
+            }
+            for entity in entities
+        ],
+        "relations": [
+            {
+                "source": relation["source"],
+                "target": relation["target"],
+                "type": relation.get("relation_type"),
+                "weight": relation.get("weight"),
+            }
+            for relation in relations
+        ],
+        "world_summary": world_state.get("world_summary", ""),
+    }
+
+
+def _select_salient_agents(agents: dict, *, max_agents: int = 12) -> dict:
+    selected_agents = sorted(
+        agents.get("agents", []),
+        key=lambda agent: (
+            len(agent.get("goals", []) or []),
+            len(agent.get("relationships", []) or []),
+        ),
+        reverse=True,
+    )[:max_agents]
+    return {
+        "agents": [
+            {
+                "id": agent["id"],
+                "name": agent.get("name"),
+                "role": agent.get("role"),
+                "goals": agent.get("goals", [])[:3],
+                "strategy": agent.get("strategy", ""),
+            }
+            for agent in selected_agents
+        ]
+    }
 
 
 async def process_round_advanced(
@@ -55,31 +139,34 @@ async def process_round(
 
     channel = sse_channel or run_id
 
-    # プロンプトサイズ縮小
-    compact_state = {
-        "entities": [
-            {"id": e["id"], "label": e.get("label"), "type": e.get("entity_type"),
-             "importance": e.get("importance_score"), "stance": e.get("stance")}
-            for e in world_state.get("entities", [])
-        ],
-        "relations": [
-            {"source": r["source"], "target": r["target"], "type": r.get("relation_type"),
-             "weight": r.get("weight")}
-            for r in world_state.get("relations", [])
-        ],
-    }
-    compact_agents = {
-        "agents": [
-            {"id": a["id"], "name": a.get("name"), "role": a.get("role"), "goals": a.get("goals", [])}
-            for a in agents.get("agents", [])
-        ]
-    }
+    compact_state = _select_salient_world_state(world_state)
+    compact_agents = _select_salient_agents(agents)
+    project_id = await _resolve_project_id(session, run_id)
+    evidence_bundle = await build_evidence_bundle(
+        session,
+        project_id,
+        prompt_text,
+        query_text="\n".join(
+            [
+                str(round_number),
+                template_prompt,
+                prompt_text,
+                compact_state.get("world_summary", ""),
+                " ".join(entity.get("label", "") for entity in compact_state.get("entities", [])[:8]),
+            ]
+        ),
+        max_documents=3,
+        max_document_chunks=2,
+        max_refs=6,
+        max_chars=6000,
+    )
     user_prompt = ROUND_PROCESS_USER.format(
         round_number=round_number,
         template_prompt=template_prompt,
         user_prompt=prompt_text or "（指示なし）",
-        world_state=json.dumps(compact_state, ensure_ascii=False)[:4000],
-        agents=json.dumps(compact_agents, ensure_ascii=False)[:2000],
+        world_state=json.dumps(compact_state, ensure_ascii=False),
+        agents=json.dumps(compact_agents, ensure_ascii=False),
+        evidence_context=evidence_bundle["context_text"] or "関連根拠なし",
     )
 
     result, usage = await llm_client.call_with_retry(

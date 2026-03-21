@@ -11,10 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.app.config import settings
 from src.app.database import init_db, async_session
 from src.app.api.routes import api_router
+from src.app.llm.client import validate_task_registry
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_task_registry()
     await init_db()
     await seed_templates()
     yield
@@ -60,7 +62,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

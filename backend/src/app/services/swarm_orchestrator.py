@@ -1,6 +1,7 @@
 """Swarm Orchestrator: N個の Colony を並列実行し、結果を統合する"""
 
 import asyncio
+import copy
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -27,6 +28,11 @@ from src.app.services.swarm_report_generator import generate_swarm_integrated_re
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
+
+
+def _clone_world_state(world_state: dict) -> dict:
+    """Colony ごとに完全に独立した world_state を生成する。"""
+    return copy.deepcopy(world_state)
 
 
 async def run_swarm(
@@ -380,7 +386,7 @@ async def _execute_single_colony(
         simulator = SingleRunSimulator(colony_config=config)
         result = await simulator.run(
             run_id=run_id,
-            world_state=dict(world_state),  # コピーして独立性を保つ
+            world_state=_clone_world_state(world_state),
             session=session,
             template_prompts=template_prompts,
             total_rounds=config.round_count,

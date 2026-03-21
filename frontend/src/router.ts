@@ -24,6 +24,11 @@ const router = createRouter({
       name: 'sample',
       component: () => import('./pages/SampleResultPage.vue'),
     },
+    {
+      path: '/populations',
+      name: 'populations',
+      component: () => import('./pages/PopulationPage.vue'),
+    },
     // === レガシーリダイレクト ===
     {
       path: '/run/:id',
@@ -47,5 +52,13 @@ const router = createRouter({
     },
   ],
 })
+
+if (import.meta.env.DEV) {
+  router.addRoute({
+    path: '/__e2e__/sse',
+    name: 'sse-probe',
+    component: () => import('./pages/SSEProbePage.vue'),
+  })
+}
 
 export default router

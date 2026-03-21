@@ -83,6 +83,7 @@ class SSEManager:
                     "run_completed", "run_failed",
                     "swarm_completed", "swarm_failed",
                     "pipeline_completed", "simulation_completed", "simulation_failed",
+                    "society_completed", "meeting_completed",
                 ):
                     break
         finally:

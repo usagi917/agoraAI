@@ -9,6 +9,9 @@ build/
 # Node
 node_modules/
 dist/
+.pnpm-store/
+playwright-report/
+frontend/test-results/
 
 # Environment
 .env
@@ -23,6 +26,7 @@ data/
 .idea/
 *.swp
 *.swo
+.coverage
 
 # OS
 .DS_Store

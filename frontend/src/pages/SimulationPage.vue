@@ -23,6 +23,8 @@ import type { ThinkingVisualMode } from '../composables/useThinkingParticles'
 import SimulationProgress from '../components/SimulationProgress.vue'
 import ColonyGrid from '../components/ColonyGrid.vue'
 import ActivityFeed from '../components/ActivityFeed.vue'
+import SocietyProgress from '../components/SocietyProgress.vue'
+import OpinionDistribution from '../components/OpinionDistribution.vue'
 
 const LIVE_SESSION_VERSION = 1
 
@@ -79,7 +81,18 @@ const thinkingMode = computed<ThinkingVisualMode>(() => {
 const { graph, setFullGraph, applyDiff: applyGraphDiff, resetCamera } = useForceGraph(graphCanvas, thinkingMode)
 
 const stageLabel = computed(() => {
+  if (store.isSocietyMode) {
+    switch (store.societyPhase) {
+      case 'population': return '人口生成中'
+      case 'selection': return 'エージェント選抜中'
+      case 'activation': return '活性化レイヤー実行中'
+      case 'evaluation': return '評価中'
+      case 'completed': return '完了'
+      default: return '準備中...'
+    }
+  }
   if (store.phase === 'graphrag') return 'GraphRAG 構築中'
+  if (store.phase === 'verification') return '検証中'
   if (store.phase === 'report' || store.status === 'generating_report') return 'レポート生成中'
   if (store.isPipelineMode) {
     switch (store.pipelineStage) {
@@ -112,6 +125,7 @@ const phaseOverlay = computed(() => {
 
   if (phase === 'graphrag') return { icon: '◈', label: 'GraphRAG 構築中...' }
   if (phase === 'world_building') return { icon: '◇', label: '世界モデル構築中...' }
+  if (phase === 'verification') return { icon: '◌', label: '出力を検証中...' }
   if (phase === 'simulation' && store.totalRounds > 0) {
     return { icon: '⟳', label: `Round ${store.currentRound}/${store.totalRounds} 推論中...` }
   }
@@ -133,11 +147,61 @@ const phaseOverlay = computed(() => {
 })
 
 const emptyState = computed(() => {
+  if (store.isSocietyMode) {
+    const phase = store.societyPhase
+    if (phase === 'population') {
+      return {
+        eyebrow: 'Population Generation',
+        title: '1,000人のデジタル住民を生成しています',
+        detail: '人口統計・性格・価値観を統計的にサンプリングし、社会ネットワークを構築中です。',
+      }
+    }
+    if (phase === 'selection') {
+      return {
+        eyebrow: 'Agent Selection',
+        title: 'テーマに関連する住民を選抜しています',
+        detail: 'ショック感応度と属性多様性に基づく層化抽出を実行中です。',
+      }
+    }
+    if (phase === 'activation') {
+      return {
+        eyebrow: 'Activation Layer',
+        title: '選抜された住民が意見を表明しています',
+        detail: '複数のLLMプロバイダを使って、各住民の立場・信頼度・理由を収集中です。',
+      }
+    }
+    if (phase === 'evaluation') {
+      return {
+        eyebrow: 'Evaluation',
+        title: 'シミュレーション品質を評価しています',
+        detail: '意見多様性・整合性・キャリブレーションスコアを計算中です。',
+      }
+    }
+    if (phase === 'meeting') {
+      return {
+        eyebrow: 'Meeting Layer',
+        title: '代表者と専門家が議論しています',
+        detail: '市民代表と専門家パネルによる構造化議論を実行中です。',
+      }
+    }
+    return {
+      eyebrow: 'Society Simulation',
+      title: '社会シミュレーションを準備しています',
+      detail: 'デジタル社会の初期化を進めています。',
+    }
+  }
   if (store.phase === 'graphrag') {
     return {
       eyebrow: 'Knowledge Extraction',
       title: 'GraphRAG が関係性を抽出しています',
       detail: '文書とプロンプトからエンティティとリンクを組み立てています。',
+    }
+  }
+  if (store.phase === 'verification') {
+    return {
+      eyebrow: 'Verification',
+      title: '生成結果を検証しています',
+      detail: 'セクション欠落、根拠不足、出力契約違反を独立フェーズで確認中です。',
     }
   }
   if (store.phase === 'report' || store.status === 'generating_report') {
@@ -379,6 +443,20 @@ async function hydrateLiveData(simulation: SimulationResponse) {
 async function bootstrapSimulation() {
   clearLiveSurface()
   const persisted = readPersistedLiveState(simId)
+  const e2eSimulation = (window as Window & {
+    __AGENT_AI_E2E_SIMULATION__?: SimulationResponse
+  }).__AGENT_AI_E2E_SIMULATION__
+
+  if (e2eSimulation) {
+    sim.value = e2eSimulation
+    applySimulationState(sim.value)
+    restorePersistedLiveState(persisted, sim.value)
+    startElapsedTimer(sim.value.started_at)
+    if (sim.value.status !== 'completed' && sim.value.status !== 'failed') {
+      sse.start()
+    }
+    return
+  }
 
   sim.value = await getSimulation(simId)
   applySimulationState(sim.value)
@@ -453,7 +531,8 @@ function goToResults() {
 <template>
   <div class="sim-page">
     <!-- Progress Pipeline -->
-    <SimulationProgress />
+    <SocietyProgress v-if="store.isSocietyMode" />
+    <SimulationProgress v-else />
 
     <!-- Status Bar -->
     <div class="status-bar">
@@ -481,6 +560,14 @@ function goToResults() {
 
     <div v-if="store.error" class="error-banner">
       {{ store.error }}
+    </div>
+
+    <!-- Society Opinion Distribution (inline) -->
+    <div v-if="store.isSocietyMode && Object.keys(store.opinionDistribution).length > 0" class="society-inline-panel">
+      <div class="panel-header">
+        <h3>意見分布</h3>
+      </div>
+      <OpinionDistribution :distribution="store.opinionDistribution" />
     </div>
 
     <!-- Main Layout -->
@@ -961,5 +1048,12 @@ function goToResults() {
     flex-wrap: wrap;
     gap: 0.35rem;
   }
+}
+
+.society-inline-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--panel-padding);
 }
 </style>

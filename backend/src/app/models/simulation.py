@@ -25,6 +25,7 @@ class Simulation(Base):
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
     run_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("runs.id"), nullable=True)
     swarm_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("swarms.id"), nullable=True)
+    population_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("populations.id"), nullable=True)
     pipeline_stage: Mapped[str] = mapped_column(String(20), default="pending")
     stage_progress: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)

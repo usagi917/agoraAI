@@ -1,0 +1,67 @@
+# レイヤー別LLMプロバイダ割当設定
+# Society モードで各レイヤーの住民にどのプロバイダを割り当てるかの重み
+
+activation_layer:
+  # 50-200人の軽量LLM呼び出し（コスト重視）
+  weights:
+    openai: 0.3
+    gemini: 0.5
+    anthropic: 0.2
+  temperature: 0.5
+  max_tokens: 1024
+
+meeting_layer:
+  # 5-10人のフルBDI議論（品質重視）
+  weights:
+    openai: 0.5
+    gemini: 0.2
+    anthropic: 0.3
+  temperature: 0.7
+  max_tokens: 4096
+
+# 人口生成パラメータ
+population:
+  default_size: 1000
+  min_size: 100
+  max_size: 10000
+
+  # 人口統計分布
+  demographics:
+    age:
+      distribution: normal
+      mean: 42
+      std: 15
+      min: 18
+      max: 85
+    gender:
+      distribution: categorical
+      weights: { male: 0.49, female: 0.49, other: 0.02 }
+    education:
+      distribution: categorical
+      weights:
+        high_school: 0.30
+        bachelor: 0.35
+        master: 0.20
+        doctorate: 0.05
+        vocational: 0.10
+    income_bracket:
+      distribution: categorical
+      weights:
+        low: 0.25
+        lower_middle: 0.25
+        upper_middle: 0.30
+        high: 0.15
+        very_high: 0.05
+
+  # Big Five パーソナリティ
+  big_five:
+    distribution: normal
+    mean: 0.5
+    std: 0.2
+
+  # 社会ネットワーク
+  network:
+    type: watts_strogatz
+    k: 6          # 各ノードの近傍接続数
+    beta: 0.3     # 再配線確率
+    cluster_by_attributes: true

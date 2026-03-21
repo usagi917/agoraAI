@@ -17,6 +17,19 @@ export function useSimulationSSE(simulationId: string) {
   let source: EventSource | null = null
 
   function start() {
+    const e2eEvents = (window as Window & {
+      __AGENT_AI_E2E_EVENTS__?: Array<{ eventType: string; payload: Record<string, any>; delayMs?: number }>
+    }).__AGENT_AI_E2E_EVENTS__
+    if (Array.isArray(e2eEvents) && e2eEvents.length > 0) {
+      for (const event of e2eEvents) {
+        window.setTimeout(() => {
+          ;(window as Window & { __AGENT_AI_E2E_LAST_EVENT__?: string }).__AGENT_AI_E2E_LAST_EVENT__ = event.eventType
+          handleEvent(event.eventType, event.payload)
+        }, event.delayMs ?? 0)
+      }
+      return
+    }
+
     const url = getSimulationStreamUrl(simulationId)
     source = new EventSource(url)
 
@@ -31,6 +44,8 @@ export function useSimulationSSE(simulationId: string) {
       'report_started',
       'report_section_done',
       'report_failed',
+      'verification_started',
+      'verification_completed',
       'run_completed',
       'run_failed',
       // Swarm モード
@@ -57,6 +72,19 @@ export function useSimulationSSE(simulationId: string) {
       // 統一イベント
       'simulation_completed',
       'simulation_failed',
+      // Society モード イベント
+      'society_started',
+      'population_status',
+      'society_selection_completed',
+      'society_activation_started',
+      'society_activation_progress',
+      'society_activation_completed',
+      'society_evaluation_completed',
+      'society_completed',
+      // Meeting Layer イベント
+      'meeting_started',
+      'meeting_round_completed',
+      'meeting_completed',
       // 認知シミュレーション イベント
       'graphrag_started',
       'graphrag_completed',
@@ -243,6 +271,31 @@ export function useSimulationSSE(simulationId: string) {
         })
         break
 
+      case 'verification_started':
+        store.setPhase('verification')
+        activity.addEntry('phase', '◌', `検証開始: ${payload.target || 'output'}`, {
+          detail: payload.scope || undefined,
+          track: 'report',
+          status: 'running',
+        })
+        break
+
+      case 'verification_completed':
+        activity.addEntry(
+          payload.status === 'passed' ? 'event' : 'error',
+          payload.status === 'passed' ? '✓' : '✗',
+          `検証完了: ${payload.target || 'output'}`,
+          {
+            detail: payload.status ? `${payload.status} / ${(Number(payload.score || 0) * 100).toFixed(0)}%` : undefined,
+            track: 'report',
+            status: payload.status === 'passed' ? 'completed' : 'failed',
+          },
+        )
+        if (store.status === 'generating_report') {
+          store.setPhase('report')
+        }
+        break
+
       case 'run_completed':
         // パイプラインモードでは run_completed は Stage 1 完了を意味する（全体完了ではない）
         if (!store.isPipelineMode) {
@@ -373,6 +426,112 @@ export function useSimulationSSE(simulationId: string) {
           store.setPhase('completed')
           close()
         }
+        break
+
+      // === Society モード ===
+      case 'society_started':
+        store.setStatus('running')
+        store.setSocietyPhase('population')
+        store.setPhase('society_population')
+        activity.addEntry('phase', '▶', 'Society シミュレーション開始', {
+          track: 'phase',
+          status: 'running',
+        })
+        break
+
+      case 'population_status':
+        if (payload.status === 'ready') {
+          store.setSocietyPhase('selection')
+          activity.addEntry('event', '◇', `人口生成完了 (${payload.agent_count}人)`, {
+            track: 'phase',
+            status: 'completed',
+          })
+        }
+        break
+
+      case 'society_selection_completed':
+        store.setSocietyPhase('activation')
+        store.setPhase('society_activation')
+        activity.addEntry('event', '◎', `${payload.selected_count}人を選抜`, {
+          detail: `${payload.total_population}人から${payload.selected_count}人を選出`,
+          track: 'agent',
+          status: 'completed',
+        })
+        break
+
+      case 'society_activation_started':
+        store.setSocietyPhase('activation')
+        activity.addEntry('phase', '⬡', `活性化開始 (${payload.agent_count}人)`, {
+          track: 'phase',
+          status: 'running',
+        })
+        break
+
+      case 'society_activation_progress':
+        store.setSocietyActivationProgress(payload.completed, payload.total)
+        break
+
+      case 'society_activation_completed':
+        store.setSocietyPhase('evaluation')
+        store.setPhase('society_evaluation')
+        if (payload.aggregation?.stance_distribution) {
+          store.setOpinionDistribution(payload.aggregation.stance_distribution)
+        }
+        activity.addEntry('event', '◎', '活性化完了', {
+          detail: `平均信頼度: ${(payload.aggregation?.average_confidence * 100)?.toFixed(1)}%`,
+          track: 'phase',
+          status: 'completed',
+        })
+        break
+
+      case 'society_evaluation_completed':
+        store.setEvaluationMetrics(payload.metrics || {})
+        activity.addEntry('event', '▣', '評価完了', {
+          track: 'phase',
+          status: 'completed',
+        })
+        break
+
+      case 'meeting_started':
+        store.setSocietyPhase('meeting')
+        store.setPhase('society_meeting')
+        activity.addEntry('phase', '◉', `Meeting 開始 (${payload.participant_count}人, ${payload.num_rounds}R)`, {
+          track: 'phase',
+          status: 'running',
+        })
+        break
+
+      case 'meeting_round_completed':
+        activity.addEntry('event', '◉', `Meeting Round ${payload.round}: ${payload.round_name}`, {
+          detail: `${payload.argument_count}件の発言`,
+          track: 'agent',
+          status: 'completed',
+        })
+        break
+
+      case 'meeting_completed':
+        activity.addEntry('event', '◉', 'Meeting 完了', {
+          track: 'phase',
+          status: 'completed',
+        })
+        break
+
+      case 'society_completed':
+        store.setStatus('completed')
+        store.setPhase('completed')
+        store.setSocietyPhase('completed')
+        store.setReportReady(true)
+        if (payload.aggregation?.stance_distribution) {
+          store.setOpinionDistribution(payload.aggregation.stance_distribution)
+        }
+        if (payload.evaluation) {
+          store.setEvaluationMetrics(payload.evaluation)
+        }
+        activity.addEntry('phase', '✓', 'Society シミュレーション完了', {
+          track: 'phase',
+          status: 'completed',
+        })
+        close()
         break
 
       // === 統一イベント ===

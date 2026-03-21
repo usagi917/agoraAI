@@ -17,11 +17,14 @@ _project_root = _resolve_project_root()
 
 class Settings(BaseSettings):
     openai_api_key: str = ""
+    google_api_key: str = ""
+    anthropic_api_key: str = ""
     llm_model: str = "gpt-4o"
     database_url: str = "postgresql+asyncpg://agentai:agentai@localhost:5432/agentai"
     redis_url: str = "redis://localhost:6379/0"
     backend_host: str = "0.0.0.0"
     backend_port: int = 8000
+    allowed_origins: str = ""
     config_dir: Path = _project_root / "config"
     templates_dir: Path = _project_root / "templates"
     data_dir: Path = _project_root / "data"
@@ -57,6 +60,12 @@ class Settings(BaseSettings):
         if self.llm_provider() == "openai":
             return "OPENAI_API_KEY is not configured. Sample results are still available."
         return f"LLM provider '{self.llm_provider()}' is not available."
+
+    def cors_origins(self) -> list[str]:
+        raw = (self.allowed_origins or "").strip()
+        if not raw:
+            return ["*"]
+        return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
     def load_graphrag_config(self) -> dict:
         config_path = self.config_dir / "graphrag.yaml"
@@ -95,6 +104,20 @@ class Settings(BaseSettings):
             with open(config_path) as f:
                 data = yaml.safe_load(f)
             return data.get("rate_limiting", {})
+        return {}
+
+    def load_llm_providers_config(self) -> dict:
+        config_path = self.config_dir / "llm_providers.yaml"
+        if config_path.exists():
+            with open(config_path) as f:
+                return yaml.safe_load(f) or {}
+        return {"providers": {}, "fallback_order": []}
+
+    def load_population_mix_config(self) -> dict:
+        config_path = self.config_dir / "population_mix.yaml"
+        if config_path.exists():
+            with open(config_path) as f:
+                return yaml.safe_load(f) or {}
         return {}
 
     @property

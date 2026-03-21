@@ -64,7 +64,7 @@ async def extract_claims(
 
         try:
             result, usage = await llm_client.call(
-                task_name="world_build",  # 高品質モデルを使用
+                task_name="claim_extract",
                 system_prompt=CLAIM_EXTRACT_SYSTEM_V2,
                 user_prompt=user_prompt,
                 response_format={"type": "json_object"},

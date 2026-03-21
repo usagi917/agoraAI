@@ -1,6 +1,6 @@
 """cost_tracker のコスト計算ロジックテスト"""
 
-from src.app.services.cost_tracker import COST_TABLE
+from src.app.services.cost_tracker import COST_TABLE, classify_task_phase
 
 
 def test_cost_table_known_models():
@@ -26,6 +26,13 @@ def test_nano_is_cheapest():
     gpt4o_cost = COST_TABLE["gpt-4o"]
     assert nano_cost["input"] < gpt4o_cost["input"]
     assert nano_cost["output"] < gpt4o_cost["output"]
+
+
+def test_classify_task_phase_groups_world_build_and_rounds():
+    assert classify_task_phase("world_build") == "world_build"
+    assert classify_task_phase("round_3") == "simulation_round"
+    assert classify_task_phase("pm_board_chief_pm") == "pm_board"
+    assert classify_task_phase("followup") == "followup"
 
 
 import pytest

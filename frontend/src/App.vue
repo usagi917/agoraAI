@@ -16,6 +16,9 @@
           <router-link to="/" class="nav-link" active-class="active">
             シミュレーション
           </router-link>
+          <router-link to="/populations" class="nav-link" active-class="active">
+            人口管理
+          </router-link>
         </nav>
       </div>
     </header>

@@ -12,11 +12,17 @@ import {
   type SimulationResponse,
   type ColonyResponse,
   type GraphSnapshot,
+  type EvidenceRef,
+  type QualitySummary,
+  type SimulationReportResponse,
+  type PMBoardReportResponse,
+  type RunConfig,
 } from '../api/client'
 import { useForceGraph } from '../composables/useForceGraph'
 import TemporalSlider from '../components/TemporalSlider.vue'
 import ProbabilityChart from '../components/ProbabilityChart.vue'
 import ScenarioCompare from '../components/ScenarioCompare.vue'
+import SocietyTimeline from '../components/SocietyTimeline.vue'
 import AgreementHeatmap from '../components/AgreementHeatmap.vue'
 import AgentMindView from '../components/AgentMindView.vue'
 import MemoryStreamViewer from '../components/MemoryStreamViewer.vue'
@@ -32,7 +38,7 @@ const simId = route.params.id as string
 const ROUND_DURATION_MS = 1200
 
 const sim = ref<SimulationResponse | null>(null)
-const report = ref<any>(null)
+const report = ref<SimulationReportResponse | null>(null)
 const error = ref('')
 const loading = ref(true)
 const graphContainer = ref<HTMLElement | null>(null)
@@ -43,7 +49,7 @@ const transitionProgress = ref(0)
 const isPlaying = ref(false)
 const colonies = ref<ColonyResponse[]>([])
 const cognitiveStore = useCognitiveStore()
-const activeTab = ref<'report' | 'scenarios' | 'pm_evaluation' | 'graph'>('report')
+const activeTab = ref<'report' | 'scenarios' | 'pm_evaluation' | 'graph' | 'society'>('report')
 const isCognitiveMode = computed(() => cognitiveStore.cognitiveMode === 'advanced')
 const cognitiveSubTab = ref<'mind' | 'memory' | 'evaluation' | 'tom' | 'social' | 'kg'>('mind')
 let playbackFrame: number | null = null
@@ -53,13 +59,16 @@ const { setFullGraph } = useForceGraph(graphContainer)
 
 // Follow-up
 const followupQuestion = ref('')
-const followupAnswers = ref<Array<{ question: string; answer: string; loading?: boolean }>>([])
+const followupAnswers = ref<Array<{ question: string; answer: string; loading?: boolean; evidenceRefs?: EvidenceRef[] }>>([])
 const isFollowupLoading = ref(false)
 const copyState = ref<'idle' | 'success' | 'error'>('idle')
 let copyStateTimer: number | null = null
 
 const isPipelineMode = computed(() => sim.value?.mode === 'pipeline')
-const hasScenarios = computed(() => report.value?.scenarios?.length > 0)
+const isSocietyMode = computed(() => sim.value?.mode === 'society')
+const societyResult = computed(() => sim.value?.metadata?.society_result || null)
+const meetingReport = computed(() => societyResult.value?.meeting || null)
+const hasScenarios = computed(() => (report.value?.scenarios?.length ?? 0) > 0)
 const hasPmBoard = computed(() => {
   if (isPipelineMode.value) return !!report.value?.pm_board
   return sim.value?.mode === 'pm_board' && report.value?.sections
@@ -70,13 +79,65 @@ const reportFailureMessage = computed(() => {
   return progress?.last_error || 'レポート生成に失敗しました。シナリオ結果は引き続き参照できます。'
 })
 const pmBoardData = computed(() => {
-  if (isPipelineMode.value) return report.value?.pm_board || null
-  return report.value
+  if (isPipelineMode.value && report.value?.type === 'pipeline') {
+    return report.value.pm_board || null
+  }
+  if (report.value?.type === 'pm_board') return report.value as PMBoardReportResponse
+  return null
+})
+const normalizedScenarios = computed(() => (
+  ((report.value?.type === 'pipeline' || report.value?.type === 'swarm')
+    ? report.value.scenarios || []
+    : []
+  ).map((s) => ({
+    description: s.description,
+    scenarioScore: s.scenario_score ?? s.probability ?? 0,
+    ci: s.ci ?? [0, 1],
+    supportRatio: s.support_ratio ?? s.agreement_ratio ?? 0,
+    modelConfidenceMean: s.model_confidence_mean ?? s.mean_confidence ?? 0,
+    supportingColonies: s.supporting_colonies ?? 0,
+    totalColonies: s.total_colonies ?? 0,
+    claimCount: s.claim_count ?? 0,
+    calibratedProbability: s.calibrated_probability ?? null,
+  }))
+))
+const reportQuality = computed<QualitySummary | null>(() => {
+  if (report.value?.quality) return report.value.quality
+  if (pmBoardData.value?.quality) return pmBoardData.value.quality
+  return null
+})
+const reportEvidenceRefs = computed<EvidenceRef[]>(() => report.value?.evidence_refs || [])
+const runConfig = computed<RunConfig | null>(() => {
+  if (report.value?.run_config) return report.value.run_config
+  if (pmBoardData.value?.run_config) return pmBoardData.value.run_config
+  return null
+})
+const verification = computed(() => report.value?.verification ?? pmBoardData.value?.verification ?? null)
+const reportQualityMessage = computed(() => {
+  const quality = reportQuality.value
+  if (!quality) return ''
+  if (quality.status === 'verified') return '文書根拠付きで出力されています。'
+  if (quality.status === 'unsupported') {
+    return quality.unsupported_reason || quality.fallback_reason || '品質基準を満たしていないため参考用途に限定してください。'
+  }
+  if (quality.trust_level === 'low_trust') {
+    return 'プロンプト入力のみを根拠にした低信頼の出力です。文書添付時より精度保証は弱くなります。'
+  }
+  return quality.fallback_reason || (quality as any).unsupported_reason || '品質基準を満たしていないため参考用途に限定してください。'
+})
+const evidenceSummary = computed(() => {
+  const quality = reportQuality.value
+  if (!quality) return ''
+  return `mode=${quality.evidence_mode || runConfig.value?.evidence_mode || 'prefer'} · document=${quality.document_refs_count ?? 0} · refs=${quality.evidence_refs_count}`
 })
 
 const reportText = computed(() => {
   if (typeof report.value?.content === 'string') return report.value.content
   return ''
+})
+const agreementMatrix = computed(() => {
+  if (!report.value?.agreement_matrix) return null
+  return report.value.agreement_matrix as { colony_ids: string[]; matrix: number[][] }
 })
 const canCopyReport = computed(() => reportText.value.trim().length > 0)
 const snapshotByRound = computed(() => new Map(graphSnapshots.value.map((snapshot) => [snapshot.round, snapshot])))
@@ -201,7 +262,9 @@ onMounted(async () => {
     }
 
     // デフォルトタブ設定
-    if (isPipelineMode.value) {
+    if (isSocietyMode.value) {
+      activeTab.value = 'society'
+    } else if (isPipelineMode.value) {
       activeTab.value = 'report'
     } else if (sim.value.mode === 'pm_board') {
       activeTab.value = 'pm_evaluation'
@@ -269,7 +332,11 @@ async function handleFollowup() {
 
   try {
     const result = await submitSimulationFollowup(simId, question)
-    followupAnswers.value[idx] = { question, answer: result.answer || '回答を生成中...' }
+    followupAnswers.value[idx] = {
+      question,
+      answer: result.answer || '回答を生成中...',
+      evidenceRefs: result.evidence_refs || [],
+    }
   } catch {
     followupAnswers.value[idx] = { question, answer: 'エラーが発生しました。' }
   } finally {
@@ -371,6 +438,43 @@ function renderMarkdown(content: string): string {
       <div v-if="reportFailureMessage" class="error-banner">
         {{ reportFailureMessage }}
       </div>
+      <div
+        v-if="reportQuality"
+        data-testid="quality-banner"
+        class="quality-banner"
+        :class="`quality-${reportQuality.status}`"
+      >
+        <strong>
+          {{
+            reportQuality.status === 'verified'
+              ? 'Verified'
+              : reportQuality.status === 'draft'
+                ? 'Draft'
+                : 'Unsupported'
+          }}
+        </strong>
+        <span>{{ reportQualityMessage }}</span>
+        <span v-if="evidenceSummary" class="quality-meta">{{ evidenceSummary }}</span>
+        <span v-if="verification" class="quality-meta">
+          verification={{ verification.status }} ({{ (verification.score * 100).toFixed(0) }}%)
+        </span>
+      </div>
+
+      <div v-if="reportEvidenceRefs.length" class="evidence-panel">
+        <div class="section-header">
+          <h3 class="section-title">Evidence</h3>
+          <span class="section-badge">{{ reportEvidenceRefs.length }} refs</span>
+        </div>
+        <div class="evidence-list">
+          <div v-for="ref in reportEvidenceRefs.slice(0, 6)" :key="`${ref.source_id}:${ref.char_start}`" class="evidence-card">
+            <div class="evidence-card-top">
+              <span class="evidence-label">{{ ref.label }}</span>
+              <span class="evidence-type">{{ ref.source_type }}</span>
+            </div>
+            <p class="evidence-excerpt">{{ ref.excerpt }}</p>
+          </div>
+        </div>
+      </div>
 
       <!-- Stats -->
       <div v-if="hasScenarios && report" class="stats-row">
@@ -418,6 +522,14 @@ function renderMarkdown(content: string): string {
           PM評価
         </button>
         <button
+          v-if="isSocietyMode"
+          class="tab-btn"
+          :class="{ active: activeTab === 'society' }"
+          @click="activeTab = 'society'"
+        >
+          Society 分析
+        </button>
+        <button
           class="tab-btn"
           :class="{ active: activeTab === 'graph' }"
           @click="activeTab = 'graph'"
@@ -429,6 +541,127 @@ function renderMarkdown(content: string): string {
       <div class="results-layout">
         <!-- Left: Main Content -->
         <div class="results-main">
+          <!-- Society tab -->
+          <div v-if="activeTab === 'society' && societyResult" class="tab-panel">
+            <div class="society-results">
+              <div class="society-section">
+                <h4 class="society-section-title">意見分布</h4>
+                <div class="society-stats-row">
+                  <span class="society-stat">
+                    <span class="society-stat-label">人口</span>
+                    <span class="society-stat-value">{{ societyResult.population_count?.toLocaleString() }}</span>
+                  </span>
+                  <span class="society-stat">
+                    <span class="society-stat-label">選抜</span>
+                    <span class="society-stat-value">{{ societyResult.selected_count }}</span>
+                  </span>
+                  <span class="society-stat">
+                    <span class="society-stat-label">平均信頼度</span>
+                    <span class="society-stat-value">{{ ((societyResult.aggregation?.average_confidence || 0) * 100).toFixed(1) }}%</span>
+                  </span>
+                </div>
+                <div v-if="societyResult.aggregation?.stance_distribution" class="society-distribution">
+                  <div
+                    v-for="(ratio, stance) in societyResult.aggregation.stance_distribution"
+                    :key="stance"
+                    class="society-bar-row"
+                  >
+                    <span class="society-bar-label">{{ stance }}</span>
+                    <div class="society-bar-track">
+                      <div class="society-bar-fill" :style="{ width: (Number(ratio) * 100) + '%' }" />
+                    </div>
+                    <span class="society-bar-value">{{ (Number(ratio) * 100).toFixed(1) }}%</span>
+                  </div>
+                </div>
+              </div>
+              <div v-if="societyResult.aggregation?.top_concerns?.length" class="society-section">
+                <h4 class="society-section-title">主要な懸念事項</h4>
+                <ul class="society-list">
+                  <li v-for="concern in societyResult.aggregation.top_concerns" :key="concern">{{ concern }}</li>
+                </ul>
+              </div>
+              <div v-if="societyResult.aggregation?.top_priorities?.length" class="society-section">
+                <h4 class="society-section-title">主要な優先事項</h4>
+                <ul class="society-list">
+                  <li v-for="priority in societyResult.aggregation.top_priorities" :key="priority">{{ priority }}</li>
+                </ul>
+              </div>
+              <div v-if="societyResult.evaluation" class="society-section">
+                <h4 class="society-section-title">評価メトリクス</h4>
+                <div class="society-metrics">
+                  <div v-for="(score, metric) in societyResult.evaluation" :key="metric" class="society-metric-card">
+                    <span class="society-metric-label">{{ metric }}</span>
+                    <span class="society-metric-score">{{ (Number(score) * 100).toFixed(1) }}%</span>
+                  </div>
+                </div>
+              </div>
+              <template v-if="meetingReport">
+                <div class="society-section">
+                  <h4 class="society-section-title">Meeting Layer: 構造化議論</h4>
+                  <p class="society-meeting-summary">{{ meetingReport.summary }}</p>
+                </div>
+                <div v-if="meetingReport.participants?.length" class="society-section">
+                  <h4 class="society-section-title">参加者</h4>
+                  <div class="society-participants-grid">
+                    <div v-for="(p, i) in meetingReport.participants" :key="i" class="society-participant-chip" :class="p.role">
+                      {{ p.display_name || p.expertise || '参加者' }}
+                      <span v-if="p.stance" class="participant-stance-tag">{{ p.stance }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="meetingReport.consensus_points?.length" class="society-section">
+                  <h4 class="society-section-title">合意点</h4>
+                  <ul class="society-list">
+                    <li v-for="point in meetingReport.consensus_points" :key="point">{{ point }}</li>
+                  </ul>
+                </div>
+                <div v-if="meetingReport.disagreement_points?.length" class="society-section">
+                  <h4 class="society-section-title">対立点</h4>
+                  <div v-for="(dp, i) in meetingReport.disagreement_points" :key="i" class="society-disagreement">
+                    <span class="disagreement-topic">{{ dp.topic }}</span>
+                    <div v-if="dp.positions" class="disagreement-positions">
+                      <span v-for="pos in dp.positions" :key="pos.participant" class="disagreement-pos">
+                        {{ pos.participant }}: {{ pos.position }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="meetingReport.scenarios?.length" class="society-section">
+                  <h4 class="society-section-title">シナリオ</h4>
+                  <div v-for="(sc, i) in meetingReport.scenarios" :key="i" class="society-scenario-card">
+                    <div class="scenario-name">{{ sc.name }}</div>
+                    <div class="scenario-desc">{{ sc.description }}</div>
+                    <div v-if="sc.probability" class="scenario-prob">確率: {{ (sc.probability * 100).toFixed(0) }}%</div>
+                  </div>
+                </div>
+                <div v-if="meetingReport.stance_shifts?.length" class="society-section">
+                  <h4 class="society-section-title">スタンス変化</h4>
+                  <div v-for="(shift, i) in meetingReport.stance_shifts" :key="i" class="society-shift">
+                    <span class="shift-name">{{ shift.participant }}</span>
+                    <span class="shift-flow">{{ shift.initial_position || shift.from }} &rarr; {{ shift.final_position || shift.to }}</span>
+                  </div>
+                </div>
+                <div v-if="meetingReport.recommendations?.length" class="society-section">
+                  <h4 class="society-section-title">提言</h4>
+                  <ul class="society-list">
+                    <li v-for="rec in meetingReport.recommendations" :key="rec">{{ rec }}</li>
+                  </ul>
+                </div>
+                <div v-if="meetingReport.overall_assessment" class="society-section">
+                  <h4 class="society-section-title">総合評価</h4>
+                  <p class="society-assessment">{{ meetingReport.overall_assessment }}</p>
+                </div>
+              </template>
+              <div class="society-section">
+                <h4 class="society-section-title">Society シミュレーション履歴</h4>
+                <SocietyTimeline
+                  :current-sim-id="simId"
+                  :population-id="societyResult?.population_id"
+                />
+              </div>
+            </div>
+          </div>
+
           <!-- Report tab -->
           <div v-if="activeTab === 'report'" class="tab-panel">
             <div v-if="reportText" class="report-panel">
@@ -451,34 +684,20 @@ function renderMarkdown(content: string): string {
               <div class="report-content" v-html="renderMarkdown(reportText)"></div>
             </div>
             <div v-else-if="hasScenarios && report?.scenarios">
-              <h3 class="content-title">シナリオ確率分布</h3>
-              <ProbabilityChart :scenarios="report.scenarios.map((s: any) => ({
-                description: s.description,
-                probability: s.probability,
-                ci: s.ci,
-                agreementRatio: s.agreement_ratio,
-              }))" />
+              <h3 class="content-title">シナリオスコア分布</h3>
+              <ProbabilityChart :scenarios="normalizedScenarios" />
             </div>
             <div v-else class="empty-state">レポートが見つかりません</div>
           </div>
 
           <!-- Scenarios tab -->
           <div v-if="activeTab === 'scenarios' && report?.scenarios" class="tab-panel">
-            <ScenarioCompare :scenarios="report.scenarios.map((s: any) => ({
-              description: s.description,
-              probability: s.probability,
-              ci: s.ci,
-              agreementRatio: s.agreement_ratio,
-              meanConfidence: s.mean_confidence,
-              supportingColonies: s.supporting_colonies,
-              totalColonies: s.total_colonies,
-              claimCount: s.claim_count,
-            }))" />
+            <ScenarioCompare :scenarios="normalizedScenarios" />
 
-            <div v-if="report?.agreement_matrix?.matrix?.length" class="mt-section">
+            <div v-if="agreementMatrix?.matrix?.length" class="mt-section">
               <h3 class="content-title">合意ヒートマップ</h3>
               <AgreementHeatmap
-                :matrix="report.agreement_matrix"
+                :matrix="agreementMatrix"
                 :colonies="colonies.map((c: any) => ({
                   id: c.id,
                   colonyIndex: c.colony_index,
@@ -495,13 +714,8 @@ function renderMarkdown(content: string): string {
             </div>
 
             <div class="mt-section">
-              <h3 class="content-title">確率分布チャート</h3>
-              <ProbabilityChart :scenarios="report.scenarios.map((s: any) => ({
-                description: s.description,
-                probability: s.probability,
-                ci: s.ci,
-                agreementRatio: s.agreement_ratio,
-              }))" />
+              <h3 class="content-title">スコア分布チャート</h3>
+              <ProbabilityChart :scenarios="normalizedScenarios" />
             </div>
           </div>
 
@@ -747,7 +961,12 @@ function renderMarkdown(content: string): string {
                   <div v-if="qa.loading" class="bubble-content">
                     <div class="typing-indicator"><span></span><span></span><span></span></div>
                   </div>
-                  <div v-else class="bubble-content">{{ qa.answer }}</div>
+                  <div v-else class="bubble-content">
+                    {{ qa.answer }}
+                    <div v-if="qa.evidenceRefs?.length" class="chat-evidence">
+                      根拠: {{ qa.evidenceRefs.map((ref) => ref.label).join(', ') }}
+                    </div>
+                  </div>
                 </div>
               </template>
             </div>
@@ -767,6 +986,21 @@ function renderMarkdown(content: string): string {
               >
                 &#8593;
               </button>
+            </div>
+          </div>
+
+          <div v-if="reportEvidenceRefs.length" class="side-card evidence-panel">
+            <div class="side-header">
+              <h3>根拠ソース</h3>
+            </div>
+            <div class="evidence-list">
+              <div v-for="(ref, idx) in reportEvidenceRefs" :key="`${ref.source_id}-${idx}`" class="evidence-item">
+                <strong>{{ ref.label }}</strong>
+                <span class="evidence-meta">
+                  {{ ref.source_type }} · {{ ref.char_start }}-{{ ref.char_end }}
+                </span>
+                <p>{{ ref.excerpt }}</p>
+              </div>
             </div>
           </div>
         </div>
@@ -819,6 +1053,19 @@ function renderMarkdown(content: string): string {
 .btn-ghost:hover { border-color: rgba(255,255,255,0.12); color: var(--text-primary); }
 
 .error-banner { padding: 0.75rem 1.25rem; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); border-radius: var(--radius-sm); color: var(--danger); font-size: 0.85rem; }
+.quality-banner { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; padding: 0.75rem 1.25rem; border-radius: var(--radius-sm); font-size: 0.82rem; border: 1px solid var(--border); }
+.quality-banner strong { font-family: var(--font-mono); font-size: 0.74rem; text-transform: uppercase; }
+.quality-meta { font-family: var(--font-mono); font-size: 0.7rem; opacity: 0.85; }
+.quality-verified { background: rgba(34,197,94,0.08); color: var(--success); border-color: rgba(34,197,94,0.2); }
+.quality-draft { background: rgba(245,158,11,0.08); color: #f59e0b; border-color: rgba(245,158,11,0.2); }
+.quality-unsupported { background: rgba(239,68,68,0.08); color: var(--danger); border-color: rgba(239,68,68,0.2); }
+.evidence-panel { display: flex; flex-direction: column; gap: 0.75rem; }
+.evidence-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; }
+.evidence-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.85rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.evidence-card-top { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+.evidence-label { font-size: 0.8rem; font-weight: 600; color: var(--text-primary); }
+.evidence-type { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; }
+.evidence-excerpt { font-size: 0.78rem; line-height: 1.6; color: var(--text-secondary); }
 
 .stats-row {
   display: grid;
@@ -905,6 +1152,7 @@ function renderMarkdown(content: string): string {
 .chat-bubble.user .bubble-content { background: var(--accent); color: white; border-radius: var(--radius-sm) var(--radius-sm) 2px var(--radius-sm); padding: 0.6rem 0.85rem; font-size: 0.82rem; max-width: 85%; }
 .chat-bubble.agent { align-items: flex-start; }
 .chat-bubble.agent .bubble-content { background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 2px var(--radius-sm) var(--radius-sm) var(--radius-sm); padding: 0.6rem 0.85rem; font-size: 0.82rem; line-height: 1.6; max-width: 85%; }
+.chat-evidence { margin-top: 0.45rem; font-size: 0.72rem; color: var(--text-muted); }
 .typing-indicator { display: flex; gap: 3px; padding: 0.2rem 0; }
 .typing-indicator span { width: 5px; height: 5px; border-radius: 50%; background: var(--text-muted); animation: typing-dot 1.4s ease-in-out infinite; }
 .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
@@ -912,8 +1160,13 @@ function renderMarkdown(content: string): string {
 .chat-input-area { display: flex; gap: 0.5rem; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
 .chat-input { flex: 1; padding: 0.55rem 0.85rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-family: var(--font-sans); font-size: 0.82rem; outline: none; }
 .chat-input:focus { border-color: var(--accent); }
+.evidence-meta { display: block; margin-top: 0.2rem; font-size: 0.68rem; color: var(--text-muted); font-family: var(--font-mono); }
 .chat-input::placeholder { color: var(--text-muted); }
 .chat-send { width: 36px; height: 36px; padding: 0; border-radius: 50%; font-size: 1rem; }
+.evidence-list { display: flex; flex-direction: column; gap: 0.6rem; }
+.evidence-item { padding: 0.7rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(255,255,255,0.02); }
+.evidence-item strong { display: block; margin-bottom: 0.25rem; font-size: 0.78rem; }
+.evidence-item p { font-size: 0.76rem; color: var(--text-secondary); line-height: 1.5; }
 
 .pm-board-result { display: flex; flex-direction: column; gap: 1.5rem; }
 .pm-section { }
@@ -1019,4 +1272,42 @@ function renderMarkdown(content: string): string {
     height: 40px;
   }
 }
+
+/* Society Results */
+.society-results { display: flex; flex-direction: column; gap: 1.5rem; }
+.society-section { display: flex; flex-direction: column; gap: 0.75rem; }
+.society-section-title { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); }
+.society-stats-row { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+.society-stat { display: flex; flex-direction: column; gap: 0.15rem; }
+.society-stat-label { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; }
+.society-stat-value { font-family: var(--font-mono); font-size: 1.2rem; font-weight: 700; color: var(--text-primary); }
+.society-distribution { display: flex; flex-direction: column; gap: 0.5rem; }
+.society-bar-row { display: flex; align-items: center; gap: 0.75rem; }
+.society-bar-label { width: 100px; font-size: 0.78rem; color: var(--text-secondary); text-align: right; flex-shrink: 0; }
+.society-bar-track { flex: 1; height: 20px; background: rgba(255,255,255,0.05); border-radius: 3px; overflow: hidden; }
+.society-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.6s ease; }
+.society-bar-value { width: 50px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-primary); font-weight: 600; }
+.society-list { margin: 0; padding-left: 1.2rem; font-size: 0.82rem; color: var(--text-secondary); line-height: 1.8; }
+.society-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; }
+.society-metric-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem; text-align: center; display: flex; flex-direction: column; gap: 0.25rem; }
+.society-metric-label { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; }
+.society-metric-score { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+.society-meeting-summary { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.7; }
+.society-participants-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.society-participant-chip { font-size: 0.78rem; padding: 0.3rem 0.6rem; border-radius: 999px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); display: flex; align-items: center; gap: 0.35rem; }
+.society-participant-chip.expert { border-color: rgba(99,102,241,0.3); color: var(--accent); }
+.society-participant-chip.citizen_representative { border-color: rgba(34,197,94,0.3); color: var(--success); }
+.participant-stance-tag { font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-muted); }
+.society-disagreement { margin-bottom: 0.5rem; }
+.disagreement-topic { font-size: 0.82rem; font-weight: 600; color: var(--text-primary); }
+.disagreement-positions { display: flex; flex-direction: column; gap: 0.2rem; margin-top: 0.25rem; }
+.disagreement-pos { font-size: 0.78rem; color: var(--text-secondary); }
+.society-scenario-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem; margin-bottom: 0.5rem; }
+.scenario-name { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.25rem; }
+.scenario-desc { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5; }
+.scenario-prob { font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent); margin-top: 0.25rem; }
+.society-shift { display: flex; align-items: center; gap: 0.75rem; font-size: 0.82rem; margin-bottom: 0.35rem; }
+.shift-name { font-weight: 600; }
+.shift-flow { font-family: var(--font-mono); color: var(--accent); }
+.society-assessment { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.7; }
 </style>

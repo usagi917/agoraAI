@@ -7,6 +7,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.llm.client import llm_client
@@ -14,13 +15,24 @@ from src.app.llm.prompts import WORLD_BUILD_SYSTEM, WORLD_BUILD_USER
 from src.app.llm.validator import validate_world_build
 from src.app.models.entity import Entity
 from src.app.models.relation import Relation
+from src.app.models.run import Run
 from src.app.models.world_state import WorldState
 from src.app.services.cost_tracker import record_usage
+from src.app.services.quality import build_evidence_bundle
+from src.app.services.verification import (
+    ensure_verification_passed,
+    verify_world_build_result,
+)
 
 if TYPE_CHECKING:
     from src.app.services.graphrag.pipeline import KnowledgeGraph
 
 logger = logging.getLogger(__name__)
+
+
+async def _resolve_project_id(session: AsyncSession, run_id: str) -> str | None:
+    result = await session.execute(select(Run.project_id).where(Run.id == run_id))
+    return result.scalar_one_or_none()
 
 
 async def build_world(
@@ -43,10 +55,24 @@ async def build_world(
             session, run_id, knowledge_graph, document_text, template_prompt, prompt_text,
         )
 
+    project_id = await _resolve_project_id(session, run_id)
+    evidence_bundle = await build_evidence_bundle(
+        session,
+        project_id,
+        prompt_text,
+        query_text="\n".join(part for part in [template_prompt, prompt_text] if part),
+        inline_document_text=document_text,
+        inline_document_label="Uploaded documents",
+        max_documents=4,
+        max_document_chunks=3,
+        max_refs=10,
+        max_chars=12000,
+    )
+
     user_prompt = WORLD_BUILD_USER.format(
         template_prompt=template_prompt,
         user_prompt=prompt_text or "（指示なし）",
-        document_text=document_text[:8000],  # トークン制限のため切り詰め
+        document_text=evidence_bundle["context_text"] or document_text,
     )
 
     result, usage = await llm_client.call_with_retry(
@@ -62,6 +88,11 @@ async def build_world(
     if not isinstance(result, dict):
         logger.error(f"World build returned non-dict: {str(result)[:200]}")
         raise ValueError(f"世界構築の LLM 応答が JSON ではありませんでした: {str(result)[:100]}")
+
+    verification = verify_world_build_result(result)
+    ensure_verification_passed(verification, context="world_build")
+    result["verification"] = verification
+    result["evidence_refs"] = evidence_bundle["evidence_refs"]
 
     # エンティティ保存
     entity_id_map = {}
@@ -112,6 +143,8 @@ async def build_world(
             "timeline": result.get("timeline", []),
             "world_summary": result.get("world_summary", ""),
             "entity_id_map": entity_id_map,
+            "verification": verification,
+            "evidence_refs": evidence_bundle["evidence_refs"],
         },
     )
     session.add(world_state)
@@ -137,6 +170,27 @@ async def _build_from_knowledge_graph(
     """GraphRAGのKGからworld_stateを構築する（8000文字制限なし）。"""
 
     kg_data = knowledge_graph.to_world_state_data()
+    project_id = await _resolve_project_id(session, run_id)
+    evidence_bundle = await build_evidence_bundle(
+        session,
+        project_id,
+        prompt_text,
+        query_text="\n".join(
+            part
+            for part in [
+                template_prompt,
+                prompt_text,
+                " ".join(entity["label"] for entity in kg_data["entities"][:12]),
+            ]
+            if part
+        ),
+        inline_document_text=document_text,
+        inline_document_label="Uploaded documents",
+        max_documents=4,
+        max_document_chunks=2,
+        max_refs=8,
+        max_chars=7000,
+    )
 
     # LLMで世界サマリーとタイムラインを生成（KGデータをコンテキストとして渡す）
     compact_entities = json.dumps(
@@ -157,7 +211,7 @@ async def _build_from_knowledge_graph(
             f"### エンティティ ({len(kg_data['entities'])}件)\n{compact_entities}\n\n"
             f"### 関係 ({len(kg_data['relations'])}件)\n{compact_relations}\n\n"
             f"### コミュニティ\n{community_info}\n\n"
-            f"## 原文（参照用）\n{document_text[:4000]}"
+            f"## 関連根拠\n{evidence_bundle['context_text'] or document_text}"
         ),
     )
 
@@ -173,6 +227,11 @@ async def _build_from_knowledge_graph(
 
     if not isinstance(result, dict):
         raise ValueError(f"GraphRAG世界構築のLLM応答がJSONではありませんでした: {str(result)[:100]}")
+
+    verification = verify_world_build_result(result)
+    ensure_verification_passed(verification, context="world_build_graphrag")
+    result["verification"] = verification
+    result["evidence_refs"] = evidence_bundle["evidence_refs"]
 
     # KGからのエンティティとLLM結果をマージ
     # LLM結果のエンティティをベースに、KGの追加情報を補完
@@ -231,6 +290,8 @@ async def _build_from_knowledge_graph(
             "world_summary": result.get("world_summary", ""),
             "entity_id_map": entity_id_map,
             "communities": kg_data.get("communities", []),
+            "verification": verification,
+            "evidence_refs": evidence_bundle["evidence_refs"],
         },
     )
     session.add(world_state)

@@ -10,11 +10,44 @@ import httpx
 
 from src.app.config import settings
 from src.app.llm.rate_limiter import RateLimiter
+from src.app.llm.validator import get_task_validator
 
 logger = logging.getLogger(__name__)
 
+REQUIRED_TASKS = {
+    "agent_generate",
+    "bdi_deliberate",
+    "bdi_execute",
+    "bdi_perceive",
+    "batch_conversation_respond",
+    "batch_reactive_process",
+    "causal_intervene",
+    "claim_extract",
+    "community_summary",
+    "debate_judge",
+    "entity_dedup",
+    "entity_extract",
+    "final_report",
+    "followup",
+    "gm_action_resolve",
+    "gm_consistency_check",
+    "memory_importance",
+    "negotiation",
+    "pm_board_chief_pm",
+    "pm_board_discovery_pm",
+    "pm_board_execution_pm",
+    "pm_board_strategy_pm",
+    "reflection",
+    "relation_extract",
+    "report_generate",
+    "round_process",
+    "self_critique",
+    "tom_infer",
+    "world_build",
+}
 
-def _extract_json(text: str) -> Optional[dict]:
+
+def _extract_json(text: str) -> Optional[Any]:
     """テキストから JSON を抽出する。thinking タグや markdown コードブロックに対応。"""
     # thinking タグを除去
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
@@ -48,12 +81,39 @@ def _extract_json(text: str) -> Optional[dict]:
 
 def _merge_usage(usage1: dict, usage2: dict) -> dict:
     """2回分の usage を合算する。"""
-    return {
+    merged = {
         "model": usage1["model"],
         "prompt_tokens": usage1["prompt_tokens"] + usage2["prompt_tokens"],
         "completion_tokens": usage1["completion_tokens"] + usage2["completion_tokens"],
         "total_tokens": usage1["total_tokens"] + usage2["total_tokens"],
     }
+    for key in ("retry_count", "validation_failures", "json_retries"):
+        merged[key] = int(usage1.get(key, 0) or 0) + int(usage2.get(key, 0) or 0)
+    merged["last_validation_error"] = (
+        str(usage2.get("last_validation_error") or "")
+        or str(usage1.get("last_validation_error") or "")
+    )
+    return merged
+
+
+def _annotate_usage(
+    usage: dict,
+    *,
+    retry_count: int = 0,
+    validation_failures: int = 0,
+    json_retries: int = 0,
+    last_validation_error: str = "",
+) -> dict:
+    annotated = dict(usage)
+    annotated["retry_count"] = retry_count
+    annotated["validation_failures"] = validation_failures
+    annotated["json_retries"] = json_retries
+    annotated["last_validation_error"] = last_validation_error
+    return annotated
+
+
+def _validation_error_summary(error: Exception) -> str:
+    return f"{type(error).__name__}: {str(error)[:300]}"
 
 
 class LLMClient:
@@ -73,7 +133,10 @@ class LLMClient:
         )
 
     def _get_task_config(self, task_name: str) -> dict:
-        return self.tasks.get(task_name, {})
+        config = self.tasks.get(task_name)
+        if config is None:
+            raise ValueError(f"LLM task '{task_name}' is not configured in config/models.yaml")
+        return config
 
     def _get_model_name(self, config: dict) -> str:
         """モデル名を取得（ollama/ プレフィックスがあれば除去）"""
@@ -265,11 +328,21 @@ class LLMClient:
         validate_fn: Optional[Callable] = None,
     ) -> tuple[Any, dict]:
         """LLM 呼び出し + validation 失敗時に1回 retry。"""
+        effective_validate_fn = validate_fn or get_task_validator(task_name)
+        retry_count = 0
+        validation_failures = 0
+        json_retries = 0
+        last_validation_error = ""
         result, usage = await self.call(task_name, system_prompt, user_prompt, response_format)
 
         # JSON パース失敗の場合はリトライ
         if not isinstance(result, dict):
-            logger.warning(f"Non-JSON result for {task_name}, retrying")
+            retry_count += 1
+            json_retries += 1
+            logger.warning(
+                "LLM JSON retry task=%s reason=non_json_initial_response",
+                task_name,
+            )
             retry_prompt = (
                 f"{user_prompt}\n\n"
                 "重要: 有効な JSON のみを出力してください。説明文やマークダウンは不要です。"
@@ -277,17 +350,36 @@ class LLMClient:
             result2, usage2 = await self.call(
                 task_name, system_prompt, retry_prompt, response_format
             )
-            if isinstance(result2, dict) and validate_fn:
-                validate_fn(result2)
-            return result2, _merge_usage(usage, usage2)
+            if isinstance(result2, dict) and effective_validate_fn:
+                effective_validate_fn(result2)
+            return result2, _annotate_usage(
+                _merge_usage(usage, usage2),
+                retry_count=retry_count,
+                validation_failures=validation_failures,
+                json_retries=json_retries,
+                last_validation_error=last_validation_error,
+            )
 
         # dict が返ってきた場合にバリデーション
-        if validate_fn:
+        if effective_validate_fn:
             try:
-                validate_fn(result)
-                return result, usage
+                effective_validate_fn(result)
+                return result, _annotate_usage(
+                    usage,
+                    retry_count=retry_count,
+                    validation_failures=validation_failures,
+                    json_retries=json_retries,
+                    last_validation_error=last_validation_error,
+                )
             except Exception as e:
-                logger.warning(f"Validation failed for {task_name}, retrying: {e}")
+                retry_count += 1
+                validation_failures += 1
+                last_validation_error = _validation_error_summary(e)
+                logger.warning(
+                    "LLM validation retry task=%s error=%s",
+                    task_name,
+                    last_validation_error,
+                )
                 retry_prompt = (
                     f"{user_prompt}\n\n"
                     f"前回の出力にバリデーションエラー: {e}\n"
@@ -296,11 +388,23 @@ class LLMClient:
                 result2, usage2 = await self.call(
                     task_name, system_prompt, retry_prompt, response_format
                 )
-                if isinstance(result2, dict) and validate_fn:
-                    validate_fn(result2)
-                return result2, _merge_usage(usage, usage2)
+                if isinstance(result2, dict) and effective_validate_fn:
+                    effective_validate_fn(result2)
+                return result2, _annotate_usage(
+                    _merge_usage(usage, usage2),
+                    retry_count=retry_count,
+                    validation_failures=validation_failures,
+                    json_retries=json_retries,
+                    last_validation_error=last_validation_error,
+                )
 
-        return result, usage
+        return result, _annotate_usage(
+            usage,
+            retry_count=retry_count,
+            validation_failures=validation_failures,
+            json_retries=json_retries,
+            last_validation_error=last_validation_error,
+        )
 
     async def call_batch(
         self,
@@ -333,3 +437,12 @@ class LLMClient:
 
 
 llm_client = LLMClient()
+
+
+def validate_task_registry() -> None:
+    config = settings.load_model_config()
+    tasks = set((config.get("tasks") or {}).keys())
+    missing = sorted(REQUIRED_TASKS - tasks)
+    if missing:
+        joined = ", ".join(missing)
+        raise RuntimeError(f"Missing required LLM task configuration(s): {joined}")

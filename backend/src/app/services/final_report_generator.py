@@ -5,13 +5,30 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.llm.client import LLMClient
 from src.app.models.report import Report
 from src.app.models.simulation import Simulation
 from src.app.services.pipeline_fallbacks import build_pipeline_report_fallback
+from src.app.services.quality import (
+    build_quality_summary,
+    build_section_detail,
+    collect_simulation_evidence_refs,
+    enforce_quality_gate,
+    merge_evidence_refs,
+    normalize_evidence_mode,
+)
 from src.app.services.simulation_live_state import update_report_progress
+from src.app.services.simulation_live_state import update_simulation_metadata
+from src.app.services.verification import (
+    ensure_verification_passed,
+    merge_verification_results,
+    verify_pm_board_result,
+    verify_report_content,
+    verify_scenarios,
+)
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -57,6 +74,8 @@ async def generate_final_report(
     single_result: dict,
     swarm_result: dict,
     pm_result: dict,
+    *,
+    evidence_mode: str = "prefer",
 ) -> str:
     """3段階の結果を統合してレポートを生成し、Report テーブルに保存する。"""
     logger.info(f"Generating final report for simulation {sim.id}")
@@ -72,6 +91,7 @@ async def generate_final_report(
         "推奨アクション",
         "結論",
     ]
+    normalized_evidence_mode = normalize_evidence_mode(evidence_mode)
 
     try:
         await sse_manager.publish(sim.id, "report_started", {
@@ -171,10 +191,44 @@ async def generate_final_report(
                 pm_result=pm_result,
             )
         completed_sections: list[str] = []
+        evidence_query_base = "\n".join(
+            filter(
+                None,
+                [
+                    sim.prompt_text,
+                    single_result.get("report_content", "")[:1200],
+                    swarm_result.get("integrated_report", "")[:1200],
+                    str(pm_result.get("sections", {}).get("core_question", "") or ""),
+                ],
+            )
+        )
+        section_details: dict[str, dict] = {}
+        all_evidence_refs: list[dict] = []
 
         # セクション完了をSSEで通知
         for i, section_name in enumerate(report_section_names):
             if f"## {section_name}" in final_content or f"# {section_name}" in final_content:
+                section_evidence_refs = await collect_simulation_evidence_refs(
+                    session,
+                    sim.project_id,
+                    sim.prompt_text,
+                    query_text=f"{section_name}\n{evidence_query_base}",
+                )
+                section_detail = build_section_detail(
+                    title=section_name,
+                    content="",
+                    evidence_refs=section_evidence_refs,
+                    fallback_used=used_fallback,
+                    fallback_reason="final_report_llm_output_empty" if used_fallback else "",
+                    evidence_mode=normalized_evidence_mode,
+                )
+                enforce_quality_gate(
+                    section_detail["quality"],
+                    evidence_mode=normalized_evidence_mode,
+                    context=f"pipeline final report section {section_name}",
+                )
+                section_details[section_name] = section_detail
+                all_evidence_refs = merge_evidence_refs(all_evidence_refs, section_evidence_refs)
                 await sse_manager.publish(sim.id, "report_section_done", {
                     "section": section_name,
                     "index": i,
@@ -187,48 +241,93 @@ async def generate_final_report(
                     completed_sections=completed_sections,
                 )
 
+        overall_quality = build_quality_summary(
+            fallback_used=used_fallback,
+            evidence_refs=all_evidence_refs,
+            fallback_reason="final_report_llm_output_empty" if used_fallback else "",
+            evidence_mode=normalized_evidence_mode,
+        )
+        enforce_quality_gate(
+            overall_quality,
+            evidence_mode=normalized_evidence_mode,
+            context="pipeline final report",
+        )
+        report_verification = verify_report_content(
+            final_content,
+            required_sections=report_section_names,
+            quality=overall_quality,
+        )
+        scenario_verification = verify_scenarios(swarm_result.get("aggregation", {}).get("scenarios", []))
+        pm_verification = (
+            dict(pm_result.get("verification") or {})
+            if isinstance(pm_result, dict) and isinstance(pm_result.get("verification"), dict)
+            else verify_pm_board_result(pm_result)
+        )
+        combined_verification = merge_verification_results(
+            {
+                "report": report_verification,
+                "scenarios": scenario_verification,
+                "pm_board": pm_verification,
+            }
+        )
+        ensure_verification_passed(combined_verification, context="pipeline final report")
+
         # Report テーブルに保存（run_id が必要なため、sim.run_id を使用）
         if sim.run_id:
-            from sqlalchemy import select
             existing = await session.execute(
                 select(Report).where(Report.run_id == sim.run_id)
             )
             report_record = existing.scalar_one_or_none()
+            report_sections = {
+                "type": "pipeline_final",
+                "generated_with_fallback": used_fallback,
+                "run_config": {
+                    "evidence_mode": normalized_evidence_mode,
+                    "trust_mode": "strict",
+                },
+                "quality": overall_quality,
+                "verification": combined_verification,
+                "section_details": section_details,
+                "evidence_refs": all_evidence_refs,
+                "single_report": single_result.get("report_content", "")[:2000],
+                "swarm_report": swarm_result.get("integrated_report", "")[:2000],
+                "pm_result": {
+                    "core_question": pm_result.get("sections", {}).get("core_question", ""),
+                    "overall_confidence": pm_result.get("overall_confidence", 0),
+                },
+            }
             if report_record:
                 # 既存レポートのコンテンツを統合レポートで更新
                 report_record.content = final_content
-                report_record.sections = {
-                    "type": "pipeline_final",
-                    "generated_with_fallback": used_fallback,
-                    "single_report": single_result.get("report_content", "")[:2000],
-                    "swarm_report": swarm_result.get("integrated_report", "")[:2000],
-                    "pm_result": {
-                        "core_question": pm_result.get("sections", {}).get("core_question", ""),
-                        "overall_confidence": pm_result.get("overall_confidence", 0),
-                    },
-                }
+                report_record.sections = report_sections
+                report_record.status = "completed_with_warnings" if used_fallback else "completed"
                 report_record.completed_at = datetime.now(timezone.utc)
             else:
                 report_record = Report(
                     id=str(uuid.uuid4()),
                     run_id=sim.run_id,
                     content=final_content,
-                    sections={
-                        "type": "pipeline_final",
-                        "generated_with_fallback": used_fallback,
-                        "single_report": single_result.get("report_content", "")[:2000],
-                        "swarm_report": swarm_result.get("integrated_report", "")[:2000],
-                        "pm_result": {
-                            "core_question": pm_result.get("sections", {}).get("core_question", ""),
-                            "overall_confidence": pm_result.get("overall_confidence", 0),
-                        },
-                    },
-                    status="completed",
+                    sections=report_sections,
+                    status="completed_with_warnings" if used_fallback else "completed",
                     completed_at=datetime.now(timezone.utc),
                 )
                 session.add(report_record)
 
-        await session.commit()
+            await session.commit()
+            await update_simulation_metadata(
+                session,
+                {
+                    "observability": {
+                        "pipeline_report": {
+                            "fallback_used": used_fallback,
+                            "quality_status": overall_quality["status"],
+                            "verification_status": combined_verification["status"],
+                            "verification_score": combined_verification["score"],
+                        },
+                    },
+                },
+                simulation_id=sim.id,
+            )
         await update_report_progress(
             session,
             simulation_id=sim.id,

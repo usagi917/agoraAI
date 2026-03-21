@@ -2,13 +2,27 @@
 
 import asyncio
 import logging
-from pathlib import Path
 
 import yaml
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.config import settings
 from src.app.llm.client import LLMClient
+from src.app.llm.validator import validate_pm_board_output
 from src.app.services.pipeline_fallbacks import build_pm_board_fallback, pm_board_has_substance
+from src.app.services.quality import (
+    build_quality_summary,
+    build_section_detail,
+    collect_simulation_evidence_refs,
+    enforce_quality_gate,
+    merge_evidence_refs,
+    normalize_evidence_mode,
+)
+from src.app.services.simulation_live_state import update_simulation_metadata
+from src.app.services.verification import (
+    ensure_verification_passed,
+    verify_pm_board_result,
+)
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -27,10 +41,14 @@ def _load_pm_template(persona_name: str) -> dict:
 
 
 async def run_pm_board(
+    session: AsyncSession,
     simulation_id: str,
     prompt_text: str,
     document_text: str = "",
     scenario_candidates: list[dict] | None = None,
+    *,
+    project_id: str | None = None,
+    evidence_mode: str = "prefer",
 ) -> dict:
     """PM Board モードを実行する。
 
@@ -40,6 +58,7 @@ async def run_pm_board(
     """
     logger.info(f"Starting PM Board for simulation {simulation_id}")
     llm = LLMClient()
+    normalized_evidence_mode = normalize_evidence_mode(evidence_mode)
 
     input_context = prompt_text
     if document_text:
@@ -179,6 +198,7 @@ async def run_pm_board(
             "synthesis": synthesis,
             "usage": total_usage,
         }
+        used_fallback = False
 
         if not pm_board_has_substance(output):
             logger.warning(
@@ -195,6 +215,74 @@ async def run_pm_board(
                 ],
                 usage=total_usage,
             )
+            used_fallback = True
+
+        output["run_config"] = {
+            "evidence_mode": normalized_evidence_mode,
+            "trust_mode": "strict",
+        }
+        section_evidence: dict[str, dict] = {}
+        all_evidence_refs: list[dict] = []
+        for section_name, section_value in output.get("sections", {}).items():
+            section_summary = _summarize_section(section_value)
+            section_refs = await collect_simulation_evidence_refs(
+                session,
+                project_id,
+                prompt_text,
+                query_text=f"{section_name}\n{section_summary}",
+            )
+            section_detail = build_section_detail(
+                title=section_name,
+                content=section_summary,
+                evidence_refs=section_refs,
+                fallback_used=used_fallback,
+                fallback_reason="pm_board_llm_output_empty" if used_fallback else "",
+                evidence_mode=normalized_evidence_mode,
+            )
+            section_evidence[section_name] = section_detail
+            enforce_quality_gate(
+                section_detail["quality"],
+                evidence_mode=normalized_evidence_mode,
+                context=f"pm_board section {section_name}",
+            )
+            all_evidence_refs = merge_evidence_refs(all_evidence_refs, section_refs)
+            output["sections"][section_name] = _annotate_section_value(
+                section_value,
+                section_refs,
+                normalized_evidence_mode,
+            )
+
+        output["section_evidence"] = section_evidence
+        output["evidence_refs"] = all_evidence_refs
+        output["quality"] = build_quality_summary(
+            fallback_used=used_fallback,
+            evidence_refs=all_evidence_refs,
+            fallback_reason="pm_board_llm_output_empty" if used_fallback else "",
+            evidence_mode=normalized_evidence_mode,
+        )
+        validate_pm_board_output(output)
+        enforce_quality_gate(
+            output["quality"],
+            evidence_mode=normalized_evidence_mode,
+            context="pm_board",
+        )
+        verification = verify_pm_board_result(output)
+        ensure_verification_passed(verification, context="pm_board")
+        output["verification"] = verification
+        await update_simulation_metadata(
+            session,
+            {
+                "observability": {
+                    "pm_board": {
+                        "fallback_used": used_fallback,
+                        "quality_status": output["quality"]["status"],
+                        "verification_status": verification["status"],
+                        "verification_score": verification["score"],
+                    },
+                },
+            },
+            simulation_id=simulation_id,
+        )
 
         await sse_manager.publish(simulation_id, "pm_board_completed", {
             "simulation_id": simulation_id,
@@ -224,3 +312,55 @@ def _safe_json_str(obj: dict) -> str:
         return json.dumps(obj, ensure_ascii=False, indent=2)
     except (TypeError, ValueError):
         return str(obj)
+
+
+def _summarize_section(value) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, dict):
+                parts.append(" / ".join(str(v) for v in item.values() if v))
+            else:
+                parts.append(str(item))
+        return "\n".join(part for part in parts if part)
+    if isinstance(value, dict):
+        return " / ".join(f"{k}: {v}" for k, v in value.items() if v)
+    return str(value or "")
+
+
+def _annotate_section_value(value, evidence_refs: list[dict], evidence_mode: str):
+    if isinstance(value, dict):
+        enriched = dict(value)
+        enriched.setdefault("evidence_refs", [dict(ref) for ref in evidence_refs])
+        enriched.setdefault(
+            "quality",
+            build_quality_summary(
+                fallback_used=False,
+                evidence_refs=evidence_refs,
+                evidence_mode=evidence_mode,
+            ),
+        )
+        return enriched
+
+    if isinstance(value, list):
+        annotated = []
+        for item in value:
+            if isinstance(item, dict):
+                enriched = dict(item)
+                enriched.setdefault("evidence_refs", [dict(ref) for ref in evidence_refs])
+                enriched.setdefault(
+                    "quality",
+                    build_quality_summary(
+                        fallback_used=False,
+                        evidence_refs=evidence_refs,
+                        evidence_mode=evidence_mode,
+                    ),
+                )
+                annotated.append(enriched)
+            else:
+                annotated.append(item)
+        return annotated
+
+    return value

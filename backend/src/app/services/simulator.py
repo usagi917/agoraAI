@@ -166,6 +166,7 @@ async def run_simulation(
     prompt_text: str = "",
     initial_world_state: dict | None = None,
     return_result: bool = False,
+    evidence_mode: str = "prefer",
 ) -> dict | None:
     """シミュレーション全体を実行する（後方互換エントリーポイント）。
 
@@ -290,8 +291,14 @@ async def run_simulation(
 
             report_sections = template_prompts.get("report_sections", None)
             await generate_report(
-                session, run_id, result["world_state"],
-                result["events"], result["agents"], report_sections,
+                session,
+                run_id,
+                result["world_state"],
+                result["events"],
+                result["agents"],
+                report_sections,
+                prompt_text=prompt_text,
+                evidence_mode=evidence_mode,
             )
             await session.commit()
 

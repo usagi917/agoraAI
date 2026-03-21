@@ -77,6 +77,10 @@ async def _apply_sqlite_compatibility_migrations(conn: AsyncConnection) -> None:
             await conn.execute(
                 text("ALTER TABLE simulations ADD COLUMN stage_progress TEXT DEFAULT '{}'")
             )
+        if "population_id" not in sim_columns:
+            await conn.execute(
+                text("ALTER TABLE simulations ADD COLUMN population_id VARCHAR(36)")
+            )
 
 
 async def init_db():

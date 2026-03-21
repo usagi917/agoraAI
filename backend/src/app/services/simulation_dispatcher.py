@@ -17,6 +17,8 @@ from src.app.services.swarm_orchestrator import run_swarm
 from src.app.services.pm_board_orchestrator import run_pm_board
 from src.app.services.pipeline_orchestrator import run_pipeline
 from src.app.services.colony_factory import generate_colony_configs
+from src.app.services.quality import extract_run_config, get_evidence_mode
+from src.app.services.society.society_orchestrator import run_society
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,8 @@ async def dispatch_simulation(simulation_id: str) -> None:
                 await _dispatch_swarm(session, sim)
             elif sim.mode == "pm_board":
                 await _dispatch_pm_board(session, sim)
+            elif sim.mode == "society":
+                await run_society(sim.id)
             else:
                 raise ValueError(f"Unknown mode: {sim.mode}")
 
@@ -97,6 +101,7 @@ async def _ensure_project(session: AsyncSession, sim: Simulation) -> str:
 async def _dispatch_single(session: AsyncSession, sim: Simulation) -> None:
     """Single モードの委譲: Run を作成して run_simulation() に委譲。"""
     total_rounds = PROFILE_ROUNDS.get(sim.execution_profile, 4)
+    run_config = extract_run_config(sim.metadata_json)
     run = Run(
         id=str(uuid.uuid4()),
         project_id=sim.project_id,
@@ -104,6 +109,7 @@ async def _dispatch_single(session: AsyncSession, sim: Simulation) -> None:
         execution_profile=sim.execution_profile,
         status="queued",
         total_rounds=total_rounds,
+        metadata_json={"run_config": run_config},
     )
     session.add(run)
     sim.run_id = run.id
@@ -113,7 +119,11 @@ async def _dispatch_single(session: AsyncSession, sim: Simulation) -> None:
     sse_manager.add_alias(run.id, sim.id)
 
     try:
-        await run_simulation(run.id, prompt_text=sim.prompt_text)
+        await run_simulation(
+            run.id,
+            prompt_text=sim.prompt_text,
+            evidence_mode=get_evidence_mode(sim.metadata_json),
+        )
 
         sim_refreshed = await session.get(Simulation, sim.id)
         if sim_refreshed:
@@ -196,9 +206,12 @@ async def _dispatch_pm_board(session: AsyncSession, sim: Simulation) -> None:
         document_text = "\n\n---\n\n".join(d.text_content for d in documents)
 
     pm_result = await run_pm_board(
+        session=session,
         simulation_id=sim.id,
         prompt_text=sim.prompt_text,
         document_text=document_text,
+        project_id=sim.project_id,
+        evidence_mode=get_evidence_mode(sim.metadata_json),
     )
 
     # 結果をメタデータに保存

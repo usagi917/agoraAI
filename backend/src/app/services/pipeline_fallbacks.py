@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from src.app.services.quality import build_quality_summary
+
 
 def _clean_text(value: str | None) -> str:
     text = (value or "").strip()
@@ -290,6 +292,11 @@ def build_pm_board_fallback(
             "context_excerpt": context_summary,
         },
         "usage": usage or {},
+        "quality": build_quality_summary(
+            fallback_used=True,
+            evidence_refs=[],
+            fallback_reason="pm_board_llm_output_empty",
+        ),
     }
 
 

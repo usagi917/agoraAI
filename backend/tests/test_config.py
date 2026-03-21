@@ -93,3 +93,21 @@ def test_live_simulation_available_for_non_openai_provider(monkeypatch):
 
     assert s.llm_provider() == "ollama"
     assert s.live_simulation_available() is True
+
+
+def test_cors_origins_defaults_to_wildcard():
+    s = Settings(
+        allowed_origins="",
+        _env_file=None,
+    )
+
+    assert s.cors_origins() == ["*"]
+
+
+def test_cors_origins_splits_csv():
+    s = Settings(
+        allowed_origins="https://a.example, https://b.example",
+        _env_file=None,
+    )
+
+    assert s.cors_origins() == ["https://a.example", "https://b.example"]

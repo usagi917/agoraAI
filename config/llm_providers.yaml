@@ -1,0 +1,48 @@
+# マルチLLMプロバイダ設定
+# Society モードで住民ごとに異なるLLMプロバイダを割り当てる
+
+providers:
+  openai:
+    type: openai
+    model: gpt-5-nano-2025-08-07
+    api_base: https://api.openai.com/v1
+    env_key: OPENAI_API_KEY
+    cost_per_1k_input: 0.00015
+    cost_per_1k_output: 0.0006
+    enabled: true
+    rate_limit:
+      rpm: 500
+      tpm: 200000
+      max_concurrent: 20
+
+  gemini:
+    type: openai  # Gemini は OpenAI互換エンドポイント
+    model: gemini-3.1-flash-lite-preview
+    api_base: https://generativelanguage.googleapis.com/v1beta/openai
+    env_key: GOOGLE_API_KEY
+    cost_per_1k_input: 0.0
+    cost_per_1k_output: 0.0
+    enabled: true
+    rate_limit:
+      rpm: 1000
+      tpm: 1000000
+      max_concurrent: 30
+
+  anthropic:
+    type: anthropic
+    model: claude-haiku-4-5-20251001
+    api_base: https://api.anthropic.com
+    env_key: ANTHROPIC_API_KEY
+    cost_per_1k_input: 0.0008
+    cost_per_1k_output: 0.004
+    enabled: true
+    rate_limit:
+      rpm: 500
+      tpm: 200000
+      max_concurrent: 20
+
+# フォールバック順序: 有効なプロバイダが使えない場合の代替
+fallback_order:
+  - openai
+  - gemini
+  - anthropic

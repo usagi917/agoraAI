@@ -8,6 +8,7 @@ from src.app.api.routes.stream import swarm_stream_router
 from src.app.api.routes.admin import router as admin_router
 from src.app.api.routes.swarms import router as swarms_router
 from src.app.api.routes.simulations import router as simulations_router
+from src.app.api.routes.society import router as society_router
 
 api_router = APIRouter()
 api_router.include_router(projects_router, prefix="/projects", tags=["projects"])
@@ -18,3 +19,4 @@ api_router.include_router(admin_router, prefix="/admin", tags=["admin"])
 api_router.include_router(swarms_router, prefix="/swarms", tags=["swarms"])
 api_router.include_router(swarm_stream_router, prefix="/swarms", tags=["swarm-stream"])
 api_router.include_router(simulations_router, prefix="/simulations", tags=["simulations"])
+api_router.include_router(society_router, prefix="/society", tags=["society"])

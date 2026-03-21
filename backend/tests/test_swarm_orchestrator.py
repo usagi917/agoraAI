@@ -2,6 +2,8 @@
 
 import pytest
 
+from src.app.services.swarm_orchestrator import _clone_world_state
+
 
 # -----------------------------------------------------------------------
 # additional_context の注入ロジック（_build_effective_prompt）
@@ -129,3 +131,17 @@ def test_partial_colony_failure_does_not_raise():
     successful_results = [{"colony_id": "c1"}]
     should_raise = len(successful_results) == 0
     assert should_raise is False
+
+
+def test_clone_world_state_is_deep_copy():
+    original = {
+        "entities": [{"id": "e1", "value": 1}],
+        "relations": [{"source": "e1", "target": "e2", "weight": 0.4}],
+    }
+    cloned = _clone_world_state(original)
+
+    cloned["entities"][0]["value"] = 99
+    cloned["relations"][0]["weight"] = 0.9
+
+    assert original["entities"][0]["value"] == 1
+    assert original["relations"][0]["weight"] == 0.4

@@ -48,24 +48,27 @@ async def aggregate_clusters(
 
         scenarios.append({
             "description": cluster["representative_text"],
-            "probability": round(raw_probability, 3),
+            "scenario_score": round(raw_probability, 3),
             "ci": [round(ci_low, 3), round(ci_high, 3)],
-            "agreement_ratio": round(agreement, 3),
-            "mean_confidence": round(confidence, 3),
+            "support_ratio": round(agreement, 3),
+            "model_confidence_mean": round(confidence, 3),
+            "calibrated_probability": None,
+            "calibration_version": None,
             "supporting_colonies": len(cluster.get("colony_ids", [])),
             "total_colonies": total_colonies,
             "claim_count": cluster["claim_count"],
             "cluster_id": cluster["cluster_id"],
+            "evidence_refs": [],
         })
 
     # 確率順にソート
-    scenarios.sort(key=lambda s: s["probability"], reverse=True)
+    scenarios.sort(key=lambda s: s["scenario_score"], reverse=True)
 
     # 多様性スコア (Colony 間の結果のばらつき)
     diversity_score = _compute_diversity_score(clusters, total_colonies)
 
     # シャノンエントロピー
-    probs = [s["probability"] for s in scenarios if s["probability"] > 0]
+    probs = [s["scenario_score"] for s in scenarios if s["scenario_score"] > 0]
     if probs:
         total = sum(probs)
         normalized = [p / total for p in probs]

@@ -19,12 +19,20 @@ const router = useRouter()
 const templates = ref<TemplateResponse[]>([])
 const selectedTemplate = ref('')
 const selectedProfile = ref('standard')
+const selectedMode = ref('pipeline')
 const promptText = ref('')
 const files = ref<File[]>([])
 const isLoading = ref(false)
 const recentSimulations = ref<SimulationListItem[]>([])
 const runtimeHealth = ref<HealthResponse | null>(null)
 const bootstrapError = ref('')
+
+const modes = [
+  { value: 'pipeline', label: 'Pipeline', desc: '3段階分析', detail: '因果推論 → 多視点 → PM評価' },
+  { value: 'society', label: 'Society', desc: '社会シミュレーション', detail: '1,000人の住民 → 選抜 → 活性化 → 評価', badge: 'Experimental' },
+  { value: 'single', label: 'Single', desc: '単一エージェント', detail: '因果推論のみ' },
+  { value: 'swarm', label: 'Swarm', desc: '多視点分析', detail: '複数コロニー並列実行' },
+]
 
 const profiles = [
   { value: 'preview', label: 'Preview', desc: '高速確認', detail: '因果推論2R → 多視点3C → PM評価' },
@@ -82,7 +90,9 @@ async function handleLaunch() {
       projectId,
       templateName: selectedTemplate.value,
       executionProfile: selectedProfile.value,
+      mode: selectedMode.value,
       promptText: promptText.value,
+      evidenceMode: 'strict',
     })
 
     router.push(`/sim/${sim.id}`)
@@ -172,6 +182,36 @@ function getPipelineStageLabel(stage: string) {
         :files="files"
         @update:files="files = $event"
       />
+      <p class="section-note">
+        既定では `strict evidence` で実行します。文書を添付すると `Verified` を満たしやすく、プロンプトのみの実行は `Unsupported` になることがあります。
+      </p>
+    </section>
+
+    <!-- Mode Selection -->
+    <section class="section">
+      <div class="section-header">
+        <h3 class="section-title">実行モード</h3>
+      </div>
+      <div class="profile-grid">
+        <div
+          v-for="m in modes"
+          :key="m.value"
+          class="profile-card"
+          :class="{ selected: selectedMode === m.value }"
+          :data-testid="`mode-card-${m.value}`"
+          @click="selectedMode = m.value"
+        >
+          <div class="mode-card-top">
+            <h4 class="profile-name">{{ m.label }}</h4>
+            <span v-if="m.badge" class="mode-badge">{{ m.badge }}</span>
+          </div>
+          <p class="profile-desc">{{ m.desc }}</p>
+          <span class="profile-detail">{{ m.detail }}</span>
+        </div>
+      </div>
+      <p v-if="selectedMode === 'society'" class="section-note section-note-warning">
+        `society` は experimental 扱いです。production 推奨導線は `pipeline` です。
+      </p>
     </section>
 
     <!-- Template Selection -->
@@ -221,6 +261,7 @@ function getPipelineStageLabel(stage: string) {
     <!-- Launch Button -->
     <section class="section launch-section">
       <button
+        data-testid="launch-button"
         class="btn btn-primary launch-button"
         :class="{ loading: isLoading }"
         :disabled="launchDisabled"
@@ -334,6 +375,8 @@ function getPipelineStageLabel(stage: string) {
 
 .section-title { font-size: 0.9rem; font-weight: 600; letter-spacing: -0.01em; }
 .section-badge { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); background: rgba(255,255,255,0.04); padding: 0.15rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); }
+.section-note { margin-top: 0.75rem; font-size: 0.78rem; color: var(--text-muted); line-height: 1.6; }
+.section-note-warning { color: #f59e0b; }
 
 .sample-desc {
   font-size: 0.82rem;
@@ -451,6 +494,8 @@ function getPipelineStageLabel(stage: string) {
 
 .profile-card:hover { border-color: rgba(255,255,255,0.12); }
 .profile-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.mode-card-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.25rem; }
+.mode-badge { font-family: var(--font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: #f59e0b; background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.24); border-radius: 999px; padding: 0.12rem 0.45rem; }
 .profile-name { font-family: var(--font-mono); font-size: 0.85rem; font-weight: 600; margin-bottom: 0.25rem; }
 .profile-desc { font-size: 0.8rem; color: var(--text-secondary); }
 .profile-detail { display: inline-block; margin-top: 0.5rem; font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); background: rgba(255,255,255,0.04); padding: 0.15rem 0.5rem; border-radius: 999px; }

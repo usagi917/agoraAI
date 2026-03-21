@@ -16,6 +16,7 @@ from src.app.services.swarm_orchestrator import run_swarm
 from src.app.services.pm_board_orchestrator import run_pm_board
 from src.app.services.colony_factory import generate_colony_configs
 from src.app.services.final_report_generator import generate_final_report
+from src.app.services.quality import extract_run_config, get_evidence_mode
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -106,9 +107,30 @@ async def run_pipeline(simulation_id: str) -> None:
                 sim_reporting.status = "generating_report"
                 await session.commit()
 
+            await sse_manager.publish(simulation_id, "verification_started", {
+                "scope": "pipeline",
+                "target": "final_report",
+            })
             await generate_final_report(
-                session, sim, single_result, swarm_result, pm_result,
+                session,
+                sim,
+                single_result,
+                swarm_result,
+                pm_result,
+                evidence_mode=get_evidence_mode(sim.metadata_json),
             )
+            sim_verified = await session.get(Simulation, simulation_id)
+            verification = (
+                dict((sim_verified.metadata_json or {}).get("observability", {}).get("pipeline_report", {}))
+                if sim_verified
+                else {}
+            )
+            await sse_manager.publish(simulation_id, "verification_completed", {
+                "scope": "pipeline",
+                "target": "final_report",
+                "status": verification.get("verification_status", "passed"),
+                "score": verification.get("verification_score", 1.0),
+            })
 
             # 完了
             sim_final = await session.get(Simulation, simulation_id)
@@ -170,6 +192,7 @@ async def _update_stage_progress(
 async def _run_stage_single(session: AsyncSession, sim: Simulation) -> dict:
     """Stage 1: Single モード実行。"""
     total_rounds = PIPELINE_SINGLE_ROUNDS.get(sim.execution_profile, 4)
+    run_config = extract_run_config(sim.metadata_json)
     run = Run(
         id=str(uuid.uuid4()),
         project_id=sim.project_id,
@@ -177,6 +200,7 @@ async def _run_stage_single(session: AsyncSession, sim: Simulation) -> dict:
         execution_profile=sim.execution_profile,
         status="queued",
         total_rounds=total_rounds,
+        metadata_json={"run_config": run_config},
     )
     session.add(run)
     sim_refreshed = await session.get(Simulation, sim.id)
@@ -192,6 +216,7 @@ async def _run_stage_single(session: AsyncSession, sim: Simulation) -> dict:
             run.id,
             prompt_text=sim.prompt_text,
             return_result=True,
+            evidence_mode=get_evidence_mode(sim.metadata_json),
         )
         return result or {}
     finally:
@@ -248,10 +273,13 @@ async def _run_stage_pm_board(
 ) -> dict:
     """Stage 3: PM Board モード実行。"""
     pm_result = await run_pm_board(
+        session=session,
         simulation_id=sim.id,
         prompt_text=sim.prompt_text,
         document_text=pm_context.get("document_text", ""),
         scenario_candidates=pm_context.get("scenarios", []),
+        project_id=sim.project_id,
+        evidence_mode=get_evidence_mode(sim.metadata_json),
     )
 
     # 結果をメタデータに保存

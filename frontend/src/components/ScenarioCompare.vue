@@ -1,10 +1,10 @@
 <script setup lang="ts">
 interface Scenario {
   description: string
-  probability: number
+  scenarioScore: number
   ci: [number, number]
-  agreementRatio: number
-  meanConfidence: number
+  supportRatio: number
+  modelConfidenceMean: number
   supportingColonies: number
   totalColonies: number
   claimCount: number
@@ -21,10 +21,10 @@ const props = defineProps<{
       <thead>
         <tr>
           <th>シナリオ</th>
-          <th>確率</th>
+          <th>スコア</th>
           <th>95% CI</th>
-          <th>合意率</th>
-          <th>信頼度</th>
+          <th>支持率</th>
+          <th>モデル信頼度</th>
           <th>Colony</th>
         </tr>
       </thead>
@@ -35,16 +35,16 @@ const props = defineProps<{
             {{ s.description }}
           </td>
           <td class="number-cell highlight">
-            {{ (s.probability * 100).toFixed(1) }}%
+            {{ (s.scenarioScore * 100).toFixed(1) }}%
           </td>
           <td class="number-cell">
             {{ (s.ci[0] * 100).toFixed(0) }}-{{ (s.ci[1] * 100).toFixed(0) }}%
           </td>
           <td class="number-cell">
-            {{ (s.agreementRatio * 100).toFixed(0) }}%
+            {{ (s.supportRatio * 100).toFixed(0) }}%
           </td>
           <td class="number-cell">
-            {{ (s.meanConfidence * 100).toFixed(0) }}%
+            {{ (s.modelConfidenceMean * 100).toFixed(0) }}%
           </td>
           <td class="number-cell">
             {{ s.supportingColonies }}/{{ s.totalColonies }}
@@ -57,7 +57,7 @@ const props = defineProps<{
       <article v-for="(s, i) in scenarios" :key="`card-${i}`" class="scenario-card">
         <div class="scenario-card-header">
           <span class="scenario-idx">S{{ i + 1 }}</span>
-          <span class="scenario-card-probability">{{ (s.probability * 100).toFixed(1) }}%</span>
+          <span class="scenario-card-probability">{{ (s.scenarioScore * 100).toFixed(1) }}%</span>
         </div>
         <p class="scenario-card-description">{{ s.description }}</p>
         <dl class="scenario-card-metrics">
@@ -66,12 +66,12 @@ const props = defineProps<{
             <dd>{{ (s.ci[0] * 100).toFixed(0) }}-{{ (s.ci[1] * 100).toFixed(0) }}%</dd>
           </div>
           <div class="metric-row">
-            <dt>合意率</dt>
-            <dd>{{ (s.agreementRatio * 100).toFixed(0) }}%</dd>
+            <dt>支持率</dt>
+            <dd>{{ (s.supportRatio * 100).toFixed(0) }}%</dd>
           </div>
           <div class="metric-row">
-            <dt>信頼度</dt>
-            <dd>{{ (s.meanConfidence * 100).toFixed(0) }}%</dd>
+            <dt>モデル信頼度</dt>
+            <dd>{{ (s.modelConfidenceMean * 100).toFixed(0) }}%</dd>
           </div>
           <div class="metric-row">
             <dt>Colony</dt>

@@ -3,22 +3,22 @@ import { computed } from 'vue'
 
 interface Scenario {
   description: string
-  probability: number
+  scenarioScore: number
   ci: [number, number]
-  agreementRatio?: number
+  supportRatio?: number
 }
 
 const props = defineProps<{
   scenarios: Scenario[]
 }>()
 
-const maxProbability = computed(() =>
-  Math.max(...props.scenarios.map(s => s.probability), 0.01)
+const maxScenarioScore = computed(() =>
+  Math.max(...props.scenarios.map(s => s.scenarioScore), 0.01)
 )
 
-const barColor = (prob: number) => {
-  if (prob >= 0.6) return 'var(--accent)'
-  if (prob >= 0.3) return 'var(--warning)'
+const barColor = (score: number) => {
+  if (score >= 0.6) return 'var(--accent)'
+  if (score >= 0.3) return 'var(--warning)'
   return 'var(--text-muted)'
 }
 </script>
@@ -48,18 +48,18 @@ const barColor = (prob: number) => {
           <div
             class="scenario-bar"
             :style="{
-              width: `${(scenario.probability / maxProbability) * 100}%`,
-              background: barColor(scenario.probability),
+              width: `${(scenario.scenarioScore / maxScenarioScore) * 100}%`,
+              background: barColor(scenario.scenarioScore),
             }"
           ></div>
         </div>
         <span class="probability-value">
-          {{ (scenario.probability * 100).toFixed(0) }}%
+          {{ (scenario.scenarioScore * 100).toFixed(0) }}%
         </span>
       </div>
-      <div class="scenario-meta" v-if="scenario.agreementRatio !== undefined">
-        <span class="agreement" title="Colony 間合意率">
-          合意 {{ (scenario.agreementRatio * 100).toFixed(0) }}%
+      <div class="scenario-meta" v-if="scenario.supportRatio !== undefined">
+        <span class="agreement" title="支持率">
+          支持 {{ (scenario.supportRatio * 100).toFixed(0) }}%
         </span>
       </div>
     </div>

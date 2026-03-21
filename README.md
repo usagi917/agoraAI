@@ -14,7 +14,7 @@
 
 Agent AI は FastAPI バックエンドと Vue 3 + Vite フロントエンドで構成されています。起動時に `templates/ja/*.yaml` を DB に自動シードし、入力プロンプトまたはアップロード文書をもとに世界モデルを構築します。ライブ実行中は SSE で進捗とグラフ差分を配信し、結果画面ではレポート、シナリオ分布、PM Board 評価、認知状態、タイムライン、3D グラフ履歴を確認できます。
 
-フロントエンドの通常起動導線は `pipeline` 固定です。API からは `single` / `swarm` / `hybrid` / `pm_board` を直接実行できます。
+フロントエンドの通常起動導線は `pipeline` 固定です。API からは `single` / `swarm` / `hybrid` / `pm_board` を直接実行できます。`society` は引き続き experimental 扱いで、production 推奨導線からは外しています。
 
 ### 実行モード
 
@@ -25,6 +25,7 @@ Agent AI は FastAPI バックエンドと Vue 3 + Vite フロントエンドで
 | `swarm` | 複数 Colony で多視点検証し、シナリオ分布と合意度を集約 |
 | `hybrid` | `swarm` と同じ統一 API で実行される多 Colony 系モード |
 | `pm_board` | PM ペルソナ群と Chief PM で事業・施策を評価 |
+| `society` | experimental。合成人口ベースの社会シミュレーション |
 
 ### 実行プロファイル
 
@@ -48,6 +49,7 @@ docker compose up --build
 - FastAPI Docs: `http://localhost:8000/docs`
 - API キー不要のサンプル結果: `http://localhost:3000/sample/sample-business-001`, `http://localhost:3000/sample/sample-pmboard-001`
 - `OPENAI_API_KEY` 未設定でも起動できます。その場合はサンプル閲覧のみ有効で、ライブ実行ボタンは無効化されます
+- LaunchPad からのライブ実行は既定で `strict evidence` を使います。文書なしの prompt-only 実行は `Unsupported` になることがあります
 
 ライブ実行も使う場合:
 
@@ -123,6 +125,10 @@ PostgreSQL を使いたくない場合は、`.env` の `DATABASE_URL` を SQLite
   Colony 群の並列実行と集約を担当
 - `backend/src/app/services/pm_board_orchestrator.py`
   PM ペルソナ分析と Chief PM 統合を担当
+- `backend/src/app/services/quality.py`
+  evidence bundle、quality gate、citation 付与を担当
+- `backend/src/app/services/verification.py`
+  world / report / PM Board / scenario の独立 verification を担当
 - `config/graphrag.yaml`
   既定で `enabled: true`。文書入力がある場合に GraphRAG パイプラインを有効化
 - `config/cognitive.yaml`
@@ -186,6 +192,7 @@ POST /simulations/{sim_id}/feedback
 POST /simulations/{sim_id}/rerun
 
 GET  /admin/costs
+GET  /admin/quality-metrics
 ```
 
 後方互換用に `/runs` と `/swarms` ルーターも残っていますが、新規利用は `/simulations` を推奨します。
@@ -217,9 +224,9 @@ uv run pytest
 ```bash
 cd frontend
 pnpm build
+pnpm test:unit
+pnpm test:e2e
 ```
-
-現状、専用のフロントエンドテストスイートは見当たらず、README 更新時点ではビルド確認が最小の検証手段です。
 
 ## プロジェクト構成
 

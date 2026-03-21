@@ -56,12 +56,19 @@ export const useSimulationStore = defineStore('simulation', () => {
   // Swarm/Hybrid モード状態
   const colonies = ref<ColonyState[]>([])
 
+  // Society モード状態
+  const societyPhase = ref<string>('idle') // idle | population | selection | activation | evaluation | completed
+  const opinionDistribution = ref<Record<string, number>>({})
+  const evaluationMetrics = ref<Record<string, number>>({})
+  const societyActivationProgress = ref<{ completed: number; total: number }>({ completed: 0, total: 0 })
+
   // 算出プロパティ
   const completedColonies = computed(() =>
     colonies.value.filter(c => c.status === 'completed').length,
   )
 
   const isPipelineMode = computed(() => mode.value === 'pipeline')
+  const isSocietyMode = computed(() => mode.value === 'society')
 
   const progress = computed(() => {
     if (status.value === 'completed') return 1
@@ -130,6 +137,10 @@ export const useSimulationStore = defineStore('simulation', () => {
     reportReady.value = false
     reportSections.value = []
     reportError.value = ''
+    societyPhase.value = 'idle'
+    opinionDistribution.value = {}
+    evaluationMetrics.value = {}
+    societyActivationProgress.value = { completed: 0, total: 0 }
   }
 
   function setReportReady(ready: boolean) {
@@ -241,6 +252,22 @@ export const useSimulationStore = defineStore('simulation', () => {
     colonies.value = colonyList
   }
 
+  function setSocietyPhase(p: string) {
+    societyPhase.value = p
+  }
+
+  function setOpinionDistribution(dist: Record<string, number>) {
+    opinionDistribution.value = dist
+  }
+
+  function setEvaluationMetrics(metrics: Record<string, number>) {
+    evaluationMetrics.value = metrics
+  }
+
+  function setSocietyActivationProgress(completed: number, total: number) {
+    societyActivationProgress.value = { completed, total }
+  }
+
   function updateColonyStatus(colonyId: string, newStatus: string, extra?: Partial<ColonyState>) {
     const colony = colonies.value.find(c => c.id === colonyId)
     if (colony) {
@@ -263,6 +290,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     colonies,
     completedColonies,
     isPipelineMode,
+    isSocietyMode,
     progress,
     reportReady,
     reportSections,
@@ -277,6 +305,14 @@ export const useSimulationStore = defineStore('simulation', () => {
     setStageProgress,
     setColonies,
     updateColonyStatus,
+    societyPhase,
+    opinionDistribution,
+    evaluationMetrics,
+    societyActivationProgress,
+    setSocietyPhase,
+    setOpinionDistribution,
+    setEvaluationMetrics,
+    setSocietyActivationProgress,
     setReportReady,
     setReportSections,
     setReportSectionsState,

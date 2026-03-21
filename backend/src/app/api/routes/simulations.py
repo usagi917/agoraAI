@@ -30,6 +30,16 @@ from src.app.services.pipeline_fallbacks import (
     build_pm_board_fallback,
     pm_board_has_substance,
 )
+from src.app.services.quality import (
+    build_quality_summary,
+    collect_simulation_evidence_refs,
+    extract_run_config,
+    extract_quality,
+    get_evidence_mode,
+    normalize_scenarios,
+    normalize_evidence_mode,
+    supports_evidence_mode,
+)
 from src.app.services.simulation_dispatcher import dispatch_simulation
 from src.app.services.simulator import PROFILE_ROUNDS
 from src.app.sse.manager import sse_manager
@@ -53,6 +63,7 @@ class SimulationCreate(BaseModel):
     execution_profile: str = "standard"
     mode: str = "pipeline"  # pipeline | single | swarm | hybrid | pm_board
     prompt_text: str = ""
+    evidence_mode: str = "prefer"  # strict | prefer | off (legacy aliases accepted)
 
 
 @router.post("")
@@ -61,9 +72,12 @@ async def create_simulation(
     session: AsyncSession = Depends(get_session),
 ):
     """Simulation を作成して実行を開始する。"""
-    valid_modes = ("pipeline", "single", "swarm", "hybrid", "pm_board")
+    valid_modes = ("pipeline", "single", "swarm", "hybrid", "pm_board", "society")
     if body.mode not in valid_modes:
         raise HTTPException(status_code=400, detail=f"Invalid mode: {body.mode}")
+    if not supports_evidence_mode(body.evidence_mode):
+        raise HTTPException(status_code=400, detail=f"Invalid evidence_mode: {body.evidence_mode}")
+    normalized_evidence_mode = normalize_evidence_mode(body.evidence_mode)
     if not settings.live_simulation_available():
         raise HTTPException(status_code=400, detail=settings.live_simulation_message())
 
@@ -75,6 +89,12 @@ async def create_simulation(
         template_name=body.template_name,
         execution_profile=body.execution_profile,
         status="queued",
+        metadata_json={
+            "run_config": {
+                "evidence_mode": normalized_evidence_mode,
+                "trust_mode": "strict",
+            }
+        },
     )
     session.add(sim)
     await session.commit()
@@ -89,6 +109,7 @@ async def create_simulation(
         "prompt_text": sim.prompt_text[:100],
         "template_name": sim.template_name,
         "execution_profile": sim.execution_profile,
+        "evidence_mode": normalized_evidence_mode,
         "created_at": sim.created_at.isoformat(),
     }
 
@@ -288,12 +309,24 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
     if not sim:
         raise HTTPException(status_code=404, detail="Simulation が見つかりません")
 
+    evidence_refs = await collect_simulation_evidence_refs(
+        session, sim.project_id, sim.prompt_text,
+    )
+    evidence_mode = get_evidence_mode(sim.metadata_json)
+    run_config = extract_run_config(sim.metadata_json)
+
     # Pipeline モード: Report (統合) + AggregationResult + PM Board
     if sim.mode == "pipeline":
-        response: dict = {"type": "pipeline"}
+        response: dict = {
+            "type": "pipeline",
+            "evidence_refs": evidence_refs,
+            "run_config": run_config,
+        }
         single_report = ""
         swarm_report = ""
         scenarios: list[dict] = []
+        fallback_used = False
+        fallback_reason = ""
 
         if sim.run_id:
             result = await session.execute(select(Report).where(Report.run_id == sim.run_id))
@@ -304,6 +337,12 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
                 response["status"] = report.status
                 response["sections"] = report.sections
                 response["content"] = report.content
+                if isinstance(report.sections, dict) and isinstance(report.sections.get("verification"), dict):
+                    response["verification"] = report.sections["verification"]
+                report_quality = extract_quality(report.sections)
+                if report_quality.get("fallback_used"):
+                    fallback_used = True
+                    fallback_reason = str(report_quality.get("fallback_reason", "") or "")
 
                 if isinstance(report.sections, dict):
                     single_report = (
@@ -319,12 +358,17 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
             )
             agg = result.scalar_one_or_none()
             if agg:
-                response["scenarios"] = agg.scenarios
+                normalized_scenarios = normalize_scenarios(
+                    agg.scenarios,
+                    evidence_refs=evidence_refs,
+                    evidence_mode=evidence_mode,
+                )
+                response["scenarios"] = normalized_scenarios
                 response["diversity_score"] = agg.diversity_score
                 response["entropy"] = agg.entropy
                 response["agreement_matrix"] = agg.colony_agreement_matrix
                 response["swarm_metadata"] = agg.metadata_json
-                scenarios = list(agg.scenarios or [])
+                scenarios = normalized_scenarios
                 if isinstance(agg.metadata_json, dict):
                     swarm_report = str(agg.metadata_json.get("integrated_report", "") or "").strip()
 
@@ -354,6 +398,12 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
                 scenario_candidates=scenarios,
                 context_excerpt="\n\n".join(filter(None, [single_report, swarm_report])),
             )
+            fallback_used = True
+            fallback_reason = "pm_board_fallback_used"
+        pm_quality = extract_quality(pm_board)
+        if pm_quality.get("fallback_used"):
+            fallback_used = True
+            fallback_reason = str(pm_quality.get("fallback_reason", "") or fallback_reason)
         response["pm_board"] = pm_board
 
         if not str(response.get("content", "") or "").strip():
@@ -369,6 +419,15 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
                 "generated_with_fallback": True,
             }
             response["status"] = response.get("status") or "completed"
+            fallback_used = True
+            fallback_reason = "pipeline_report_fallback_used"
+
+        response["quality"] = build_quality_summary(
+            fallback_used=fallback_used,
+            evidence_refs=evidence_refs,
+            fallback_reason=fallback_reason,
+            evidence_mode=evidence_mode,
+        )
 
         if response.get("content") or response.get("scenarios") or response.get("pm_board"):
             return response
@@ -378,6 +437,7 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
         report = result.scalar_one_or_none()
         if not report:
             raise HTTPException(status_code=404, detail="レポートが見つかりません")
+        report_quality = extract_quality(report.sections)
         return {
             "type": "single",
             "id": report.id,
@@ -385,6 +445,19 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
             "content": report.content,
             "sections": report.sections,
             "status": report.status,
+            "evidence_refs": evidence_refs,
+            "run_config": run_config,
+            "verification": (
+                dict(report.sections.get("verification"))
+                if isinstance(report.sections, dict) and isinstance(report.sections.get("verification"), dict)
+                else None
+            ),
+            "quality": build_quality_summary(
+                fallback_used=bool(report_quality.get("fallback_used", False)),
+                evidence_refs=evidence_refs,
+                fallback_reason=str(report_quality.get("fallback_reason", "") or ""),
+                evidence_mode=evidence_mode,
+            ),
         }
 
     if sim.swarm_id:
@@ -405,7 +478,11 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
         return {
             "type": "swarm",
             "swarm_id": sim.swarm_id,
-            "scenarios": agg.scenarios,
+            "scenarios": normalize_scenarios(
+                agg.scenarios,
+                evidence_refs=evidence_refs,
+                evidence_mode=evidence_mode,
+            ),
             "diversity_score": agg.diversity_score,
             "entropy": agg.entropy,
             "agreement_matrix": agg.colony_agreement_matrix,
@@ -420,11 +497,28 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
                 for c in colonies
             ],
             "metadata": agg.metadata_json,
+            "evidence_refs": evidence_refs,
+            "run_config": run_config,
+            "quality": build_quality_summary(
+                fallback_used=False,
+                evidence_refs=evidence_refs,
+                evidence_mode=evidence_mode,
+            ),
         }
 
     # PM Board モード: metadata_json に結果を保存
     if sim.mode == "pm_board" and sim.metadata_json:
-        return sim.metadata_json
+        pm_quality = extract_quality(sim.metadata_json)
+        response = dict(sim.metadata_json)
+        response["evidence_refs"] = evidence_refs
+        response["run_config"] = run_config
+        response["quality"] = build_quality_summary(
+            fallback_used=bool(pm_quality.get("fallback_used", False)),
+            evidence_refs=evidence_refs,
+            fallback_reason=str(pm_quality.get("fallback_reason", "") or ""),
+            evidence_mode=evidence_mode,
+        )
+        return response
 
     raise HTTPException(status_code=404, detail="レポートが見つかりません")
 
@@ -444,7 +538,14 @@ async def get_simulation_scenarios(sim_id: str, session: AsyncSession = Depends(
     agg = result.scalar_one_or_none()
     if not agg:
         raise HTTPException(status_code=404, detail="シナリオが見つかりません")
-    return agg.scenarios
+    evidence_refs = await collect_simulation_evidence_refs(
+        session, sim.project_id, sim.prompt_text,
+    )
+    return normalize_scenarios(
+        agg.scenarios,
+        evidence_refs=evidence_refs,
+        evidence_mode=get_evidence_mode(sim.metadata_json),
+    )
 
 
 @router.get("/{sim_id}/colonies")
@@ -550,14 +651,42 @@ async def create_simulation_followup(
                 session, run_id, question,
                 report.content, ws.state_data,
             )
+            evidence_refs = await collect_simulation_evidence_refs(
+                session,
+                sim.project_id,
+                sim.prompt_text,
+                query_text=question,
+            )
             followup.answer = answer
             followup.status = "completed"
             await session.commit()
-            return {"id": followup.id, "status": "completed", "answer": answer}
+            return {
+                "id": followup.id,
+                "status": "completed",
+                "answer": answer,
+                "evidence_refs": evidence_refs,
+                "run_config": extract_run_config(sim.metadata_json),
+                "quality": build_quality_summary(
+                    fallback_used=False,
+                    evidence_refs=evidence_refs,
+                    evidence_mode=get_evidence_mode(sim.metadata_json),
+                ),
+            }
     except Exception as e:
         logger.error(f"Followup generation failed: {e}")
 
-    return {"id": followup.id, "status": "pending"}
+    return {
+        "id": followup.id,
+        "status": "pending",
+        "evidence_refs": [],
+        "run_config": extract_run_config(sim.metadata_json),
+        "quality": build_quality_summary(
+            fallback_used=True,
+            evidence_refs=[],
+            fallback_reason="followup_generation_pending",
+            evidence_mode=get_evidence_mode(sim.metadata_json),
+        ),
+    }
 
 
 class FeedbackCreate(BaseModel):
@@ -607,6 +736,7 @@ async def rerun_simulation(sim_id: str, session: AsyncSession = Depends(get_sess
         template_name=original.template_name,
         execution_profile=original.execution_profile,
         status="queued",
+        metadata_json=dict(original.metadata_json or {}),
     )
     session.add(new_sim)
     await session.commit()
