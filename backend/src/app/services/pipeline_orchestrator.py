@@ -246,6 +246,9 @@ async def _run_stage_swarm(
         total_rounds=round_count,
     )
     session.add(swarm)
+    # swarm を先に INSERT してから simulation を更新する（FK制約対応）
+    await session.flush()
+
     sim_refreshed = await session.get(Simulation, sim.id)
     if sim_refreshed:
         sim_refreshed.swarm_id = swarm.id

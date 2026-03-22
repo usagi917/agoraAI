@@ -17,6 +17,8 @@ import {
   type SimulationReportResponse,
   type PMBoardReportResponse,
   type RunConfig,
+  type SocietyFirstReportResponse,
+  type SocietyFirstBacktestResponse,
 } from '../api/client'
 import { useForceGraph } from '../composables/useForceGraph'
 import TemporalSlider from '../components/TemporalSlider.vue'
@@ -30,7 +32,12 @@ import EvaluationDashboard from '../components/EvaluationDashboard.vue'
 import ToMMapVisualization from '../components/ToMMapVisualization.vue'
 import SocialNetworkDynamics from '../components/SocialNetworkDynamics.vue'
 import KnowledgeGraphExplorer from '../components/KnowledgeGraphExplorer.vue'
+import PeopleGraph from '../components/PeopleGraph.vue'
+import SimulationJourney from '../components/SimulationJourney.vue'
+import ConversationPanel from '../components/ConversationPanel.vue'
+import FindingsExplorer from '../components/FindingsExplorer.vue'
 import { useCognitiveStore } from '../stores/cognitiveStore'
+import { useSocietyStore } from '../stores/societyStore'
 
 const route = useRoute()
 const router = useRouter()
@@ -43,19 +50,28 @@ const error = ref('')
 const loading = ref(true)
 const graphContainer = ref<HTMLElement | null>(null)
 const graphSnapshots = ref<GraphSnapshot[]>([])
+const fallbackGraph = ref<{ nodes: any[]; edges: any[] } | null>(null)
 const currentRound = ref(0)
 const transitionTargetRound = ref<number | null>(null)
 const transitionProgress = ref(0)
 const isPlaying = ref(false)
 const colonies = ref<ColonyResponse[]>([])
 const cognitiveStore = useCognitiveStore()
+const societyStore = useSocietyStore()
 const activeTab = ref<'report' | 'scenarios' | 'pm_evaluation' | 'graph' | 'society'>('report')
+const societySubTab = ref<'overview' | 'people' | 'journey' | 'conversations' | 'findings' | 'raw'>('overview')
 const isCognitiveMode = computed(() => cognitiveStore.cognitiveMode === 'advanced')
 const cognitiveSubTab = ref<'mind' | 'memory' | 'evaluation' | 'tom' | 'social' | 'kg'>('mind')
 let playbackFrame: number | null = null
 let playbackStartedAt: number | null = null
 
-const { setFullGraph } = useForceGraph(graphContainer)
+const {
+  setFullGraph,
+  startGraphTransition,
+  updateGraphTransition,
+  finishGraphTransition,
+  graphError,
+} = useForceGraph(graphContainer)
 
 // Follow-up
 const followupQuestion = ref('')
@@ -65,9 +81,21 @@ const copyState = ref<'idle' | 'success' | 'error'>('idle')
 let copyStateTimer: number | null = null
 
 const isPipelineMode = computed(() => sim.value?.mode === 'pipeline')
-const isSocietyMode = computed(() => sim.value?.mode === 'society')
-const societyResult = computed(() => sim.value?.metadata?.society_result || null)
+const isSocietyMode = computed(() => sim.value?.mode === 'society' || sim.value?.mode === 'society_first')
+const societyFirstData = computed<SocietyFirstReportResponse | null>(() => (
+  report.value?.type === 'society_first' ? report.value as SocietyFirstReportResponse : null
+))
+const societyResult = computed(() => (
+  societyFirstData.value?.society_summary
+  || sim.value?.metadata?.society_result
+  || null
+))
 const meetingReport = computed(() => societyResult.value?.meeting || null)
+const societyIssueCandidates = computed(() => societyFirstData.value?.issue_candidates || [])
+const selectedSocietyIssues = computed(() => societyFirstData.value?.selected_issues || [])
+const societyIssueColonies = computed(() => societyFirstData.value?.issue_colonies || [])
+const societyInterventions = computed(() => societyFirstData.value?.intervention_comparison || [])
+const societyBacktest = computed<SocietyFirstBacktestResponse | null>(() => societyFirstData.value?.backtest || null)
 const hasScenarios = computed(() => (report.value?.scenarios?.length ?? 0) > 0)
 const hasPmBoard = computed(() => {
   if (isPipelineMode.value) return !!report.value?.pm_board
@@ -86,7 +114,7 @@ const pmBoardData = computed(() => {
   return null
 })
 const normalizedScenarios = computed(() => (
-  ((report.value?.type === 'pipeline' || report.value?.type === 'swarm')
+  ((report.value?.type === 'pipeline' || report.value?.type === 'swarm' || report.value?.type === 'society_first')
     ? report.value.scenarios || []
     : []
   ).map((s) => ({
@@ -141,10 +169,66 @@ const agreementMatrix = computed(() => {
 })
 const canCopyReport = computed(() => reportText.value.trim().length > 0)
 const snapshotByRound = computed(() => new Map(graphSnapshots.value.map((snapshot) => [snapshot.round, snapshot])))
+const displayedGraphData = computed(() => {
+  const activeRound = transitionTargetRound.value !== null && transitionProgress.value >= 0.5
+    ? transitionTargetRound.value
+    : currentRound.value
+  return snapshotByRound.value.get(activeRound) ?? fallbackGraph.value
+})
+const kgEntities = computed(() => (
+  (displayedGraphData.value?.nodes || []).map((node: any) => ({
+    id: String(node.id),
+    label: node.label || String(node.id),
+    type: node.type || 'unknown',
+    description: node.group ? `Group: ${node.group}` : `${node.type || 'unknown'} entity`,
+    community: node.group || undefined,
+    aliases: [],
+  }))
+))
+const kgRelations = computed(() => (
+  (displayedGraphData.value?.edges || []).map((edge: any) => ({
+    source: String(edge.source),
+    target: String(edge.target),
+    type: edge.relation_type || 'related_to',
+    confidence: Math.max(0, Math.min(Number(edge.weight ?? 0.5), 1)),
+  }))
+))
+const kgCommunities = computed(() => {
+  const groups = new Map<string, string[]>()
+  for (const node of displayedGraphData.value?.nodes || []) {
+    if (!node.group) continue
+    const members = groups.get(node.group) || []
+    members.push(node.label || String(node.id))
+    groups.set(node.group, members)
+  }
+  return Array.from(groups.entries()).map(([community, members]) => ({
+    community,
+    summary: `${members.length} entities`,
+    members,
+  }))
+})
 const sliderDisplayValue = computed(() => {
   if (transitionTargetRound.value === null) return currentRound.value
   return currentRound.value + transitionProgress.value
 })
+
+function formatPointDelta(value?: number | null) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return 'n/a'
+  return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}pt`
+}
+
+function backtestVerdictLabel(verdict?: string | null) {
+  if (verdict === 'hit') return 'Hit'
+  if (verdict === 'partial_hit') return 'Partial'
+  if (verdict === 'miss') return 'Miss'
+  return 'n/a'
+}
+
+function backtestVerdictClass(verdict?: string | null) {
+  if (verdict === 'hit') return 'verdict-hit'
+  if (verdict === 'partial_hit') return 'verdict-partial'
+  return 'verdict-miss'
+}
 
 const totalRounds = computed(() => {
   if (graphSnapshots.value.length === 0) return 0
@@ -198,12 +282,14 @@ function stepPlayback(timestamp: number) {
 
   const rawProgress = Math.min((timestamp - playbackStartedAt) / ROUND_DURATION_MS, 1)
   transitionProgress.value = rawProgress
+  updateGraphTransition(rawProgress)
 
   if (rawProgress < 1) {
     playbackFrame = requestAnimationFrame(stepPlayback)
     return
   }
 
+  finishGraphTransition()
   currentRound.value = transitionTargetRound.value
   resetTransitionState()
 
@@ -216,6 +302,7 @@ function stepPlayback(timestamp: number) {
 }
 
 function beginRoundTransition(fromRound: number) {
+  const fromSnapshot = snapshotByRound.value.get(fromRound)
   const toSnapshot = snapshotByRound.value.get(fromRound + 1)
   if (!toSnapshot) {
     stopPlayback(fromRound)
@@ -226,7 +313,11 @@ function beginRoundTransition(fromRound: number) {
   currentRound.value = fromRound
   transitionTargetRound.value = toSnapshot.round
   transitionProgress.value = 0
-  setFullGraph(toSnapshot.nodes, toSnapshot.edges)
+  if (fromSnapshot) {
+    startGraphTransition(fromSnapshot.nodes, fromSnapshot.edges, toSnapshot.nodes, toSnapshot.edges)
+  } else {
+    setFullGraph(toSnapshot.nodes, toSnapshot.edges)
+  }
   playbackFrame = requestAnimationFrame(stepPlayback)
 }
 
@@ -261,6 +352,13 @@ onMounted(async () => {
       }, 3000)
     }
 
+    // Society データの非同期ロード
+    if (isSocietyMode.value) {
+      societyStore.loadSocialGraph(simId).catch(() => {})
+      societyStore.loadConversations(simId).catch(() => {})
+      societyStore.loadNarrative(simId).catch(() => {})
+    }
+
     // デフォルトタブ設定
     if (isSocietyMode.value) {
       activeTab.value = 'society'
@@ -281,11 +379,13 @@ onMounted(async () => {
     if (graphHistory.length > 0) {
       const latest = graphHistory[graphHistory.length - 1]
       currentRound.value = latest.round
+      fallbackGraph.value = { nodes: latest.nodes, edges: latest.edges }
       await nextTick()
       setFullGraph(latest.nodes, latest.edges)
     } else {
       const graphData = await getSimulationGraph(simId).catch(() => null)
       if (graphData?.nodes?.length) {
+        fallbackGraph.value = { nodes: graphData.nodes, edges: graphData.edges }
         await nextTick()
         setFullGraph(graphData.nodes, graphData.edges)
       }
@@ -543,7 +643,28 @@ function renderMarkdown(content: string): string {
         <div class="results-main">
           <!-- Society tab -->
           <div v-if="activeTab === 'society' && societyResult" class="tab-panel">
-            <div class="society-results">
+            <!-- Society Sub-tabs -->
+            <div class="society-sub-tabs">
+              <button
+                v-for="tab in [
+                  { id: 'overview', label: 'Overview' },
+                  { id: 'people', label: 'People & Network' },
+                  { id: 'journey', label: 'Journey' },
+                  { id: 'conversations', label: 'Conversations' },
+                  { id: 'findings', label: 'Findings' },
+                  { id: 'raw', label: 'Raw Data' },
+                ]"
+                :key="tab.id"
+                class="society-sub-tab"
+                :class="{ active: societySubTab === tab.id }"
+                @click="societySubTab = tab.id as any"
+              >
+                {{ tab.label }}
+              </button>
+            </div>
+
+            <!-- Overview Sub-tab -->
+            <div v-if="societySubTab === 'overview'" class="society-results">
               <div class="society-section">
                 <h4 class="society-section-title">意見分布</h4>
                 <div class="society-stats-row">
@@ -585,6 +706,134 @@ function renderMarkdown(content: string): string {
                 <ul class="society-list">
                   <li v-for="priority in societyResult.aggregation.top_priorities" :key="priority">{{ priority }}</li>
                 </ul>
+              </div>
+              <div v-if="societyIssueCandidates.length" class="society-section">
+                <h4 class="society-section-title">重要論点ランキング</h4>
+                <div class="society-issue-grid">
+                  <div v-for="issue in societyIssueCandidates" :key="issue.issue_id" class="society-issue-card">
+                    <div class="society-issue-top">
+                      <span class="society-issue-label">{{ issue.label }}</span>
+                      <span class="society-issue-score">{{ (issue.selection_score * 100).toFixed(0) }}</span>
+                    </div>
+                    <p class="society-issue-desc">{{ issue.description }}</p>
+                    <div class="society-issue-metrics">
+                      <span>人数 {{ (issue.population_share * 100).toFixed(0) }}%</span>
+                      <span>対立 {{ (issue.controversy_score * 100).toFixed(0) }}%</span>
+                      <span>市場影響 {{ (issue.market_impact_score * 100).toFixed(0) }}%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div v-if="selectedSocietyIssues.length" class="society-section">
+                <h4 class="society-section-title">選抜した Issue Colony</h4>
+                <div class="society-chip-row">
+                  <span v-for="issue in selectedSocietyIssues" :key="issue.issue_id" class="society-chip">
+                    {{ issue.label }}
+                  </span>
+                </div>
+              </div>
+              <div v-if="societyIssueColonies.length" class="society-section">
+                <h4 class="society-section-title">Issue Colony 深掘り</h4>
+                <div v-for="colony in societyIssueColonies" :key="colony.issue_id" class="society-colony-card">
+                  <div class="society-colony-head">
+                    <span class="society-colony-title">{{ colony.label }}</span>
+                    <span class="society-colony-meta">diversity {{ Number(colony.diversity_score || 0).toFixed(2) }}</span>
+                  </div>
+                  <p class="society-colony-report">{{ colony.integrated_report || '統合レポートなし' }}</p>
+                  <div v-if="colony.top_scenarios?.length" class="society-colony-scenarios">
+                    <div v-for="(scenario, index) in colony.top_scenarios" :key="index" class="society-scenario-card">
+                      <div class="scenario-name">{{ scenario.description }}</div>
+                      <div class="scenario-prob">スコア: {{ ((scenario.scenario_score || scenario.probability || 0) * 100).toFixed(0) }}%</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div v-if="societyInterventions.length" class="society-section">
+                <h4 class="society-section-title">介入比較</h4>
+                <div class="society-intervention-grid">
+                  <div v-for="intervention in societyInterventions" :key="intervention.intervention_id" class="society-intervention-card">
+                    <div class="society-intervention-top">
+                      <span class="society-intervention-label">{{ intervention.label }}</span>
+                      <span class="society-intervention-effect" :class="intervention.comparison_mode === 'observed' ? 'observed' : 'heuristic'">
+                        {{ intervention.comparison_mode === 'observed' ? '実測比較' : '仮説比較' }}
+                      </span>
+                    </div>
+                    <p class="society-intervention-desc">{{ intervention.change_summary }}</p>
+                    <p class="society-intervention-issues">対象: {{ intervention.affected_issues.join(', ') }}</p>
+                    <template v-if="intervention.comparison_mode === 'observed'">
+                      <div class="society-intervention-metrics">
+                        <span>uplift {{ formatPointDelta(intervention.observed_uplift) }}</span>
+                        <span>downside {{ formatPointDelta(intervention.observed_downside ? -intervention.observed_downside : 0) }}</span>
+                        <span>uncertainty {{ ((intervention.uncertainty || 0) * 100).toFixed(0) }}%</span>
+                      </div>
+                      <div v-if="intervention.supporting_evidence?.length" class="society-evidence-list">
+                        <div
+                          v-for="evidence in intervention.supporting_evidence.slice(0, 3)"
+                          :key="`${intervention.intervention_id}-${evidence.case_id}-${evidence.metric}`"
+                          class="society-evidence-card"
+                        >
+                          <div class="society-evidence-top">
+                            <span>{{ evidence.title }}</span>
+                            <span>{{ formatPointDelta(evidence.signed_delta) }}</span>
+                          </div>
+                          <p>{{ evidence.metric_label }}: {{ evidence.summary }}</p>
+                        </div>
+                      </div>
+                    </template>
+                    <template v-else>
+                      <p class="society-intervention-hint">{{ intervention.expected_effect }}</p>
+                    </template>
+                  </div>
+                </div>
+              </div>
+              <div v-if="societyBacktest" class="society-section">
+                <h4 class="society-section-title">Backtest</h4>
+                <div v-if="societyBacktest.summary.case_count" class="society-backtest-summary">
+                  <div class="society-metric-card">
+                    <span class="society-metric-label">historical cases</span>
+                    <span class="society-metric-score">{{ societyBacktest.summary.case_count }}</span>
+                  </div>
+                  <div class="society-metric-card">
+                    <span class="society-metric-label">hit rate</span>
+                    <span class="society-metric-score">{{ (societyBacktest.summary.hit_rate * 100).toFixed(0) }}%</span>
+                  </div>
+                  <div class="society-metric-card">
+                    <span class="society-metric-label">issue hit rate</span>
+                    <span class="society-metric-score">{{ (societyBacktest.summary.issue_hit_rate * 100).toFixed(0) }}%</span>
+                  </div>
+                </div>
+                <div v-if="societyBacktest.summary.case_count" class="society-backtest-grid">
+                  <div v-for="historicalCase in societyBacktest.cases" :key="historicalCase.case_id" class="society-backtest-card">
+                    <div class="society-backtest-top">
+                      <div>
+                        <div class="society-backtest-title">{{ historicalCase.title }}</div>
+                        <div class="society-backtest-meta">
+                          {{ historicalCase.observed_at || 'date unknown' }}
+                          <span v-if="historicalCase.outcome.issue_label"> · {{ historicalCase.outcome.issue_label }}</span>
+                        </div>
+                      </div>
+                      <span
+                        v-if="historicalCase.best_match"
+                        class="society-verdict-badge"
+                        :class="backtestVerdictClass(historicalCase.best_match.verdict)"
+                      >
+                        {{ backtestVerdictLabel(historicalCase.best_match.verdict) }}
+                      </span>
+                    </div>
+                    <p class="society-backtest-outcome">{{ historicalCase.outcome.summary || historicalCase.outcome.actual_scenario }}</p>
+                    <div v-if="historicalCase.best_match" class="society-backtest-match">
+                      <span class="society-backtest-label">予測:</span>
+                      <span>{{ historicalCase.best_match.issue_label }} / {{ historicalCase.best_match.scenario_description }}</span>
+                    </div>
+                    <div v-if="historicalCase.best_match" class="society-backtest-match">
+                      <span class="society-backtest-label">一致度:</span>
+                      <span>{{ (historicalCase.best_match.match_score * 100).toFixed(0) }}%</span>
+                    </div>
+                  </div>
+                </div>
+                <p v-else class="society-empty-copy">
+                  historical case を追加すると、予測シナリオと実績の hit / miss / partial hit をここで比較できます。
+                </p>
               </div>
               <div v-if="societyResult.evaluation" class="society-section">
                 <h4 class="society-section-title">評価メトリクス</h4>
@@ -658,6 +907,51 @@ function renderMarkdown(content: string): string {
                   :current-sim-id="simId"
                   :population-id="societyResult?.population_id"
                 />
+              </div>
+            </div>
+
+            <!-- People & Network Sub-tab -->
+            <div v-if="societySubTab === 'people'" class="society-people-panel">
+              <PeopleGraph :simulation-id="simId" />
+            </div>
+
+            <!-- Journey Sub-tab -->
+            <div v-if="societySubTab === 'journey'" class="society-results">
+              <SimulationJourney
+                :simulation-id="simId"
+                :society-result="societyResult"
+                @select-agent="(agentId: string) => societyStore.loadAgentDetail(simId, agentId)"
+              />
+            </div>
+
+            <!-- Conversations Sub-tab -->
+            <div v-if="societySubTab === 'conversations'" class="society-results">
+              <ConversationPanel
+                :rounds="societyStore.meetingRounds"
+                :participants="societyStore.meetingParticipants"
+                :synthesis="societyStore.meetingSynthesis"
+                @select-agent="(agentId: string) => societyStore.loadAgentDetail(simId, agentId)"
+              />
+            </div>
+
+            <!-- Findings Sub-tab -->
+            <div v-if="societySubTab === 'findings'" class="society-results">
+              <FindingsExplorer
+                :narrative="societyStore.narrative"
+                @select-agent="(agentId: string) => societyStore.loadAgentDetail(simId, agentId)"
+              />
+            </div>
+
+            <!-- Raw Data Sub-tab -->
+            <div v-if="societySubTab === 'raw'" class="society-results">
+              <div class="society-section">
+                <h4 class="society-section-title">Raw Meeting Report</h4>
+                <pre v-if="meetingReport" class="society-raw-text">{{ JSON.stringify(meetingReport, null, 2) }}</pre>
+                <p v-else class="society-empty-copy">Meeting report not available</p>
+              </div>
+              <div class="society-section">
+                <h4 class="society-section-title">Raw Society Result</h4>
+                <pre class="society-raw-text">{{ JSON.stringify(societyResult, null, 2) }}</pre>
               </div>
             </div>
           </div>
@@ -882,6 +1176,7 @@ function renderMarkdown(content: string): string {
           <div v-if="activeTab === 'graph'" class="tab-panel">
             <div class="graph-tab-layout">
               <div ref="graphContainer" class="graph-snapshot-large"></div>
+              <div v-if="graphError" class="graph-error-note">{{ graphError }}</div>
               <TemporalSlider
                 v-if="graphSnapshots.length > 1"
                 :total-rounds="totalRounds"
@@ -917,7 +1212,12 @@ function renderMarkdown(content: string): string {
                 <EvaluationDashboard v-if="cognitiveSubTab === 'evaluation'" />
                 <ToMMapVisualization v-if="cognitiveSubTab === 'tom'" />
                 <SocialNetworkDynamics v-if="cognitiveSubTab === 'social'" />
-                <KnowledgeGraphExplorer v-if="cognitiveSubTab === 'kg'" :entities="[]" :relations="[]" :communities="[]" />
+                <KnowledgeGraphExplorer
+                  v-if="cognitiveSubTab === 'kg'"
+                  :entities="kgEntities"
+                  :relations="kgRelations"
+                  :communities="kgCommunities"
+                />
               </div>
             </div>
           </div>
@@ -931,6 +1231,7 @@ function renderMarkdown(content: string): string {
               <h3>3D Graph</h3>
             </div>
             <div ref="graphContainer" class="graph-snapshot"></div>
+            <div v-if="graphError" class="graph-error-note">{{ graphError }}</div>
             <TemporalSlider
               v-if="graphSnapshots.length > 1"
               :total-rounds="totalRounds"
@@ -1141,6 +1442,16 @@ function renderMarkdown(content: string): string {
   border: 1px solid rgba(100,100,255,0.12);
   margin-bottom: 0.5rem;
 }
+.graph-error-note {
+  margin-bottom: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid rgba(245,158,11,0.24);
+  border-radius: var(--radius-sm);
+  background: rgba(245,158,11,0.08);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
 
 .chat-panel { display: flex; flex-direction: column; max-height: min(32rem, 70vh); }
 .chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.6rem; padding: 0.5rem 0; min-height: 80px; max-height: min(15rem, 35vh); }
@@ -1273,6 +1584,46 @@ function renderMarkdown(content: string): string {
   }
 }
 
+/* Society Sub-tabs */
+.society-sub-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.5rem 0;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border-default, #333);
+  overflow-x: auto;
+}
+.society-sub-tab {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted, #888);
+  background: none;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.society-sub-tab:hover { color: var(--text-primary, #fff); background: rgba(255,255,255,0.05); }
+.society-sub-tab.active {
+  color: var(--accent, #6366f1);
+  background: rgba(99,102,241,0.1);
+}
+.society-people-panel { height: 600px; display: flex; flex-direction: column; }
+.society-raw-text {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted, #888);
+  background: rgba(0,0,0,0.3);
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow: auto;
+  max-height: 600px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 /* Society Results */
 .society-results { display: flex; flex-direction: column; gap: 1.5rem; }
 .society-section { display: flex; flex-direction: column; gap: 0.75rem; }
@@ -1288,6 +1639,50 @@ function renderMarkdown(content: string): string {
 .society-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.6s ease; }
 .society-bar-value { width: 50px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-primary); font-weight: 600; }
 .society-list { margin: 0; padding-left: 1.2rem; font-size: 0.82rem; color: var(--text-secondary); line-height: 1.8; }
+.society-issue-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; }
+.society-issue-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.85rem; display: flex; flex-direction: column; gap: 0.45rem; }
+.society-issue-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.society-issue-label { font-size: 0.84rem; font-weight: 600; color: var(--text-primary); }
+.society-issue-score { font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent); }
+.society-issue-desc { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.5; }
+.society-issue-metrics { display: flex; flex-wrap: wrap; gap: 0.5rem; font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); }
+.society-chip-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.society-chip { font-size: 0.76rem; padding: 0.28rem 0.58rem; border-radius: 999px; border: 1px solid rgba(99,102,241,0.24); background: rgba(99,102,241,0.08); color: var(--accent); }
+.society-colony-card { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.9rem; display: flex; flex-direction: column; gap: 0.65rem; }
+.society-colony-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.society-colony-title { font-size: 0.84rem; font-weight: 600; color: var(--text-primary); }
+.society-colony-meta { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); }
+.society-colony-report { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.65; white-space: pre-wrap; }
+.society-colony-scenarios { display: grid; gap: 0.5rem; }
+.society-intervention-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; }
+.society-intervention-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.85rem; display: flex; flex-direction: column; gap: 0.45rem; }
+.society-intervention-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.society-intervention-label { font-size: 0.84rem; font-weight: 600; color: var(--text-primary); }
+.society-intervention-effect { font-family: var(--font-mono); font-size: 0.7rem; color: var(--accent); }
+.society-intervention-effect.observed { color: var(--success); }
+.society-intervention-effect.heuristic { color: var(--accent); }
+.society-intervention-desc { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.55; }
+.society-intervention-issues { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); }
+.society-intervention-metrics { display: flex; flex-wrap: wrap; gap: 0.5rem; font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); }
+.society-intervention-hint { font-family: var(--font-mono); font-size: 0.74rem; color: var(--accent); }
+.society-evidence-list { display: grid; gap: 0.45rem; }
+.society-evidence-card { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.6rem; background: rgba(255,255,255,0.02); }
+.society-evidence-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; font-size: 0.72rem; font-weight: 600; color: var(--text-primary); }
+.society-evidence-card p { margin-top: 0.25rem; font-size: 0.76rem; color: var(--text-secondary); line-height: 1.5; }
+.society-backtest-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; margin-bottom: 0.75rem; }
+.society-backtest-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.75rem; }
+.society-backtest-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.85rem; display: flex; flex-direction: column; gap: 0.45rem; }
+.society-backtest-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
+.society-backtest-title { font-size: 0.84rem; font-weight: 600; color: var(--text-primary); }
+.society-backtest-meta { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); margin-top: 0.15rem; }
+.society-backtest-outcome { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6; }
+.society-backtest-match { display: flex; gap: 0.45rem; font-size: 0.76rem; color: var(--text-secondary); }
+.society-backtest-label { font-family: var(--font-mono); color: var(--text-muted); min-width: 3.8rem; }
+.society-verdict-badge { font-family: var(--font-mono); font-size: 0.68rem; padding: 0.18rem 0.45rem; border-radius: 999px; border: 1px solid var(--border); }
+.society-verdict-badge.verdict-hit { color: var(--success); border-color: rgba(34,197,94,0.24); background: rgba(34,197,94,0.1); }
+.society-verdict-badge.verdict-partial { color: #f59e0b; border-color: rgba(245,158,11,0.28); background: rgba(245,158,11,0.1); }
+.society-verdict-badge.verdict-miss { color: var(--danger); border-color: rgba(239,68,68,0.24); background: rgba(239,68,68,0.1); }
+.society-empty-copy { font-size: 0.8rem; color: var(--text-muted); line-height: 1.6; }
 .society-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; }
 .society-metric-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem; text-align: center; display: flex; flex-direction: column; gap: 0.25rem; }
 .society-metric-label { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; }

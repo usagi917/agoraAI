@@ -25,7 +25,7 @@ def test_profile_rounds_fallback_for_unknown():
 # dispatch_simulation: mode 分岐ロジックのユニットテスト
 # -----------------------------------------------------------------------
 
-VALID_MODES = ["pipeline", "single", "swarm", "hybrid", "pm_board"]
+VALID_MODES = ["pipeline", "single", "swarm", "hybrid", "pm_board", "society", "society_first"]
 INVALID_MODE = "unknown_mode"
 
 
@@ -39,7 +39,7 @@ def test_invalid_mode_raises():
     """未知のモードは ValueError を発生させるべき。"""
     # dispatch_simulation の mode 分岐で未知 mode は raise ValueError
     mode = INVALID_MODE
-    supported = {"pipeline", "single", "swarm", "hybrid", "pm_board"}
+    supported = {"pipeline", "single", "swarm", "hybrid", "pm_board", "society", "society_first"}
     assert mode not in supported, f"{mode} は supported に含まれるべきではない"
 
 

@@ -65,7 +65,7 @@ const showColonyGrid = computed(() => {
   if (store.isPipelineMode) {
     return store.pipelineStage === 'swarm' && store.colonies.length > 0
   }
-  return (store.mode === 'swarm' || store.mode === 'hybrid') && store.colonies.length > 0
+  return (store.mode === 'swarm' || store.mode === 'hybrid' || store.mode === 'society_first') && store.colonies.length > 0
 })
 
 const thinkingMode = computed<ThinkingVisualMode>(() => {
@@ -78,10 +78,22 @@ const thinkingMode = computed<ThinkingVisualMode>(() => {
   return 'idle'
 })
 
-const { graph, setFullGraph, applyDiff: applyGraphDiff, resetCamera } = useForceGraph(graphCanvas, thinkingMode)
+const {
+  graph,
+  graphError,
+  setFullGraph,
+  applyDiff: applyGraphDiff,
+  resetCamera,
+} = useForceGraph(graphCanvas, thinkingMode)
 
 const stageLabel = computed(() => {
   if (store.isSocietyMode) {
+    if (store.mode === 'society_first') {
+      if (store.phase === 'issue_mining') return '重要論点を抽出中'
+      if (store.phase === 'colony_execution') return 'Issue Colony 深掘り中'
+      if (store.phase === 'aggregation') return 'Issue Colony 集約中'
+      if (store.phase === 'report') return 'Society First レポート生成中'
+    }
     switch (store.societyPhase) {
       case 'population': return '人口生成中'
       case 'selection': return 'エージェント選抜中'
@@ -129,6 +141,9 @@ const phaseOverlay = computed(() => {
   if (phase === 'simulation' && store.totalRounds > 0) {
     return { icon: '⟳', label: `Round ${store.currentRound}/${store.totalRounds} 推論中...` }
   }
+  if (store.mode === 'society_first' && store.colonies.length > 0 && (phase === 'colony_execution' || phase === 'aggregation')) {
+    return { icon: '⬡', label: `Issue Colony ${store.completedColonies}/${store.colonies.length} 実行中` }
+  }
   if (stage === 'swarm' && store.colonies.length > 0) {
     return { icon: '⬡', label: `Colony ${store.completedColonies}/${store.colonies.length} 実行中` }
   }
@@ -148,6 +163,23 @@ const phaseOverlay = computed(() => {
 
 const emptyState = computed(() => {
   if (store.isSocietyMode) {
+    const currentPhase = store.phase
+    if (store.mode === 'society_first') {
+      if (currentPhase === 'issue_mining') {
+        return {
+          eyebrow: 'Issue Mining',
+          title: '社会反応から重要論点を抽出しています',
+          detail: '懸念・優先事項・理由を集約し、深掘り対象の Issue Colony を選んでいます。',
+        }
+      }
+      if (currentPhase === 'colony_execution' || showColonyGrid.value) {
+        return {
+          eyebrow: 'Issue Colonies',
+          title: '選抜された論点を深掘りしています',
+          detail: '価格・規制・信頼などの重要論点ごとに colony を走らせ、市場シナリオを比較中です。',
+        }
+      }
+    }
     const phase = store.societyPhase
     if (phase === 'population') {
       return {
@@ -470,7 +502,13 @@ async function bootstrapSimulation() {
 }
 
 onMounted(async () => {
-  await bootstrapSimulation()
+  try {
+    await bootstrapSimulation()
+  } catch (error) {
+    console.error('Simulation bootstrap failed:', error)
+    store.init(simId, store.mode, store.promptText)
+    store.setError('シミュレーション状態の取得に失敗しました。少し待ってから再読み込みしてください。')
+  }
 })
 
 onUnmounted(() => {
@@ -584,7 +622,14 @@ function goToResults() {
           </div>
           <div class="graph-container" :class="graphContainerClass">
             <div ref="graphCanvas" class="graph-canvas-host"></div>
-            <div v-if="graphStore.nodes.length === 0" class="graph-empty" :class="graphContainerClass">
+            <div v-if="graphError" class="graph-error-state">
+              <div class="graph-empty-shell">
+                <div class="graph-empty-eyebrow">Graph Unavailable</div>
+                <div class="graph-empty-title">3D グラフを表示できません</div>
+                <p class="graph-empty-detail">{{ graphError }}</p>
+              </div>
+            </div>
+            <div v-else-if="graphStore.nodes.length === 0" class="graph-empty" :class="graphContainerClass">
               <div class="graph-empty-backdrop"></div>
               <div class="graph-empty-shell">
                 <div class="graph-empty-eyebrow">{{ emptyState.eyebrow }}</div>
@@ -598,13 +643,13 @@ function goToResults() {
                 </div>
               </div>
             </div>
-            <div v-if="phaseOverlay" class="phase-overlay">
+            <div v-if="phaseOverlay && !graphError" class="phase-overlay">
               <span class="phase-icon">{{ phaseOverlay.icon }}</span>
               <span class="phase-label">{{ phaseOverlay.label }}</span>
             </div>
           </div>
-          <button v-if="graphStore.nodes.length > 0" class="reset-camera-btn" @click="resetCamera" title="中心に戻す">&#8962;</button>
-          <div v-if="graphStore.nodes.length > 0" class="graph-legend">
+          <button v-if="graphStore.nodes.length > 0 && !graphError" class="reset-camera-btn" @click="resetCamera" title="中心に戻す">&#8962;</button>
+          <div v-if="graphStore.nodes.length > 0 && !graphError" class="graph-legend">
             <span class="legend-item" v-for="(color, type) in entityTypeColors" :key="type">
               <span class="legend-dot" :style="{ background: color, boxShadow: `0 0 6px ${color}` }"></span>
               <span class="legend-label">{{ type }}</span>
@@ -781,6 +826,15 @@ function goToResults() {
   color: var(--text-muted);
   font-size: 0.82rem;
   z-index: 1;
+}
+.graph-error-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  z-index: 2;
 }
 
 .graph-empty-backdrop {

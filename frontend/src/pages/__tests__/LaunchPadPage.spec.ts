@@ -45,7 +45,7 @@ describe('LaunchPadPage', () => {
     apiMocks.createSimulation.mockResolvedValue({ id: 'sim-1' })
   })
 
-  it('shows society as experimental and launches with strict evidence mode', async () => {
+  it('uses society_first as the default primary flow and launches with strict evidence mode', async () => {
     const wrapper = mount(LaunchPadPage, {
       global: {
         stubs: {
@@ -56,7 +56,7 @@ describe('LaunchPadPage', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Experimental')
+    expect(wrapper.text()).toContain('Society First を既定で起動')
 
     await wrapper.get('#simulation-prompt').setValue('EV battery market analysis')
     await wrapper.get('[data-testid="launch-button"]').trigger('click')
@@ -65,7 +65,7 @@ describe('LaunchPadPage', () => {
     expect(apiMocks.createSimulation).toHaveBeenCalledWith(
       expect.objectContaining({
         evidenceMode: 'strict',
-        mode: 'pipeline',
+        mode: 'society_first',
       }),
     )
     expect(push).toHaveBeenCalledWith('/sim/sim-1')

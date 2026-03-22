@@ -30,6 +30,12 @@ from src.app.services.pipeline_fallbacks import (
     build_pm_board_fallback,
     pm_board_has_substance,
 )
+from src.app.services.society.backtest import (
+    build_empty_backtest_result,
+    overlay_observed_intervention_comparison,
+    prepare_backtest_payload,
+)
+from src.app.services.society.issue_miner import build_intervention_comparison
 from src.app.services.quality import (
     build_quality_summary,
     collect_simulation_evidence_refs,
@@ -61,9 +67,40 @@ class SimulationCreate(BaseModel):
     project_id: str | None = None
     template_name: str = ""
     execution_profile: str = "standard"
-    mode: str = "pipeline"  # pipeline | single | swarm | hybrid | pm_board
+    mode: str = "pipeline"  # pipeline | single | swarm | hybrid | pm_board | society | society_first
     prompt_text: str = ""
     evidence_mode: str = "prefer"  # strict | prefer | off (legacy aliases accepted)
+
+
+class HistoricalOutcome(BaseModel):
+    issue_label: str | None = None
+    summary: str = ""
+    actual_scenario: str = ""
+    metrics: dict[str, float] = {}
+    tags: list[str] = []
+
+
+class HistoricalIntervention(BaseModel):
+    intervention_id: str
+    label: str = ""
+    baseline_metrics: dict[str, float] = {}
+    outcome_metrics: dict[str, float] = {}
+    evidence: list[str] = []
+
+
+class HistoricalCase(BaseModel):
+    case_id: str | None = None
+    title: str
+    observed_at: str | None = None
+    linked_simulation_id: str | None = None
+    linked_report_id: str | None = None
+    baseline_metrics: dict[str, float] = {}
+    outcome: HistoricalOutcome
+    interventions: list[HistoricalIntervention] = []
+
+
+class BacktestCreate(BaseModel):
+    historical_cases: list[HistoricalCase]
 
 
 @router.post("")
@@ -72,7 +109,7 @@ async def create_simulation(
     session: AsyncSession = Depends(get_session),
 ):
     """Simulation を作成して実行を開始する。"""
-    valid_modes = ("pipeline", "single", "swarm", "hybrid", "pm_board", "society")
+    valid_modes = ("pipeline", "single", "swarm", "hybrid", "pm_board", "society", "society_first")
     if body.mode not in valid_modes:
         raise HTTPException(status_code=400, detail=f"Invalid mode: {body.mode}")
     if not supports_evidence_mode(body.evidence_mode):
@@ -207,6 +244,10 @@ async def get_simulation(sim_id: str, session: AsyncSession = Depends(get_sessio
         "started_at": sim.started_at.isoformat() if sim.started_at else None,
         "completed_at": sim.completed_at.isoformat() if sim.completed_at else None,
     }
+
+
+def _get_society_first_payload(sim: Simulation) -> dict:
+    return dict((sim.metadata_json or {}).get("society_first_result") or {})
 
 
 @router.get("/{sim_id}/stream")
@@ -506,6 +547,36 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
             ),
         }
 
+    if sim.mode == "society_first":
+        society_first = _get_society_first_payload(sim)
+        if not society_first:
+            raise HTTPException(status_code=404, detail="レポートが見つかりません")
+
+        return {
+            "type": "society_first",
+            "content": society_first.get("content", ""),
+            "sections": society_first.get("sections", {}),
+            "society_summary": society_first.get("society_summary", {}),
+            "issue_candidates": society_first.get("issue_candidates", []),
+            "selected_issues": society_first.get("selected_issues", []),
+            "issue_colonies": society_first.get("issue_colonies", []),
+            "intervention_comparison": society_first.get("intervention_comparison", []),
+            "backtest": society_first.get("backtest") or build_empty_backtest_result(),
+            "scenarios": normalize_scenarios(
+                society_first.get("scenarios", []),
+                evidence_refs=evidence_refs,
+                evidence_mode=evidence_mode,
+            ),
+            "verification": society_first.get("verification"),
+            "evidence_refs": evidence_refs,
+            "run_config": run_config,
+            "quality": build_quality_summary(
+                fallback_used=False,
+                evidence_refs=evidence_refs,
+                evidence_mode=evidence_mode,
+            ),
+        }
+
     # PM Board モード: metadata_json に結果を保存
     if sim.mode == "pm_board" and sim.metadata_json:
         pm_quality = extract_quality(sim.metadata_json)
@@ -521,6 +592,67 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
         return response
 
     raise HTTPException(status_code=404, detail="レポートが見つかりません")
+
+
+@router.get("/{sim_id}/backtest")
+async def get_simulation_backtest(sim_id: str, session: AsyncSession = Depends(get_session)):
+    """society_first の backtest 結果を返す。"""
+    sim = await session.get(Simulation, sim_id)
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation が見つかりません")
+    if sim.mode != "society_first":
+        raise HTTPException(status_code=400, detail="backtest は society_first モードのみ対応")
+
+    society_first = _get_society_first_payload(sim)
+    if not society_first:
+        raise HTTPException(status_code=404, detail="society_first 結果が見つかりません")
+
+    return society_first.get("backtest") or build_empty_backtest_result()
+
+
+@router.post("/{sim_id}/backtest")
+async def create_simulation_backtest(
+    sim_id: str,
+    body: BacktestCreate,
+    session: AsyncSession = Depends(get_session),
+):
+    """society_first の historical case を保存し backtest を計算する。"""
+    sim = await session.get(Simulation, sim_id)
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation が見つかりません")
+    if sim.mode != "society_first":
+        raise HTTPException(status_code=400, detail="backtest は society_first モードのみ対応")
+
+    society_first = _get_society_first_payload(sim)
+    if not society_first:
+        raise HTTPException(status_code=404, detail="society_first 結果が見つかりません")
+
+    normalized_cases = [case.model_dump() for case in body.historical_cases]
+    backtest = prepare_backtest_payload(society_first, normalized_cases)
+
+    base_interventions = build_intervention_comparison(
+        society_first.get("selected_issues", []),
+        society_first.get("issue_colonies", []),
+    )
+    updated_interventions = overlay_observed_intervention_comparison(base_interventions, backtest)
+
+    updated_society_first = {
+        **society_first,
+        "backtest": backtest,
+        "intervention_comparison": updated_interventions,
+        "sections": {
+            **dict(society_first.get("sections") or {}),
+            "intervention_comparison": updated_interventions,
+            "backtest": backtest,
+        },
+    }
+    sim.metadata_json = {
+        **dict(sim.metadata_json or {}),
+        "society_first_result": updated_society_first,
+    }
+    await session.commit()
+
+    return backtest
 
 
 @router.get("/{sim_id}/scenarios")

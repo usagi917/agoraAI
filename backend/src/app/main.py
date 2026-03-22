@@ -58,6 +58,7 @@ app = FastAPI(
     title="Agent AI - Realtime Graph Multi-Agent Simulation",
     version="0.1.0",
     lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 app.add_middleware(

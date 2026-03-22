@@ -2,13 +2,33 @@
 
 import pytest
 
+from src.app.config import settings
 from src.app.services.society.population_generator import (
     generate_population,
     generate_agent_profile,
+    get_population_size_bounds,
+    validate_population_size,
 )
 
 
 class TestGenerateAgentProfile:
+    def test_population_size_bounds_follow_config(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr(
+            type(settings),
+            "load_population_mix_config",
+            lambda self: {"population": {"default_size": 250, "min_size": 120, "max_size": 400}},
+        )
+        assert get_population_size_bounds() == (250, 120, 400)
+
+    def test_validate_population_size_uses_configured_range(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr(
+            type(settings),
+            "load_population_mix_config",
+            lambda self: {"population": {"default_size": 250, "min_size": 120, "max_size": 400}},
+        )
+        with pytest.raises(ValueError, match="120〜400"):
+            validate_population_size(401)
+
     def test_profile_has_required_fields(self):
         profile = generate_agent_profile(
             index=0,
@@ -51,8 +71,34 @@ class TestGenerateAgentProfile:
         for topic, value in shock.items():
             assert 0.0 <= value <= 1.0
 
+    def test_census_age_distribution_respects_bounds(self):
+        pop_config = {
+            "demographics": {
+                "age": {
+                    "distribution": "census",
+                    "min": 18,
+                    "max": 85,
+                }
+            }
+        }
+        ages = [
+            generate_agent_profile(i, "pop", pop_config, {}, 100)["demographics"]["age"]
+            for i in range(200)
+        ]
+        assert all(18 <= age <= 85 for age in ages)
+
 
 class TestGeneratePopulation:
+    @pytest.mark.asyncio
+    async def test_uses_config_default_count_when_omitted(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr(
+            type(settings),
+            "load_population_mix_config",
+            lambda self: {"population": {"default_size": 12, "min_size": 5, "max_size": 20}},
+        )
+        agents = await generate_population("test-pop", seed=42)
+        assert len(agents) == 12
+
     @pytest.mark.asyncio
     async def test_generates_correct_count(self):
         agents = await generate_population("test-pop", count=50, seed=42)

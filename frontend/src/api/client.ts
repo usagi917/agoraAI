@@ -242,6 +242,149 @@ export interface PipelineReportResponse extends SimulationReportBase {
   pm_board?: PMBoardReportResponse
 }
 
+export interface SocietyFirstIssueCandidate {
+  issue_id: string
+  label: string
+  description: string
+  population_share: number
+  controversy_score: number
+  market_impact_score: number
+  network_spread_score: number
+  selection_score: number
+  supporting_stances?: Array<{ stance: string; share: number }>
+  sample_reasons?: string[]
+}
+
+export interface SocietyFirstIssueColony {
+  issue_id: string
+  label: string
+  description: string
+  swarm_id: string
+  integrated_report: string
+  top_scenarios?: ScenarioReport[]
+  diversity_score?: number
+  entropy?: number
+  colony_count?: number
+}
+
+export interface SocietyFirstIntervention {
+  intervention_id: string
+  label: string
+  change_summary: string
+  affected_issues: string[]
+  comparison_mode?: 'heuristic' | 'observed'
+  expected_effect: string
+  observed_uplift?: number | null
+  observed_downside?: number | null
+  uncertainty?: number | null
+  observed_case_count?: number
+  supporting_signals?: string[]
+  supporting_evidence?: SocietyFirstInterventionEvidence[]
+}
+
+export interface SocietyFirstInterventionEvidence {
+  case_id: string
+  title: string
+  metric: string
+  metric_label: string
+  baseline: number
+  outcome: number
+  signed_delta: number
+  summary: string
+  evidence?: string[]
+}
+
+export interface SocietyFirstBacktestMatch {
+  issue_id: string
+  issue_label: string
+  scenario_description: string
+  predicted_score: number
+  actual_summary: string
+  actual_scenario: string
+  match_score: number
+  label_match: number
+  text_overlap: number
+  tag_overlap: number
+  verdict: 'hit' | 'partial_hit' | 'miss'
+  reasons: string[]
+}
+
+export interface SocietyFirstHistoricalOutcome {
+  issue_label?: string
+  summary: string
+  actual_scenario: string
+  metrics: Record<string, number>
+  tags: string[]
+}
+
+export interface SocietyFirstHistoricalCase {
+  case_id: string
+  title: string
+  observed_at?: string
+  linked_simulation_id?: string
+  linked_report_id?: string
+  baseline_metrics: Record<string, number>
+  outcome: SocietyFirstHistoricalOutcome
+  interventions: Array<{
+    intervention_id: string
+    label?: string
+    baseline_metrics: Record<string, number>
+    outcome_metrics: Record<string, number>
+    evidence: string[]
+  }>
+}
+
+export interface SocietyFirstBacktestCase extends SocietyFirstHistoricalCase {
+  best_match?: SocietyFirstBacktestMatch | null
+  scenario_matches?: SocietyFirstBacktestMatch[]
+  issue_results?: Array<{
+    issue_label: string
+    verdict: 'hit' | 'partial_hit' | 'miss'
+    match_score: number
+    scenario_description: string
+  }>
+  summary?: {
+    hit_count: number
+    partial_hit_count: number
+    miss_count: number
+  }
+}
+
+export interface SocietyFirstBacktestSummary {
+  case_count: number
+  compared_case_count: number
+  hit_count: number
+  partial_hit_count: number
+  miss_count: number
+  hit_rate: number
+  issue_hit_count: number
+  issue_hit_rate: number
+}
+
+export interface SocietyFirstBacktestResponse {
+  id?: string
+  schema_version: number
+  input_format: Record<string, any>
+  matching_rules: Record<string, any>
+  historical_cases: SocietyFirstHistoricalCase[]
+  cases: SocietyFirstBacktestCase[]
+  summary: SocietyFirstBacktestSummary
+  status: 'no_data' | 'ready'
+}
+
+export interface SocietyFirstReportResponse extends SimulationReportBase {
+  type: 'society_first'
+  content: string
+  sections?: Record<string, any>
+  society_summary?: Record<string, any>
+  issue_candidates?: SocietyFirstIssueCandidate[]
+  selected_issues?: SocietyFirstIssueCandidate[]
+  issue_colonies?: SocietyFirstIssueColony[]
+  intervention_comparison?: SocietyFirstIntervention[]
+  backtest?: SocietyFirstBacktestResponse
+  scenarios?: ScenarioReport[]
+}
+
 export type SimulationReportResponse = SimulationReportBase
 
 export interface SimulationTimelineEvent {
@@ -298,6 +441,21 @@ export async function getSimulationGraphHistory(simId: string): Promise<GraphSna
 
 export async function getSimulationReport(simId: string): Promise<SimulationReportResponse> {
   const { data } = await api.get(`/simulations/${simId}/report`)
+  return data
+}
+
+export async function getSimulationBacktest(simId: string): Promise<SocietyFirstBacktestResponse> {
+  const { data } = await api.get(`/simulations/${simId}/backtest`)
+  return data
+}
+
+export async function submitSimulationBacktest(
+  simId: string,
+  historicalCases: SocietyFirstHistoricalCase[],
+): Promise<SocietyFirstBacktestResponse> {
+  const { data } = await api.post(`/simulations/${simId}/backtest`, {
+    historical_cases: historicalCases,
+  })
   return data
 }
 
@@ -391,6 +549,222 @@ export async function getPopulationDetail(popId: string) {
 
 export async function forkPopulation(popId: string) {
   const { data } = await api.post(`/society/populations/${popId}/fork`)
+  return data
+}
+
+// === Society ソーシャルグラフ & エージェント API ===
+
+export interface AgentDemographics {
+  age: number
+  gender: string
+  occupation: string
+  region: string
+  income_bracket: string
+  education: string
+}
+
+export interface SocialGraphNode {
+  id: string
+  agent_index: number
+  demographics: AgentDemographics
+  big_five: Record<string, number>
+  values: Record<string, any>
+  speech_style: string
+  stance: string
+  confidence: number
+  reason: string
+  concern: string
+  priority: string
+}
+
+export interface SocialGraphEdge {
+  id: string
+  source: string
+  target: string
+  relation_type: string
+  strength: number
+}
+
+export interface SocialGraphResponse {
+  nodes: SocialGraphNode[]
+  edges: SocialGraphEdge[]
+  population_id: string
+}
+
+export interface AgentListItem {
+  id: string
+  agent_index: number
+  demographics: AgentDemographics
+  big_five: Record<string, number>
+  stance: string
+  confidence: number
+  reason: string
+  concern: string
+  priority: string
+}
+
+export interface AgentListResponse {
+  agents: AgentListItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface AgentConnection {
+  id: string
+  agent_id: string
+  target_id: string
+  relation_type: string
+  strength: number
+  connected_to: string
+}
+
+export interface MeetingArgument {
+  participant_index: number
+  participant_name: string
+  role: string
+  expertise: string
+  round: number
+  position: string
+  argument: string
+  evidence: string
+  concerns: string[]
+  questions_to_others: string[]
+}
+
+export interface MeetingParticipant {
+  role: string
+  expertise: string
+  display_name: string
+  agent_id?: string
+  agent_index?: number
+  occupation?: string
+  region?: string
+  age?: number
+  stance?: string
+}
+
+export interface AgentDetailResponse {
+  id: string
+  agent_index: number
+  population_id: string
+  demographics: AgentDemographics
+  big_five: Record<string, number>
+  values: Record<string, any>
+  life_event: string
+  contradiction: string
+  information_source: string
+  local_context: string
+  hidden_motivation: string
+  speech_style: string
+  shock_sensitivity: Record<string, number>
+  memory_summary: string
+  activation_response: Record<string, any> | null
+  meeting_participant: MeetingParticipant | null
+  meeting_contributions: MeetingArgument[]
+  connections: AgentConnection[]
+}
+
+export interface ConversationRound {
+  round: number
+  arguments: MeetingArgument[]
+}
+
+export interface MeetingSynthesis {
+  consensus_points?: string[]
+  disagreement_points?: Array<Record<string, any>>
+  key_insights?: string[]
+  scenarios?: Array<Record<string, any>>
+  stance_shifts?: Array<Record<string, any>>
+  recommendations?: string[]
+  overall_assessment?: string
+}
+
+export interface ConversationsResponse {
+  rounds: ConversationRound[]
+  participants: MeetingParticipant[]
+  synthesis: MeetingSynthesis
+  total_rounds: number
+}
+
+export async function getSocialGraph(simId: string): Promise<SocialGraphResponse> {
+  const { data } = await api.get(`/society/simulations/${simId}/social-graph`)
+  return data
+}
+
+export async function getSocietyAgents(
+  simId: string,
+  filters?: { stance?: string; region?: string; occupation?: string; page?: number; page_size?: number },
+): Promise<AgentListResponse> {
+  const { data } = await api.get(`/society/simulations/${simId}/agents`, { params: filters })
+  return data
+}
+
+export async function getAgentDetail(simId: string, agentId: string): Promise<AgentDetailResponse> {
+  const { data } = await api.get(`/society/simulations/${simId}/agents/${agentId}`)
+  return data
+}
+
+export async function getConversations(
+  simId: string,
+  filters?: { round?: number; participant_index?: number },
+): Promise<ConversationsResponse> {
+  const { data } = await api.get(`/society/simulations/${simId}/conversations`, { params: filters })
+  return data
+}
+
+// === Narrative API ===
+
+export interface AgentQuote {
+  agent_id: string
+  agent_index: number
+  occupation: string
+  age: number
+  region: string
+  stance: string
+  confidence: number
+  quote: string
+}
+
+export interface NarrativeFinding {
+  finding: string
+  type: string
+  supporting_evidence?: AgentQuote[]
+  confidence: number
+  probability?: number
+  key_factors?: string[]
+}
+
+export interface NarrativeConsensus {
+  point: string
+  supporting_agents: AgentQuote[]
+}
+
+export interface NarrativeControversy {
+  point: string
+  positions: Array<Record<string, any>>
+  supporting_quotes: AgentQuote[]
+  opposing_quotes: AgentQuote[]
+  demographic_split: Record<string, any>
+}
+
+export interface NarrativeRecommendation {
+  recommendation: string
+  evidence_chain: Array<Record<string, any>>
+  supporting_agents: AgentQuote[]
+}
+
+export interface NarrativeResponse {
+  executive_summary: string
+  key_findings: NarrativeFinding[]
+  consensus_areas: NarrativeConsensus[]
+  controversy_areas: NarrativeControversy[]
+  recommendations: NarrativeRecommendation[]
+  stance_shifts: Array<Record<string, any>>
+}
+
+export async function getNarrative(simId: string): Promise<{ phase_data: NarrativeResponse }> {
+  const { data } = await api.get(`/society/simulations/${simId}/narrative`)
   return data
 }
 

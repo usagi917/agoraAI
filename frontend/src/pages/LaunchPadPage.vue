@@ -19,16 +19,18 @@ const router = useRouter()
 const templates = ref<TemplateResponse[]>([])
 const selectedTemplate = ref('')
 const selectedProfile = ref('standard')
-const selectedMode = ref('pipeline')
+const selectedMode = ref('society_first')
 const promptText = ref('')
 const files = ref<File[]>([])
 const isLoading = ref(false)
 const recentSimulations = ref<SimulationListItem[]>([])
 const runtimeHealth = ref<HealthResponse | null>(null)
 const bootstrapError = ref('')
+const showAdvancedOptions = ref(false)
 
 const modes = [
   { value: 'pipeline', label: 'Pipeline', desc: '3段階分析', detail: '因果推論 → 多視点 → PM評価' },
+  { value: 'society_first', label: 'Society First', desc: '社会反応起点', detail: '社会反応 → Issue Colony → 市場仮説', badge: 'New' },
   { value: 'society', label: 'Society', desc: '社会シミュレーション', detail: '1,000人の住民 → 選抜 → 活性化 → 評価', badge: 'Experimental' },
   { value: 'single', label: 'Single', desc: '単一エージェント', detail: '因果推論のみ' },
   { value: 'swarm', label: 'Swarm', desc: '多視点分析', detail: '複数コロニー並列実行' },
@@ -51,7 +53,7 @@ const launchDisabled = computed(() => {
 const launchLabel = computed(() => {
   if (isLoading.value) return '起動中...'
   if (!canLaunchLive.value) return 'ライブ実行は利用不可'
-  return 'シミュレーション実行'
+  return selectedMode.value === 'society_first' ? 'Society First を実行' : 'シミュレーション実行'
 })
 
 onMounted(async () => {
@@ -129,8 +131,8 @@ function getPipelineStageLabel(stage: string) {
   <div class="launchpad-page">
     <!-- Hero -->
     <section class="hero">
-      <h2 class="hero-title">群生知能<br />シミュレーション</h2>
-      <p class="hero-desc">プロンプトまたはドキュメントから世界モデルを構築し、因果推論・多視点検証・PM評価の3段階パイプラインで分析を実行します</p>
+      <h2 class="hero-title">Society First<br />Market Lab</h2>
+      <p class="hero-desc">1つの指示から社会反応を先に広く観測し、重要論点だけを Issue Colony で深掘りします。初回導線は `society_first` を既定にし、他モードは詳細設定に退避しています。</p>
     </section>
 
     <section v-if="bootstrapError || (runtimeHealth && !runtimeHealth.live_simulation_available)" class="runtime-notice" :class="{ warning: runtimeHealth && !runtimeHealth.live_simulation_available, error: bootstrapError }">
@@ -175,7 +177,7 @@ function getPipelineStageLabel(stage: string) {
     <!-- Input Panel -->
     <section class="section">
       <div class="section-header">
-        <h3 class="section-title">入力</h3>
+        <h3 class="section-title">指示</h3>
       </div>
       <InputPanel
         v-model="promptText"
@@ -183,77 +185,101 @@ function getPipelineStageLabel(stage: string) {
         @update:files="files = $event"
       />
       <p class="section-note">
-        既定では `strict evidence` で実行します。文書を添付すると `Verified` を満たしやすく、プロンプトのみの実行は `Unsupported` になることがあります。
+        指示 1 つで開始できます。既定では `society_first` + `strict evidence` で実行し、文書を添付すると検証可能性が上がります。
       </p>
     </section>
 
-    <!-- Mode Selection -->
     <section class="section">
       <div class="section-header">
-        <h3 class="section-title">実行モード</h3>
+        <h3 class="section-title">既定の実行導線</h3>
+        <button class="btn btn-ghost section-toggle" type="button" @click="showAdvancedOptions = !showAdvancedOptions">
+          {{ showAdvancedOptions ? '詳細設定を閉じる' : '詳細設定を開く' }}
+        </button>
       </div>
-      <div class="profile-grid">
-        <div
-          v-for="m in modes"
-          :key="m.value"
-          class="profile-card"
-          :class="{ selected: selectedMode === m.value }"
-          :data-testid="`mode-card-${m.value}`"
-          @click="selectedMode = m.value"
-        >
-          <div class="mode-card-top">
-            <h4 class="profile-name">{{ m.label }}</h4>
-            <span v-if="m.badge" class="mode-badge">{{ m.badge }}</span>
+      <div class="default-flow-card">
+        <div class="default-flow-top">
+          <div>
+            <div class="default-flow-eyebrow">Primary Flow</div>
+            <h4 class="default-flow-title">Society First を既定で起動</h4>
           </div>
-          <p class="profile-desc">{{ m.desc }}</p>
-          <span class="profile-detail">{{ m.detail }}</span>
+          <span class="mode-badge primary">Default</span>
+        </div>
+        <p class="default-flow-copy">
+          社会反応を広く生成し、重要論点を抽出してから Issue Colony で深掘りします。mode を理解しなくてもこのまま実行開始できます。
+        </p>
+        <div class="default-flow-pills">
+          <span class="profile-detail">社会反応 → Issue Mining</span>
+          <span class="profile-detail">Issue Colony → シナリオ比較</span>
+          <span class="profile-detail">次の検証アクション</span>
         </div>
       </div>
-      <p v-if="selectedMode === 'society'" class="section-note section-note-warning">
-        `society` は experimental 扱いです。production 推奨導線は `pipeline` です。
-      </p>
-    </section>
-
-    <!-- Template Selection -->
-    <section class="section">
-      <div class="section-header">
-        <h3 class="section-title">テンプレート</h3>
-        <span class="section-badge">{{ templates.length }} 件</span>
-      </div>
-      <div class="template-grid">
-        <div
-          v-for="tmpl in templates"
-          :key="tmpl.name"
-          class="template-card"
-          :class="{ selected: selectedTemplate === tmpl.name }"
-          @click="selectedTemplate = tmpl.name"
-        >
-          <div class="template-card-top">
-            <div class="template-indicator" :class="{ active: selectedTemplate === tmpl.name }"></div>
-            <span class="template-category">{{ tmpl.category }}</span>
+      <div v-if="showAdvancedOptions" class="advanced-panel">
+        <div class="advanced-section">
+          <div class="section-header">
+            <h3 class="section-title">実行モード</h3>
           </div>
-          <h4 class="template-name">{{ tmpl.display_name }}</h4>
-          <p class="template-desc">{{ tmpl.description }}</p>
+          <div class="profile-grid">
+            <div
+              v-for="m in modes"
+              :key="m.value"
+              class="profile-card"
+              :class="{ selected: selectedMode === m.value }"
+              :data-testid="`mode-card-${m.value}`"
+              @click="selectedMode = m.value"
+            >
+              <div class="mode-card-top">
+                <h4 class="profile-name">{{ m.label }}</h4>
+                <span v-if="m.badge" class="mode-badge">{{ m.badge }}</span>
+              </div>
+              <p class="profile-desc">{{ m.desc }}</p>
+              <span class="profile-detail">{{ m.detail }}</span>
+            </div>
+          </div>
+          <p v-if="selectedMode === 'society'" class="section-note section-note-warning">
+            `society` は experimental 扱いです。迷う場合は `society_first` を使ってください。
+          </p>
         </div>
-      </div>
-    </section>
 
-    <!-- Profile Selection -->
-    <section class="section">
-      <div class="section-header">
-        <h3 class="section-title">実行プロファイル</h3>
-      </div>
-      <div class="profile-grid">
-        <div
-          v-for="p in profiles"
-          :key="p.value"
-          class="profile-card"
-          :class="{ selected: selectedProfile === p.value }"
-          @click="selectedProfile = p.value"
-        >
-          <h4 class="profile-name">{{ p.label }}</h4>
-          <p class="profile-desc">{{ p.desc }}</p>
-          <span class="profile-detail">{{ p.detail }}</span>
+        <div class="advanced-section">
+          <div class="section-header">
+            <h3 class="section-title">テンプレート</h3>
+            <span class="section-badge">{{ templates.length }} 件</span>
+          </div>
+          <div class="template-grid">
+            <div
+              v-for="tmpl in templates"
+              :key="tmpl.name"
+              class="template-card"
+              :class="{ selected: selectedTemplate === tmpl.name }"
+              @click="selectedTemplate = tmpl.name"
+            >
+              <div class="template-card-top">
+                <div class="template-indicator" :class="{ active: selectedTemplate === tmpl.name }"></div>
+                <span class="template-category">{{ tmpl.category }}</span>
+              </div>
+              <h4 class="template-name">{{ tmpl.display_name }}</h4>
+              <p class="template-desc">{{ tmpl.description }}</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="advanced-section">
+          <div class="section-header">
+            <h3 class="section-title">実行プロファイル</h3>
+          </div>
+          <div class="profile-grid">
+            <div
+              v-for="p in profiles"
+              :key="p.value"
+              class="profile-card"
+              :class="{ selected: selectedProfile === p.value }"
+              @click="selectedProfile = p.value"
+            >
+              <h4 class="profile-name">{{ p.label }}</h4>
+              <p class="profile-desc">{{ p.desc }}</p>
+              <span class="profile-detail">{{ p.detail }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -377,6 +403,63 @@ function getPipelineStageLabel(stage: string) {
 .section-badge { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); background: rgba(255,255,255,0.04); padding: 0.15rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); }
 .section-note { margin-top: 0.75rem; font-size: 0.78rem; color: var(--text-muted); line-height: 1.6; }
 .section-note-warning { color: #f59e0b; }
+.section-toggle { margin-left: auto; font-size: 0.78rem; }
+
+.default-flow-card {
+  background: linear-gradient(135deg, rgba(99,102,241,0.12), rgba(16,185,129,0.08));
+  border: 1px solid rgba(99,102,241,0.24);
+  border-radius: var(--radius);
+  padding: var(--panel-padding);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.default-flow-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.default-flow-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.default-flow-title {
+  margin-top: 0.2rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.default-flow-copy {
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
+.default-flow-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.advanced-panel {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.advanced-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
 
 .sample-desc {
   font-size: 0.82rem;
@@ -496,6 +579,7 @@ function getPipelineStageLabel(stage: string) {
 .profile-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .mode-card-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.25rem; }
 .mode-badge { font-family: var(--font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: #f59e0b; background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.24); border-radius: 999px; padding: 0.12rem 0.45rem; }
+.mode-badge.primary { color: var(--success); background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.24); }
 .profile-name { font-family: var(--font-mono); font-size: 0.85rem; font-weight: 600; margin-bottom: 0.25rem; }
 .profile-desc { font-size: 0.8rem; color: var(--text-secondary); }
 .profile-detail { display: inline-block; margin-top: 0.5rem; font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); background: rgba(255,255,255,0.04); padding: 0.15rem 0.5rem; border-radius: 999px; }
@@ -608,6 +692,10 @@ function getPipelineStageLabel(stage: string) {
   .template-grid,
   .profile-grid {
     grid-template-columns: 1fr;
+  }
+
+  .default-flow-top {
+    flex-direction: column;
   }
 
   .launch-section {

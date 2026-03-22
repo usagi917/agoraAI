@@ -18,7 +18,7 @@ interface KGRelation {
 }
 
 interface KGCommunity {
-  community: number
+  community: string | number
   summary: string
   members: string[]
 }
@@ -44,6 +44,8 @@ const filteredEntities = computed(() => {
   )
 })
 
+const entityById = computed(() => new Map(props.entities.map(entity => [entity.id, entity])))
+
 const entityRelations = computed(() => {
   if (!selectedEntity.value) return []
   const id = selectedEntity.value.id
@@ -58,6 +60,14 @@ function selectEntity(entity: KGEntity) {
 function selectCommunity(community: KGCommunity) {
   selectedCommunity.value = community
   selectedEntity.value = null
+}
+
+function relationEndpointLabel(id: string) {
+  return entityById.value.get(id)?.label || id
+}
+
+function communityLabel(community: string | number) {
+  return typeof community === 'number' ? `C${community}` : String(community)
 }
 
 function typeColor(type: string): string {
@@ -95,7 +105,7 @@ function typeColor(type: string): string {
           :class="{ selected: selectedCommunity?.community === comm.community }"
           @click="selectCommunity(comm)"
         >
-          <div class="community-name">C{{ comm.community }} ({{ comm.members.length }})</div>
+          <div class="community-name">{{ communityLabel(comm.community) }} ({{ comm.members.length }})</div>
           <div class="community-summary">{{ comm.summary?.slice(0, 60) }}...</div>
         </div>
       </div>
@@ -132,20 +142,20 @@ function typeColor(type: string): string {
           <span v-for="alias in selectedEntity.aliases" :key="alias" class="alias-badge">{{ alias }}</span>
         </div>
 
-        <div v-if="entityRelations.length > 0" class="relations-section">
-          <h4>関係 ({{ entityRelations.length }})</h4>
-          <div v-for="rel in entityRelations" :key="`${rel.source}-${rel.target}`" class="relation-item">
-            <span>{{ rel.source }}</span>
-            <span class="rel-type">&mdash; {{ rel.type }} &rarr;</span>
-            <span>{{ rel.target }}</span>
-            <span class="rel-confidence">{{ (rel.confidence * 100).toFixed(0) }}%</span>
+          <div v-if="entityRelations.length > 0" class="relations-section">
+            <h4>関係 ({{ entityRelations.length }})</h4>
+            <div v-for="rel in entityRelations" :key="`${rel.source}-${rel.target}`" class="relation-item">
+              <span>{{ relationEndpointLabel(rel.source) }}</span>
+              <span class="rel-type">&mdash; {{ rel.type }} &rarr;</span>
+              <span>{{ relationEndpointLabel(rel.target) }}</span>
+              <span class="rel-confidence">{{ (rel.confidence * 100).toFixed(0) }}%</span>
+            </div>
           </div>
-        </div>
       </div>
 
       <!-- コミュニティ詳細 -->
       <div v-else-if="selectedCommunity" class="detail-panel">
-        <h3>コミュニティ {{ selectedCommunity.community }}</h3>
+        <h3>コミュニティ {{ communityLabel(selectedCommunity.community) }}</h3>
         <div class="detail-description">{{ selectedCommunity.summary }}</div>
         <div class="members-section">
           <h4>メンバー ({{ selectedCommunity.members.length }})</h4>

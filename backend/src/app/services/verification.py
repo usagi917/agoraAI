@@ -147,6 +147,45 @@ def verify_pm_board_result(payload: dict[str, Any] | None) -> dict[str, Any]:
     )
 
 
+def verify_society_first_result(payload: dict[str, Any] | None) -> dict[str, Any]:
+    issues: list[str] = []
+    warnings: list[str] = []
+    data = payload or {}
+
+    issue_candidates = data.get("issue_candidates") or []
+    selected_issues = data.get("selected_issues") or []
+    issue_colonies = data.get("issue_colonies") or []
+    interventions = data.get("intervention_comparison") or []
+    society_summary = data.get("society_summary") or {}
+
+    if not issue_candidates:
+        issues.append("no_issue_candidates")
+    if not selected_issues:
+        issues.append("no_selected_issues")
+    if not issue_colonies:
+        issues.append("no_issue_colonies")
+    if not society_summary.get("aggregation"):
+        warnings.append("missing_society_aggregation")
+    if not interventions:
+        warnings.append("no_intervention_comparison")
+
+    missing_top_scenarios = sum(1 for colony in issue_colonies if not colony.get("top_scenarios"))
+    if issue_colonies and missing_top_scenarios:
+        warnings.append("issue_colony_missing_scenarios")
+
+    return _build_verification(
+        issues=issues,
+        warnings=warnings,
+        metrics={
+            "issue_candidate_count": len(issue_candidates),
+            "selected_issue_count": len(selected_issues),
+            "issue_colony_count": len(issue_colonies),
+            "intervention_count": len(interventions),
+            "issue_colonies_missing_scenarios": missing_top_scenarios,
+        },
+    )
+
+
 def verify_report_content(
     content: str,
     *,

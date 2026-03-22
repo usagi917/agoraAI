@@ -157,6 +157,107 @@ async def _seed_prompt_only_simulation(session_factory, *, evidence_mode: str = 
     return {"simulation_id": sim_id, "project_id": project_id, "run_id": run_id}
 
 
+async def _seed_society_first_simulation(session_factory) -> dict[str, str]:
+    project_id = str(uuid.uuid4())
+    sim_id = str(uuid.uuid4())
+
+    async with session_factory() as session:
+        project = Project(id=project_id, name="Society First", prompt_text="新規サービス投入時の市場反応")
+        simulation = Simulation(
+            id=sim_id,
+            project_id=project_id,
+            mode="society_first",
+            prompt_text="新規サービス投入時の市場反応",
+            template_name="scenario_exploration",
+            execution_profile="standard",
+            status="completed",
+            metadata_json={
+                "run_config": {"evidence_mode": "strict", "trust_mode": "strict"},
+                "society_first_result": {
+                    "type": "society_first",
+                    "content": "# Society First\n\n価格受容性が最大論点です。",
+                    "sections": {},
+                    "society_summary": {
+                        "aggregation": {
+                            "average_confidence": 0.71,
+                            "stance_distribution": {"賛成": 0.45, "反対": 0.35, "中立": 0.2},
+                        }
+                    },
+                    "issue_candidates": [
+                        {
+                            "issue_id": "issue-1",
+                            "label": "価格受容性",
+                            "description": "価格に関する論点",
+                            "population_share": 0.4,
+                            "controversy_score": 0.5,
+                            "market_impact_score": 0.9,
+                            "network_spread_score": 0.7,
+                            "selection_score": 0.82,
+                        }
+                    ],
+                    "selected_issues": [
+                        {
+                            "issue_id": "issue-1",
+                            "label": "価格受容性",
+                            "description": "価格に関する論点",
+                            "population_share": 0.4,
+                            "controversy_score": 0.5,
+                            "market_impact_score": 0.9,
+                            "network_spread_score": 0.7,
+                            "selection_score": 0.82,
+                        }
+                    ],
+                    "issue_colonies": [
+                        {
+                            "issue_id": "issue-1",
+                            "label": "価格受容性",
+                            "description": "価格に関する論点",
+                            "integrated_report": "価格障壁で初期採用が鈍る。",
+                            "top_scenarios": [
+                                {
+                                    "description": "価格障壁で導入が遅れる",
+                                    "scenario_score": 0.73,
+                                    "support_ratio": 0.6,
+                                    "model_confidence_mean": 0.7,
+                                    "ci": [0.52, 0.81],
+                                    "supporting_colonies": 3,
+                                    "total_colonies": 5,
+                                    "claim_count": 6,
+                                }
+                            ],
+                        }
+                    ],
+                    "intervention_comparison": [
+                        {
+                            "intervention_id": "price_reduction",
+                            "label": "価格変更",
+                            "change_summary": "初期費用を引き下げる",
+                            "affected_issues": ["価格受容性"],
+                            "expected_effect": "高",
+                        }
+                    ],
+                    "scenarios": [
+                        {
+                            "description": "[価格受容性] 価格障壁で導入が遅れる",
+                            "scenario_score": 0.73,
+                            "support_ratio": 0.6,
+                            "model_confidence_mean": 0.7,
+                            "ci": [0.52, 0.81],
+                            "supporting_colonies": 3,
+                            "total_colonies": 5,
+                            "claim_count": 6,
+                        }
+                    ],
+                    "verification": {"status": "passed", "score": 1.0, "issues": [], "warnings": [], "metrics": {}},
+                },
+            },
+        )
+        session.add_all([project, simulation])
+        await session.commit()
+
+    return {"simulation_id": sim_id, "project_id": project_id}
+
+
 @pytest.mark.asyncio
 async def test_get_simulation_report_includes_quality_and_evidence_refs(client, session_factory):
     seeded = await _seed_single_simulation(session_factory)
@@ -183,6 +284,79 @@ async def test_get_simulation_report_marks_prompt_only_strict_runs_as_unsupporte
     assert payload["quality"]["status"] == "unsupported"
     assert payload["quality"]["unsupported_reason"] == "strict_document_evidence_required"
     assert payload["run_config"]["evidence_mode"] == "strict"
+
+
+@pytest.mark.asyncio
+async def test_get_society_first_report_returns_issue_driven_payload(client, session_factory):
+    seeded = await _seed_society_first_simulation(session_factory)
+
+    response = await client.get(f"/simulations/{seeded['simulation_id']}/report")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["type"] == "society_first"
+    assert payload["issue_candidates"][0]["label"] == "価格受容性"
+    assert payload["intervention_comparison"][0]["label"] == "価格変更"
+    assert payload["scenarios"][0]["description"].startswith("[価格受容性]")
+    assert payload["backtest"]["summary"]["case_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_create_society_first_backtest_updates_report_and_interventions(client, session_factory):
+    seeded = await _seed_society_first_simulation(session_factory)
+
+    response = await client.post(
+        f"/simulations/{seeded['simulation_id']}/backtest",
+        json={
+            "historical_cases": [
+                {
+                    "title": "2025 関西ローンチ",
+                    "observed_at": "2025-10-01",
+                    "baseline_metrics": {
+                        "adoption_rate": 0.18,
+                        "conversion_rate": 0.09,
+                    },
+                    "outcome": {
+                        "issue_label": "価格受容性",
+                        "summary": "価格改定後も本格導入は遅れたが試験導入は増えた",
+                        "actual_scenario": "価格障壁で導入が遅れる",
+                        "metrics": {
+                            "adoption_rate": 0.27,
+                            "conversion_rate": 0.13,
+                        },
+                        "tags": ["価格", "導入"],
+                    },
+                    "interventions": [
+                        {
+                            "intervention_id": "price_reduction",
+                            "label": "価格変更",
+                            "baseline_metrics": {
+                                "adoption_rate": 0.18,
+                                "conversion_rate": 0.09,
+                            },
+                            "outcome_metrics": {
+                                "adoption_rate": 0.27,
+                                "conversion_rate": 0.13,
+                            },
+                            "evidence": ["初月の採用率が改善した"],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ready"
+    assert payload["summary"]["hit_count"] == 1
+
+    report_response = await client.get(f"/simulations/{seeded['simulation_id']}/report")
+    assert report_response.status_code == 200
+    report_payload = report_response.json()
+    assert report_payload["backtest"]["summary"]["case_count"] == 1
+    assert report_payload["intervention_comparison"][0]["comparison_mode"] == "observed"
+    assert report_payload["intervention_comparison"][0]["observed_uplift"] > 0
 
 
 @pytest.mark.asyncio

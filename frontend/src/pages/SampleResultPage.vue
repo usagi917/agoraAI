@@ -14,7 +14,7 @@ const loading = ref(true)
 const graphContainer = ref<HTMLElement | null>(null)
 const activeTab = ref<'report' | 'pm_board'>('report')
 
-const { setFullGraph } = useForceGraph(graphContainer)
+const { setFullGraph, graphError } = useForceGraph(graphContainer)
 
 const isPmBoardMode = computed(() => sample.value?.mode === 'pm_board')
 
@@ -277,6 +277,7 @@ onMounted(async () => {
               <h3>3D Graph</h3>
             </div>
             <div ref="graphContainer" class="graph-snapshot"></div>
+            <div v-if="graphError" class="graph-error-note">{{ graphError }}</div>
           </div>
 
           <!-- Sample Info -->
@@ -404,6 +405,16 @@ onMounted(async () => {
   border-radius: var(--radius-sm);
   border: 1px solid rgba(100,100,255,0.12);
   margin-bottom: 0.5rem;
+}
+.graph-error-note {
+  margin-bottom: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid rgba(245,158,11,0.24);
+  border-radius: var(--radius-sm);
+  background: rgba(245,158,11,0.08);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.6;
 }
 
 .sample-info-text {

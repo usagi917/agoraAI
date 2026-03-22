@@ -21,6 +21,9 @@ class OpenAIAdapter(LLMAdapter):
             self._http_client = httpx.AsyncClient(timeout=httpx.Timeout(300.0))
         return self._http_client
 
+    def _uses_reasoning_controls(self) -> bool:
+        return self.model.startswith("gpt-5") or self.model.startswith(("o1", "o3", "o4"))
+
     async def call(
         self,
         system_prompt: str,
@@ -38,9 +41,17 @@ class OpenAIAdapter(LLMAdapter):
         body: dict = {
             "model": self.model,
             "messages": messages,
-            "temperature": temperature,
             "max_completion_tokens": max_tokens,
         }
+        if self._uses_reasoning_controls():
+            if temperature not in (1, 1.0):
+                logger.info(
+                    "Skipping unsupported temperature override for reasoning model %s: %s",
+                    self.model,
+                    temperature,
+                )
+        else:
+            body["temperature"] = temperature
 
         headers = {
             "Content-Type": "application/json",

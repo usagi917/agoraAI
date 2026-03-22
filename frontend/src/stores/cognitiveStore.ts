@@ -75,11 +75,22 @@ export const useCognitiveStore = defineStore('cognitive', () => {
 
   const selectedAgentReflections = computed(() => {
     if (!selectedAgentId.value) return []
-    return reflections.value.filter((_r) =>
-      memoryEntries.value.some(
-        m => m.agentId === selectedAgentId.value && m.isReflection,
-      ),
+    const selectedMemories = memoryEntries.value.filter(m => m.agentId === selectedAgentId.value)
+    if (selectedMemories.length === 0) return []
+
+    const selectedMemoryIds = new Set(selectedMemories.map(m => m.id))
+    const selectedReflectionRounds = new Set(
+      selectedMemories
+        .filter(m => m.isReflection)
+        .map(m => m.round),
     )
+
+    return reflections.value.filter((reflection) => {
+      if (reflection.sourceIds.length > 0) {
+        return reflection.sourceIds.some(id => selectedMemoryIds.has(id))
+      }
+      return selectedReflectionRounds.has(reflection.round)
+    })
   })
 
   // アクション

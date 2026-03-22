@@ -11,7 +11,16 @@ const TYPE_COLORS: Record<string, string> = {
   market: '#E57373',
   technology: '#BA68C8',
   resource: '#4DB6AC',
+  agent: '#FFB74D',
   unknown: '#90A4AE',
+}
+
+const STANCE_COLORS: Record<string, string> = {
+  '賛成': '#22c55e',
+  '条件付き賛成': '#86efac',
+  '中立': '#a3a3a3',
+  '条件付き反対': '#fca5a5',
+  '反対': '#ef4444',
 }
 
 const GRAPH_LAYOUT = {
@@ -145,7 +154,13 @@ function hasPosition(node: PositionedNode | undefined): node is Position {
     && Number.isFinite(node.z)
 }
 
-function getNodeVisuals(type: string, importanceScore: number) {
+function getNodeVisuals(type: string, importanceScore: number, stance?: string) {
+  if (type === 'agent' && stance) {
+    return {
+      color: STANCE_COLORS[stance] || TYPE_COLORS.agent,
+      size: 2.5 + importanceScore * 3.5,
+    }
+  }
   return {
     color: TYPE_COLORS[type] || TYPE_COLORS.unknown,
     size: 3 + importanceScore * 4,
@@ -189,6 +204,10 @@ function getLinkColor(
   for (const nodeMap of nodeMaps) {
     const node = nodeMap.get(sourceId)
     if (node) {
+      // agent ノード同士のリンクはソースノードの色を使う
+      if (node.type === 'agent') {
+        return (node as InternalNode).color || TYPE_COLORS.agent
+      }
       return TYPE_COLORS[node.type] || TYPE_COLORS.unknown
     }
   }
@@ -284,7 +303,7 @@ function updateInternalNode(node: InternalNode, next: GraphNode) {
   node.label = next.label
   node.type = next.type
   node.importance_score = next.importance_score || 0.5
-  const visuals = getNodeVisuals(node.type, node.importance_score)
+  const visuals = getNodeVisuals(node.type, node.importance_score, next.stance)
   node.color = visuals.color
   node.size = visuals.size
   node.opacity = DEFAULT_NODE_OPACITY
@@ -295,6 +314,7 @@ export function useForceGraph(
   thinkingModeRef?: Ref<ThinkingVisualMode>,
 ) {
   const graph = ref<ForceGraph3DInstance | null>(null)
+  const graphError = ref('')
   let resizeObserver: ResizeObserver | null = null
   let mountedContainer: HTMLElement | null = null
   let activeTransition: GraphTransitionState | null = null
@@ -303,6 +323,7 @@ export function useForceGraph(
   const internalNodes: InternalNode[] = []
   const internalLinks: InternalLink[] = []
   let thinkingCleanup: (() => void) | null = null
+  let externalNodeClickCallback: ((nodeId: string) => void) | null = null
 
   function restartThinkingAnimation() {
     if (!sceneRef || internalNodes.length > 0) return
@@ -424,7 +445,7 @@ export function useForceGraph(
 
   function buildInternalNode(node: GraphNode, seedPosition?: Position): InternalNode {
     const importanceScore = node.importance_score || 0.5
-    const visuals = getNodeVisuals(node.type, importanceScore)
+    const visuals = getNodeVisuals(node.type, importanceScore, node.stance)
 
     return {
       id: node.id,
@@ -484,107 +505,119 @@ export function useForceGraph(
 
     const container = containerRef.value
     mountedContainer = container
-    const width = container.clientWidth
-    const height = container.clientHeight
+    try {
+      const width = container.clientWidth
+      const height = container.clientHeight
 
-    const fg = new ForceGraph3D(container)
-      .width(width)
-      .height(height)
-      .backgroundColor('rgba(0,0,0,0)')
-      .showNavInfo(false)
-      .nodeThreeObject((node: any) => createNodeThreeObject(node as InternalNode))
-      .nodeThreeObjectExtend(false)
-      .linkWidth((link: any) => 0.3 + (link as InternalLink).weight * 0.6)
-      .linkColor((link: any) => (link as InternalLink).color)
-      .linkDirectionalArrowRelPos(0.95)
-      .linkDirectionalParticleWidth(1.2)
-      .linkDirectionalParticleSpeed(0.005)
-      .linkCurvature(0.15)
-      .d3AlphaDecay(GRAPH_LAYOUT.alphaDecay)
-      .d3VelocityDecay(GRAPH_LAYOUT.velocityDecay)
-      .warmupTicks(GRAPH_LAYOUT.warmupTicks)
-      .cooldownTime(GRAPH_LAYOUT.cooldownTime)
+      const fg = new ForceGraph3D(container)
+        .width(width)
+        .height(height)
+        .backgroundColor('rgba(0,0,0,0)')
+        .showNavInfo(false)
+        .nodeThreeObject((node: any) => createNodeThreeObject(node as InternalNode))
+        .nodeThreeObjectExtend(false)
+        .linkWidth((link: any) => 0.3 + (link as InternalLink).weight * 0.6)
+        .linkColor((link: any) => (link as InternalLink).color)
+        .linkDirectionalArrowRelPos(0.95)
+        .linkDirectionalParticleWidth(1.2)
+        .linkDirectionalParticleSpeed(0.005)
+        .linkCurvature(0.15)
+        .d3AlphaDecay(GRAPH_LAYOUT.alphaDecay)
+        .d3VelocityDecay(GRAPH_LAYOUT.velocityDecay)
+        .warmupTicks(GRAPH_LAYOUT.warmupTicks)
+        .cooldownTime(GRAPH_LAYOUT.cooldownTime)
 
-    ;(fg as any)
-      .linkOpacity((link: any) => (link as InternalLink).opacity ?? DEFAULT_LINK_OPACITY)
-      .linkVisibility((link: any) => ((link as InternalLink).opacity ?? 0) > 0.02)
-      .linkDirectionalArrowLength((link: any) => (((link as InternalLink).opacity ?? 0) > 0.05 ? 3 : 0))
-      .linkDirectionalArrowColor((link: any) => (link as InternalLink).color)
-      .linkDirectionalParticles((link: any) => (((link as InternalLink).opacity ?? 0) > 0.12 ? 2 : 0))
-      .linkDirectionalParticleColor((link: any) => (link as InternalLink).color)
+      ;(fg as any)
+        .linkOpacity((link: any) => (link as InternalLink).opacity ?? DEFAULT_LINK_OPACITY)
+        .linkVisibility((link: any) => ((link as InternalLink).opacity ?? 0) > 0.02)
+        .linkDirectionalArrowLength((link: any) => (((link as InternalLink).opacity ?? 0) > 0.05 ? 3 : 0))
+        .linkDirectionalArrowColor((link: any) => (link as InternalLink).color)
+        .linkDirectionalParticles((link: any) => (((link as InternalLink).opacity ?? 0) > 0.12 ? 2 : 0))
+        .linkDirectionalParticleColor((link: any) => (link as InternalLink).color)
 
-    fg.d3Force('charge')?.strength(GRAPH_LAYOUT.chargeStrength)
-    fg.d3Force('link')?.distance(GRAPH_LAYOUT.linkDistance)
+      fg.d3Force('charge')?.strength(GRAPH_LAYOUT.chargeStrength)
+      fg.d3Force('link')?.distance(GRAPH_LAYOUT.linkDistance)
 
-    const renderer = fg.renderer() as THREE.WebGLRenderer
-    renderer.toneMapping = THREE.ACESFilmicToneMapping
-    renderer.toneMappingExposure = 0.9
+      const renderer = fg.renderer() as THREE.WebGLRenderer
+      renderer.toneMapping = THREE.ACESFilmicToneMapping
+      renderer.toneMappingExposure = 0.9
 
-    const camera = fg.camera() as THREE.PerspectiveCamera
-    camera.far = 2000
-    camera.updateProjectionMatrix()
+      const camera = fg.camera() as THREE.PerspectiveCamera
+      camera.far = 2000
+      camera.updateProjectionMatrix()
 
-    const scene = fg.scene()
-    sceneRef = scene
-    scene.fog = new THREE.FogExp2(0x020210, 0.0008)
+      const scene = fg.scene()
+      sceneRef = scene
+      scene.fog = new THREE.FogExp2(0x020210, 0.0008)
 
-    const ambientLight = new THREE.AmbientLight(0x080820, 1.2)
-    scene.add(ambientLight)
+      const ambientLight = new THREE.AmbientLight(0x080820, 1.2)
+      scene.add(ambientLight)
 
-    const purpleLight = new THREE.PointLight(0x9933ff, 1.5, 500)
-    purpleLight.position.set(200, 100, -150)
-    scene.add(purpleLight)
+      const purpleLight = new THREE.PointLight(0x9933ff, 1.5, 500)
+      purpleLight.position.set(200, 100, -150)
+      scene.add(purpleLight)
 
-    const blueLight = new THREE.PointLight(0x3366ff, 1.2, 500)
-    blueLight.position.set(-180, -80, 200)
-    scene.add(blueLight)
+      const blueLight = new THREE.PointLight(0x3366ff, 1.2, 500)
+      blueLight.position.set(-180, -80, 200)
+      scene.add(blueLight)
 
-    const cyanLight = new THREE.PointLight(0x00cccc, 1.0, 400)
-    cyanLight.position.set(50, -150, -100)
-    scene.add(cyanLight)
+      const cyanLight = new THREE.PointLight(0x00cccc, 1.0, 400)
+      cyanLight.position.set(50, -150, -100)
+      scene.add(cyanLight)
 
-    createNebula(scene)
+      createNebula(scene)
 
-    const controls = fg.controls() as any
-    controls.autoRotate = true
-    controls.autoRotateSpeed = 0.3
+      const controls = fg.controls() as any
+      controls.autoRotate = true
+      controls.autoRotateSpeed = 0.3
 
-    fg.onEngineStop(() => {
-      if (!cameraInitialized) {
-        cameraInitialized = true
-        fg.cameraPosition({ x: 0, y: 50, z: 350 })
-      }
-    })
+      fg.onEngineStop(() => {
+        if (!cameraInitialized) {
+          cameraInitialized = true
+          fg.cameraPosition({ x: 0, y: 50, z: 350 })
+        }
+      })
 
-    fg.onNodeClick((node: any) => {
-      const n = node as InternalNode
-      const distance = 100
-      const distRatio = 1 + distance / Math.hypot(n.x || 0, n.y || 0, n.z || 0)
-      fg.cameraPosition(
-        { x: (n.x || 0) * distRatio, y: (n.y || 0) * distRatio, z: (n.z || 0) * distRatio },
-        { x: n.x, y: n.y, z: n.z } as any,
-        1000,
-      )
-    })
+      fg.onNodeClick((node: any) => {
+        const n = node as InternalNode
+        const distance = 100
+        const distRatio = 1 + distance / Math.hypot(n.x || 0, n.y || 0, n.z || 0)
+        fg.cameraPosition(
+          { x: (n.x || 0) * distRatio, y: (n.y || 0) * distRatio, z: (n.z || 0) * distRatio },
+          { x: n.x, y: n.y, z: n.z } as any,
+          1000,
+        )
+        if (externalNodeClickCallback) {
+          externalNodeClickCallback(n.id)
+        }
+      })
 
-    fg.onNodeHover((node: any) => {
-      container.style.cursor = node ? 'pointer' : 'default'
-    })
+      fg.onNodeHover((node: any) => {
+        container.style.cursor = node ? 'pointer' : 'default'
+      })
 
-    graph.value = fg
-    syncGraphData()
+      graphError.value = ''
+      graph.value = fg
+      syncGraphData()
 
-    // Start thinking particles if no nodes yet
-    restartThinkingAnimation()
+      // Start thinking particles if no nodes yet
+      restartThinkingAnimation()
 
-    resizeObserver?.disconnect()
-    resizeObserver = new ResizeObserver(() => {
-      if (!containerRef.value || !graph.value) return
-      const w = containerRef.value.clientWidth
-      const h = containerRef.value.clientHeight
-      graph.value.width(w).height(h)
-    })
-    resizeObserver.observe(container)
+      resizeObserver?.disconnect()
+      resizeObserver = new ResizeObserver(() => {
+        if (!containerRef.value || !graph.value) return
+        const w = containerRef.value.clientWidth
+        const h = containerRef.value.clientHeight
+        graph.value.width(w).height(h)
+      })
+      resizeObserver.observe(container)
+    } catch (error) {
+      graph.value = null
+      sceneRef = null
+      mountedContainer = null
+      graphError.value = 'この環境では 3D グラフを初期化できませんでした。WebGL が利用できない可能性があります。'
+      console.error('Force graph initialization failed:', error)
+    }
   }
 
   function syncGraphData(options: { reheat?: boolean } = {}) {
@@ -805,7 +838,7 @@ export function useForceGraph(
     options: { opacity?: number; sizeMultiplier?: number } = {},
   ): TransitionNodeFrame {
     const importanceScore = node.importance_score || 0.5
-    const visuals = getNodeVisuals(node.type, importanceScore)
+    const visuals = getNodeVisuals(node.type, importanceScore, node.stance)
 
     return {
       label: node.label,
@@ -1153,18 +1186,26 @@ export function useForceGraph(
     stopThinkingAnimation()
     graph.value?._destructor?.()
     graph.value = null
+    graphError.value = ''
     mountedContainer = null
     activeTransition = null
     sceneRef = null
   })
 
+  function onNodeClick(callback: ((nodeId: string) => void) | null) {
+    externalNodeClickCallback = callback
+  }
+
   return {
     graph,
+    graphError,
     setFullGraph,
     applyDiff,
     startGraphTransition,
+    updateGraphTransition,
     finishGraphTransition,
     getNodeById,
     resetCamera,
+    onNodeClick,
   }
 }

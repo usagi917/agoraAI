@@ -68,7 +68,7 @@ export const useSimulationStore = defineStore('simulation', () => {
   )
 
   const isPipelineMode = computed(() => mode.value === 'pipeline')
-  const isSocietyMode = computed(() => mode.value === 'society')
+  const isSocietyMode = computed(() => mode.value === 'society' || mode.value === 'society_first')
 
   const progress = computed(() => {
     if (status.value === 'completed') return 1

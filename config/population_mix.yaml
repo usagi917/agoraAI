@@ -21,37 +21,35 @@ meeting_layer:
 
 # 人口生成パラメータ
 population:
-  default_size: 1000
+  default_size: 10000
   min_size: 100
   max_size: 10000
 
-  # 人口統計分布
+  # 人口統計分布（2020年国勢調査・総務省統計に基づく）
   demographics:
-    age:
-      distribution: normal
-      mean: 42
-      std: 15
-      min: 18
-      max: 85
+    # 年齢は population_generator.py の AGE_BRACKETS で国勢調査分布を使用
     gender:
       distribution: categorical
-      weights: { male: 0.49, female: 0.49, other: 0.02 }
+      # 2020年国勢調査: 男性48.7%, 女性51.3%
+      weights: { male: 0.485, female: 0.510, other: 0.005 }
     education:
       distribution: categorical
+      # 文部科学省・総務省労働力調査（25歳以上）
       weights:
-        high_school: 0.30
-        bachelor: 0.35
-        master: 0.20
-        doctorate: 0.05
-        vocational: 0.10
+        high_school: 0.42   # 高校・中学以下
+        vocational: 0.20    # 専門学校・短期大学
+        bachelor: 0.28      # 大学
+        master: 0.07        # 大学院修士
+        doctorate: 0.03     # 大学院博士
     income_bracket:
       distribution: categorical
+      # 国税庁 民間給与実態統計調査（2021年）全18歳以上ベース
       weights:
-        low: 0.25
-        lower_middle: 0.25
-        upper_middle: 0.30
-        high: 0.15
-        very_high: 0.05
+        low: 0.30           # 200万円未満（無職・パート・学生含む）
+        lower_middle: 0.32  # 200〜400万円
+        upper_middle: 0.22  # 400〜600万円
+        high: 0.12          # 600〜1000万円
+        very_high: 0.04     # 1000万円超
 
   # Big Five パーソナリティ
   big_five:

@@ -10,6 +10,10 @@ from src.app.config import settings
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_POPULATION_SIZE = 1000
+DEFAULT_MIN_POPULATION_SIZE = 100
+DEFAULT_MAX_POPULATION_SIZE = 10000
+
 # 職業リスト（地域・教育レベル別に重み付け）
 OCCUPATIONS = [
     "会社員", "公務員", "教師", "医師", "看護師", "エンジニア", "研究者",
@@ -24,7 +28,35 @@ REGIONS = [
     "関西（都市部）", "関西（郊外）", "中国", "四国", "九州", "沖縄",
 ]
 
-REGION_WEIGHTS = [0.04, 0.07, 0.20, 0.10, 0.12, 0.15, 0.07, 0.06, 0.03, 0.11, 0.05]
+# 2020年国勢調査（令和2年）都道府県別人口比
+REGION_WEIGHTS = [0.041, 0.070, 0.292, 0.053, 0.168, 0.134, 0.043, 0.057, 0.029, 0.101, 0.012]
+
+# 2020年国勢調査 18歳以上の年齢分布（min, max, weight）
+AGE_BRACKETS: list[tuple[int, int, float]] = [
+    (18, 24, 0.079),
+    (25, 29, 0.058),
+    (30, 34, 0.059),
+    (35, 39, 0.068),
+    (40, 44, 0.083),
+    (45, 49, 0.090),
+    (50, 54, 0.085),
+    (55, 59, 0.076),
+    (60, 64, 0.072),
+    (65, 69, 0.082),
+    (70, 74, 0.088),
+    (75, 79, 0.059),
+    (80, 84, 0.038),
+    (85, 90, 0.063),
+]
+
+# 総務省労働力調査・国税庁データに基づく職業別就業人口ウェイト（OCCUPATIONS と同順）
+OCCUPATION_WEIGHTS = [
+    0.210, 0.035, 0.012, 0.003, 0.012, 0.023, 0.006,
+    0.041, 0.052, 0.041, 0.023, 0.002, 0.035, 0.023,
+    0.041, 0.035, 0.023, 0.001, 0.005, 0.008,
+    0.029, 0.035, 0.082, 0.105, 0.082,
+    0.023, 0.006, 0.001, 0.003, 0.003,
+]
 
 INFORMATION_SOURCES = [
     "テレビニュース", "新聞", "SNS(Twitter/X)", "SNS(Instagram)", "YouTube",
@@ -59,22 +91,74 @@ def _sample_categorical(categories: list[str], weights: list[float]) -> str:
     return random.choices(categories, weights=weights, k=1)[0]
 
 
+def _sample_age_from_census(min_age: int = 18, max_age: int = 85) -> int:
+    """2020年国勢調査の年齢分布に基づいて年齢をサンプリングする。"""
+    eligible_brackets = []
+    eligible_weights = []
+    for start, end, weight in AGE_BRACKETS:
+        clipped_start = max(start, min_age)
+        clipped_end = min(end, max_age)
+        if clipped_start <= clipped_end:
+            eligible_brackets.append((clipped_start, clipped_end))
+            eligible_weights.append(weight)
+
+    if not eligible_brackets:
+        return min_age
+
+    bracket = random.choices(eligible_brackets, weights=eligible_weights, k=1)[0]
+    return random.randint(bracket[0], bracket[1])
+
+
+def _sample_age(age_cfg: dict) -> int:
+    """設定に応じて年齢をサンプリングする。"""
+    distribution = age_cfg.get("distribution", "normal")
+    min_age = age_cfg.get("min", 18)
+    max_age = age_cfg.get("max", 85)
+
+    if distribution == "census":
+        return _sample_age_from_census(min_age=min_age, max_age=max_age)
+
+    mean = age_cfg.get("mean", 42)
+    std = age_cfg.get("std", 15)
+    return int(_sample_normal_clamped(mean, std, min_age, max_age))
+
+
 def _sample_normal_clamped(mean: float, std: float, low: float = 0.0, high: float = 1.0) -> float:
     value = random.gauss(mean, std)
     return max(low, min(high, value))
+
+
+def get_population_size_bounds() -> tuple[int, int, int]:
+    """人口サイズのデフォルト値と許容範囲を設定から解決する。"""
+    mix_config = settings.load_population_mix_config()
+    pop_config = mix_config.get("population", {})
+
+    default_size = int(pop_config.get("default_size", DEFAULT_POPULATION_SIZE))
+    min_size = int(pop_config.get("min_size", DEFAULT_MIN_POPULATION_SIZE))
+    max_size = int(pop_config.get("max_size", DEFAULT_MAX_POPULATION_SIZE))
+
+    min_size, max_size = sorted((min_size, max_size))
+    default_size = max(min_size, min(max_size, default_size))
+    return default_size, min_size, max_size
+
+
+def get_default_population_size() -> int:
+    return get_population_size_bounds()[0]
+
+
+def validate_population_size(count: int) -> int:
+    """人口サイズが設定された範囲内かを検証する。"""
+    _, min_size, max_size = get_population_size_bounds()
+    if count < min_size or count > max_size:
+        raise ValueError(f"count は {min_size}〜{max_size} の範囲で指定してください")
+    return count
 
 
 def _generate_demographics(pop_config: dict) -> dict:
     """人口統計情報を生成する。"""
     demo_cfg = pop_config.get("demographics", {})
 
-    age_cfg = demo_cfg.get("age", {})
-    age = int(_sample_normal_clamped(
-        age_cfg.get("mean", 42),
-        age_cfg.get("std", 15),
-        age_cfg.get("min", 18),
-        age_cfg.get("max", 85),
-    ))
+    age = _sample_age(demo_cfg.get("age", {}))
 
     gender_cfg = demo_cfg.get("gender", {}).get("weights", {"male": 0.49, "female": 0.49, "other": 0.02})
     gender = _sample_categorical(list(gender_cfg.keys()), list(gender_cfg.values()))
@@ -92,7 +176,7 @@ def _generate_demographics(pop_config: dict) -> dict:
     income_bracket = _sample_categorical(list(income_cfg.keys()), list(income_cfg.values()))
 
     region = _sample_categorical(REGIONS, REGION_WEIGHTS)
-    occupation = random.choice(OCCUPATIONS)
+    occupation = _sample_categorical(OCCUPATIONS, OCCUPATION_WEIGHTS)
 
     return {
         "age": age,
@@ -189,13 +273,17 @@ def generate_agent_profile(
 
 async def generate_population(
     population_id: str,
-    count: int = 1000,
+    count: int | None = None,
     seed: int | None = None,
 ) -> list[dict[str, Any]]:
     """指定人数の住民プロフィールを一括生成する。
 
     LLM は使用しない。統計的サンプリングのみ。
     """
+    resolved_count = get_default_population_size() if count is None else int(count)
+    if resolved_count <= 0:
+        raise ValueError("count must be positive")
+
     if seed is not None:
         random.seed(seed)
 
@@ -203,9 +291,9 @@ async def generate_population(
     pop_config = mix_config.get("population", {})
 
     agents = []
-    for i in range(count):
-        profile = generate_agent_profile(i, population_id, pop_config, mix_config, count)
+    for i in range(resolved_count):
+        profile = generate_agent_profile(i, population_id, pop_config, mix_config, resolved_count)
         agents.append(profile)
 
-    logger.info("Generated %d agent profiles for population %s", count, population_id)
+    logger.info("Generated %d agent profiles for population %s", resolved_count, population_id)
     return agents

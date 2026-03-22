@@ -2,6 +2,7 @@ import { onUnmounted } from 'vue'
 import { useSimulationStore, type ColonyState } from '../stores/simulationStore'
 import { useGraphStore } from '../stores/graphStore'
 import { useActivityStore } from '../stores/activityStore'
+import { useSocietyStore } from '../stores/societyStore'
 import { useCognitiveSSE } from './useCognitiveSSE'
 
 function getSimulationStreamUrl(simulationId: string) {
@@ -13,6 +14,7 @@ export function useSimulationSSE(simulationId: string) {
   const store = useSimulationStore()
   const graphStore = useGraphStore()
   const activity = useActivityStore()
+  const societyStore = useSocietyStore()
   const { handleCognitiveEvent } = useCognitiveSSE()
   let source: EventSource | null = null
 
@@ -81,6 +83,8 @@ export function useSimulationSSE(simulationId: string) {
       'society_activation_completed',
       'society_evaluation_completed',
       'society_completed',
+      // Society ソーシャルグラフ
+      'society_social_graph_ready',
       // Meeting Layer イベント
       'meeting_started',
       'meeting_round_completed',
@@ -318,7 +322,7 @@ export function useSimulationSSE(simulationId: string) {
         if (!store.isPipelineMode) {
           store.setStatus('running')
         }
-        store.setPhase('world_building')
+        store.setPhase(store.mode === 'society_first' ? 'colony_execution' : 'world_building')
         activity.addEntry('phase', '⬡', 'Swarm シミュレーション開始', {
           track: 'phase',
           status: 'running',
@@ -372,12 +376,12 @@ export function useSimulationSSE(simulationId: string) {
         break
 
       case 'aggregation_completed':
-        store.setPhase('completed')
+        store.setPhase(store.mode === 'society_first' ? 'aggregation' : 'completed')
         break
 
       case 'swarm_completed':
         // パイプラインモードでは swarm_completed は Stage 2 完了を意味する
-        if (!store.isPipelineMode) {
+        if (!store.isPipelineMode && store.mode !== 'society_first') {
           store.setStatus('completed')
           store.setPhase('completed')
           close()
@@ -386,7 +390,7 @@ export function useSimulationSSE(simulationId: string) {
 
       case 'swarm_failed':
         store.setError(payload.error || '不明なエラー')
-        if (!store.isPipelineMode) {
+        if (!store.isPipelineMode && store.mode !== 'society_first') {
           close()
         }
         break
@@ -512,6 +516,15 @@ export function useSimulationSSE(simulationId: string) {
       case 'meeting_completed':
         activity.addEntry('event', '◉', 'Meeting 完了', {
           track: 'phase',
+          status: 'completed',
+        })
+        break
+
+      case 'society_social_graph_ready':
+        societyStore.loadSocialGraph(simulationId)
+        societyStore.loadConversations(simulationId)
+        activity.addEntry('event', '⬡', `ソーシャルグラフ準備完了 (${payload.edge_count}辺)`, {
+          track: 'graph',
           status: 'completed',
         })
         break

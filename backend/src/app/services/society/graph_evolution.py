@@ -10,6 +10,23 @@ from src.app.models.social_edge import SocialEdge
 logger = logging.getLogger(__name__)
 
 
+def _graph_participants(meeting_participants: list[dict]) -> list[tuple[int, str]]:
+    """DB に存在する市民代表だけをグラフ更新の対象にする。"""
+    participants: list[tuple[int, str]] = []
+    for p in meeting_participants:
+        if p.get("role") != "citizen_representative":
+            continue
+        agent_profile = p.get("agent_profile", {}) or {}
+        agent_id = agent_profile.get("id")
+        if not agent_id:
+            continue
+        participant_index = p.get("participant_index")
+        if participant_index is None:
+            participant_index = len(participants)
+        participants.append((int(participant_index), agent_id))
+    return participants
+
+
 def _compute_interaction_strength(
     meeting_rounds: list[list[dict]],
     agent_id: str,
@@ -68,25 +85,19 @@ async def evolve_social_graph(
     if not rounds:
         return 0
 
-    # 参加者のエージェントID一覧
-    participant_ids = []
-    for p in meeting_participants:
-        agent_id = p.get("agent_profile", {}).get("id")
-        if agent_id:
-            participant_ids.append(agent_id)
-
-    if len(participant_ids) < 2:
+    graph_participants = _graph_participants(meeting_participants)
+    if len(graph_participants) < 2:
         return 0
 
     updated = 0
 
-    for i, id_a in enumerate(participant_ids):
-        for j, id_b in enumerate(participant_ids):
-            if i >= j:
+    for pos_a, (round_index_a, id_a) in enumerate(graph_participants):
+        for pos_b, (round_index_b, id_b) in enumerate(graph_participants):
+            if pos_a >= pos_b:
                 continue
 
             delta = _compute_interaction_strength(
-                rounds, id_a, id_b, i, j,
+                rounds, id_a, id_b, round_index_a, round_index_b,
             )
             if delta <= 0:
                 continue

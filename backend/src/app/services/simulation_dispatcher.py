@@ -19,6 +19,7 @@ from src.app.services.pipeline_orchestrator import run_pipeline
 from src.app.services.colony_factory import generate_colony_configs
 from src.app.services.quality import extract_run_config, get_evidence_mode
 from src.app.services.society.society_orchestrator import run_society
+from src.app.services.society_first_orchestrator import run_society_first
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,8 @@ async def dispatch_simulation(simulation_id: str) -> None:
                 await _dispatch_pm_board(session, sim)
             elif sim.mode == "society":
                 await run_society(sim.id)
+            elif sim.mode == "society_first":
+                await run_society_first(sim.id)
             else:
                 raise ValueError(f"Unknown mode: {sim.mode}")
 
@@ -62,6 +65,7 @@ async def dispatch_simulation(simulation_id: str) -> None:
             logger.error(f"Simulation {simulation_id} failed: {error_msg}", exc_info=True)
 
             try:
+                await session.rollback()
                 sim = await session.get(Simulation, simulation_id)
                 if sim:
                     sim.status = "failed"

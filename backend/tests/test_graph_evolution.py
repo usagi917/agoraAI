@@ -1,6 +1,9 @@
 """社会グラフ進化テスト"""
 
-from src.app.services.society.graph_evolution import _compute_interaction_strength
+from src.app.services.society.graph_evolution import (
+    _compute_interaction_strength,
+    _graph_participants,
+)
 
 
 class TestComputeInteractionStrength:
@@ -41,3 +44,29 @@ class TestComputeInteractionStrength:
         ]
         delta = _compute_interaction_strength(rounds, "a", "b", 0, 1)
         assert delta > 0
+
+
+class TestGraphParticipants:
+    def test_skips_experts_and_keeps_citizens(self):
+        participants = [
+            {
+                "participant_index": 0,
+                "role": "citizen_representative",
+                "agent_profile": {"id": "citizen-1"},
+            },
+            {
+                "participant_index": 1,
+                "role": "expert",
+                "agent_profile": {"id": "expert-1"},
+            },
+            {
+                "participant_index": 2,
+                "role": "citizen_representative",
+                "agent_profile": {"id": "citizen-2"},
+            },
+        ]
+
+        assert _graph_participants(participants) == [
+            (0, "citizen-1"),
+            (2, "citizen-2"),
+        ]
