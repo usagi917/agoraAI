@@ -59,10 +59,6 @@ def get_evidence_mode(metadata: dict[str, Any] | None, default: str = DEFAULT_EV
     return normalize_evidence_mode(config.get("evidence_mode") or default)
 
 
-def _has_document_evidence(refs: list[dict[str, Any]]) -> bool:
-    return any(str(ref.get("source_type", "")).startswith("document") for ref in refs)
-
-
 def _tokenize_for_relevance(text: str) -> set[str]:
     return {
         token
@@ -180,19 +176,6 @@ def build_prompt_evidence_ref(prompt_text: str) -> dict[str, Any] | None:
         "source_type": "prompt_input",
         "source_id": "prompt_input",
         "label": "User prompt",
-        "excerpt": excerpt,
-        "char_start": 0,
-        "char_end": len(excerpt),
-    }
-
-
-def build_document_evidence_ref(document: Document) -> dict[str, Any]:
-    text = (document.text_content or "").strip()
-    excerpt = text[:200]
-    return {
-        "source_type": "document",
-        "source_id": document.id,
-        "label": document.filename,
         "excerpt": excerpt,
         "char_start": 0,
         "char_end": len(excerpt),
@@ -504,5 +487,3 @@ def merge_evidence_refs(*groups: list[dict[str, Any]] | None) -> list[dict[str, 
     return _dedupe_evidence_refs(merged)
 
 
-def has_document_evidence(refs: list[dict[str, Any]] | None) -> bool:
-    return _has_document_evidence(refs or [])

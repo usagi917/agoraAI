@@ -42,6 +42,22 @@ def _build_participant_context(participant: dict) -> str:
 def _build_meeting_system_prompt(participant: dict, theme: str, round_name: str) -> str:
     """Meeting 用のシステムプロンプトを構築する。"""
     context = _build_participant_context(participant)
+    is_devil_advocate = participant.get("is_devil_advocate", False)
+
+    devil_advocate_instruction = (
+        "\n\n【反証役】あなたは意図的に主流意見への反論を提示する役割です。"
+        "最も強力な反証を探し、批判的に検証してください。"
+        "他の参加者が見落としているリスクや前提の誤りを指摘してください。"
+    ) if is_devil_advocate else ""
+
+    json_format = (
+        f"回答はJSON形式で:\n"
+        f'{{"position": "あなたの立場の要約", '
+        f'"argument": "100-200文字の主張", '
+        f'"evidence": "根拠となる事実やデータ", '
+        f'"concerns": ["懸念事項"], '
+        f'"questions_to_others": ["他の参加者への質問"]}}'
+    )
 
     if participant["role"] == "expert":
         prompts = participant.get("prompts", {})
@@ -51,13 +67,9 @@ def _build_meeting_system_prompt(participant: dict, theme: str, round_name: str)
             f"{context}\n\n"
             f"テーマ: {theme}\n\n"
             f"議論フェーズ: {round_name}\n\n"
-            f"専門家としての指示:\n{expert_instruction}\n\n"
-            f"回答はJSON形式で:\n"
-            f'{{"position": "あなたの立場の要約", '
-            f'"argument": "100-200文字の主張", '
-            f'"evidence": "根拠となる事実やデータ", '
-            f'"concerns": ["懸念事項"], '
-            f'"questions_to_others": ["他の参加者への質問"]}}'
+            f"専門家としての指示:\n{expert_instruction}"
+            f"{devil_advocate_instruction}\n\n"
+            f"{json_format}"
         )
 
     return (
@@ -65,13 +77,9 @@ def _build_meeting_system_prompt(participant: dict, theme: str, round_name: str)
         f"{context}\n\n"
         f"テーマ: {theme}\n\n"
         f"議論フェーズ: {round_name}\n\n"
-        f"あなたのプロフィールと価値観に基づいて率直に議論してください。\n\n"
-        f"回答はJSON形式で:\n"
-        f'{{"position": "あなたの立場の要約", '
-        f'"argument": "100-200文字の主張", '
-        f'"evidence": "根拠となる事実や経験", '
-        f'"concerns": ["懸念事項"], '
-        f'"questions_to_others": ["他の参加者への質問"]}}'
+        f"あなたのプロフィールと価値観に基づいて率直に議論してください。"
+        f"{devil_advocate_instruction}\n\n"
+        f"{json_format}"
     )
 
 
@@ -154,6 +162,17 @@ async def _run_meeting_round(
             "round": round_number,
             "round_name": round_name,
             "argument_count": len(arguments),
+            "arguments": [
+                {
+                    "participant_name": arg.get("participant_name", ""),
+                    "participant_index": arg.get("participant_index", 0),
+                    "role": arg.get("role", ""),
+                    "argument": (arg.get("argument", "") or "")[:300],
+                    "position": (arg.get("position", "") or "")[:100],
+                    "questions_to_others": arg.get("questions_to_others", []),
+                }
+                for arg in arguments
+            ],
         })
 
     return arguments
@@ -282,6 +301,7 @@ async def run_meeting(
         await sse_manager.publish(simulation_id, "meeting_completed", {
             "rounds": len(all_arguments),
             "synthesis_available": bool(synthesis),
+            "stance_shifts": synthesis.get("stance_shifts", []) if synthesis else [],
         })
 
     # 参加者サマリー（プロフィール詳細を除外）

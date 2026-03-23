@@ -11,6 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.llm.client import LLMClient
 from src.app.models.report import Report
 from src.app.models.simulation import Simulation
+from src.app.services.decision_briefing import (
+    build_pipeline_decision_brief,
+    render_decision_brief_markdown,
+)
 from src.app.services.pipeline_fallbacks import build_pipeline_report_fallback
 from src.app.services.quality import (
     build_quality_summary,
@@ -190,6 +194,15 @@ async def generate_final_report(
                 scenarios=swarm_result.get("aggregation", {}).get("scenarios", []),
                 pm_result=pm_result,
             )
+        decision_brief = build_pipeline_decision_brief(
+            prompt_text=sim.prompt_text,
+            report_content=final_content,
+            scenarios=swarm_result.get("aggregation", {}).get("scenarios", []),
+            pm_result=pm_result,
+        )
+        final_content = (
+            f"{render_decision_brief_markdown(decision_brief)}\n\n---\n\n{final_content}"
+        )
         completed_sections: list[str] = []
         evidence_query_base = "\n".join(
             filter(
@@ -289,6 +302,7 @@ async def generate_final_report(
                 "verification": combined_verification,
                 "section_details": section_details,
                 "evidence_refs": all_evidence_refs,
+                "decision_brief": decision_brief,
                 "single_report": single_result.get("report_content", "")[:2000],
                 "swarm_report": swarm_result.get("integrated_report", "")[:2000],
                 "pm_result": {

@@ -9,6 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.config import settings
 from src.app.llm.client import LLMClient
 from src.app.llm.validator import validate_pm_board_output
+from src.app.services.decision_briefing import (
+    build_pm_board_decision_brief,
+    render_decision_brief_markdown,
+)
 from src.app.services.pipeline_fallbacks import build_pm_board_fallback, pm_board_has_substance
 from src.app.services.quality import (
     build_quality_summary,
@@ -217,6 +221,12 @@ async def run_pm_board(
             )
             used_fallback = True
 
+        output["decision_brief"] = build_pm_board_decision_brief(
+            prompt_text=prompt_text,
+            pm_result=output,
+            scenarios=scenario_candidates,
+        )
+        output["content"] = render_decision_brief_markdown(output["decision_brief"])
         output["run_config"] = {
             "evidence_mode": normalized_evidence_mode,
             "trust_mode": "strict",

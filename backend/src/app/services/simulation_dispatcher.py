@@ -17,9 +17,11 @@ from src.app.services.swarm_orchestrator import run_swarm
 from src.app.services.pm_board_orchestrator import run_pm_board
 from src.app.services.pipeline_orchestrator import run_pipeline
 from src.app.services.colony_factory import generate_colony_configs
+from src.app.services.meta_orchestrator import run_meta_simulation
 from src.app.services.quality import extract_run_config, get_evidence_mode
 from src.app.services.society.society_orchestrator import run_society
 from src.app.services.society_first_orchestrator import run_society_first
+from src.app.services.unified_orchestrator import run_unified
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,8 @@ async def dispatch_simulation(simulation_id: str) -> None:
 
             if sim.mode == "pipeline":
                 await run_pipeline(sim.id)
+            elif sim.mode == "meta_simulation":
+                await run_meta_simulation(sim.id)
             elif sim.mode == "single":
                 await _dispatch_single(session, sim)
             elif sim.mode in ("swarm", "hybrid"):
@@ -57,6 +61,8 @@ async def dispatch_simulation(simulation_id: str) -> None:
                 await run_society(sim.id)
             elif sim.mode == "society_first":
                 await run_society_first(sim.id)
+            elif sim.mode == "unified":
+                await run_unified(sim.id)
             else:
                 raise ValueError(f"Unknown mode: {sim.mode}")
 

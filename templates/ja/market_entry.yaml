@@ -1,0 +1,38 @@
+name: market_entry
+display_name: 市場参入判断
+description: 新市場への参入判断を、競合分析・顧客受容性・リスク評価から総合的にシミュレーションします。
+category: ビジネス
+
+wizard_steps:
+  - key: market_description
+    label: 市場・業界の説明
+    placeholder: "例: 日本の法人向けAIアシスタント市場に参入を検討"
+    type: textarea
+  - key: company_strengths
+    label: 自社の強み/制約
+    placeholder: "例: 自然言語処理技術に強み、日本語対応が課題"
+    type: textarea
+  - key: analysis_focus
+    label: 分析フォーカス
+    type: multi_select
+    options:
+      - 競合反応
+      - 顧客受容性
+      - リスク分析
+      - 価格戦略
+
+prompt_template: |
+  以下の市場参入判断について、シミュレーションを行ってください。
+
+  【市場・業界】
+  {market_description}
+
+  【自社の強み/制約】
+  {company_strengths}
+
+  【分析フォーカス】
+  {analysis_focus}
+
+  潜在顧客、既存競合、パートナー企業、規制当局など多様なステークホルダーの
+  反応をシミュレーションし、参入の Go/No-Go 判断に必要な情報を提供してください。
+  市場サイズ、参入障壁、差別化ポイント、想定リスクを具体的に分析してください。

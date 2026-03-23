@@ -2,7 +2,7 @@ import * as THREE from 'three'
 
 const DISSOLVE_DURATION = 600
 
-export type ThinkingVisualMode = 'idle' | 'graphrag' | 'simulation' | 'swarm' | 'report'
+export type ThinkingVisualMode = 'idle' | 'graphrag' | 'simulation' | 'swarm' | 'report' | 'society'
 
 const MODE_PRESETS: Record<ThinkingVisualMode, { color: number; secondaryColor: number; particleCount: number; orbitRadius: number; size: number; opacity: number; speedBase: number }> = {
   idle: {
@@ -49,6 +49,15 @@ const MODE_PRESETS: Record<ThinkingVisualMode, { color: number; secondaryColor: 
     size: 3.3,
     opacity: 0.52,
     speedBase: 0.0018,
+  },
+  society: {
+    color: 0x66bb6a,
+    secondaryColor: 0xb39ddb,
+    particleCount: 72,
+    orbitRadius: 96,
+    size: 2.6,
+    opacity: 0.54,
+    speedBase: 0.0024,
   },
 }
 

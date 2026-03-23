@@ -3,6 +3,7 @@ import { useSimulationStore, type ColonyState } from '../stores/simulationStore'
 import { useGraphStore } from '../stores/graphStore'
 import { useActivityStore } from '../stores/activityStore'
 import { useSocietyStore } from '../stores/societyStore'
+import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useCognitiveSSE } from './useCognitiveSSE'
 
 function getSimulationStreamUrl(simulationId: string) {
@@ -15,6 +16,7 @@ export function useSimulationSSE(simulationId: string) {
   const graphStore = useGraphStore()
   const activity = useActivityStore()
   const societyStore = useSocietyStore()
+  const societyGraphStore = useSocietyGraphStore()
   const { handleCognitiveEvent } = useCognitiveSSE()
   let source: EventSource | null = null
 
@@ -71,6 +73,16 @@ export function useSimulationSSE(simulationId: string) {
       'pipeline_stage_started',
       'pipeline_stage_completed',
       'pipeline_completed',
+      // Meta Simulation イベント
+      'meta_started',
+      'meta_cycle_started',
+      'meta_cycle_completed',
+      'meta_phase_changed',
+      'meta_activation_progress',
+      'meta_issue_swarm_completed',
+      'meta_interventions_generated',
+      'meta_score_updated',
+      'meta_converged',
       // 統一イベント
       'simulation_completed',
       'simulation_failed',
@@ -85,6 +97,8 @@ export function useSimulationSSE(simulationId: string) {
       'society_completed',
       // Society ソーシャルグラフ
       'society_social_graph_ready',
+      // Unified モード イベント
+      'unified_phase_changed',
       // Meeting Layer イベント
       'meeting_started',
       'meeting_round_completed',
@@ -122,6 +136,97 @@ export function useSimulationSSE(simulationId: string) {
 
   function handleEvent(eventType: string, payload: Record<string, any>) {
     switch (eventType) {
+      // === Meta Simulation イベント ===
+      case 'meta_started':
+        store.setStatus('running')
+        store.setMetaCycle(0, payload.max_cycles || 0)
+        store.setMetaTargetScore(Number(payload.target_score || 0))
+        store.setMetaPhase('world_building')
+        store.setPhase('meta_world_building')
+        activity.addEntry('phase', '⬢', 'Meta Simulation 開始', {
+          detail: payload.target_score ? `target ${(Number(payload.target_score) * 100).toFixed(0)}%` : undefined,
+          track: 'phase',
+          status: 'running',
+        })
+        break
+
+      case 'meta_cycle_started':
+        store.setStatus('running')
+        store.setMetaCycle(payload.cycle_index || 0)
+        if (payload.target_score) {
+          store.setMetaTargetScore(Number(payload.target_score))
+        }
+        store.setMetaSelectedIntervention(payload.selected_intervention || null)
+        store.setMetaPhase('society')
+        store.setPhase('meta_society')
+        activity.addEntry('phase', '⬢', `Meta Cycle ${payload.cycle_index} 開始`, {
+          track: 'phase',
+          status: 'running',
+        })
+        break
+
+      case 'meta_phase_changed':
+        store.setMetaPhase(payload.phase || 'idle')
+        store.setPhase(`meta_${payload.phase || 'idle'}`)
+        if (payload.issue_label) {
+          activity.addEntry('event', '⬡', `Issue Colony: ${payload.issue_label}`, {
+            track: 'swarm',
+            status: 'running',
+          })
+        }
+        break
+
+      case 'meta_activation_progress':
+        store.setSocietyActivationProgress(payload.completed || 0, payload.total || 0)
+        break
+
+      case 'meta_issue_swarm_completed':
+        activity.addEntry('event', '⬡', `${payload.issue_label || 'Issue'} 深掘り完了`, {
+          detail: `${payload.scenario_count || 0} scenarios`,
+          track: 'swarm',
+          status: 'completed',
+        })
+        break
+
+      case 'meta_interventions_generated':
+        store.setMetaSelectedIntervention(payload.selected_intervention || null)
+        activity.addEntry('event', '◉', `介入候補生成 (${payload.count || 0}件)`, {
+          detail: payload.selected_intervention?.label || undefined,
+          track: 'report',
+          status: 'completed',
+        })
+        break
+
+      case 'meta_score_updated':
+        store.setMetaBestScore(Number(payload.objective_score || 0))
+        store.setMetaStopReason(payload.stop_evaluation?.reason || '')
+        store.setMetaPhase('scoring')
+        store.setPhase('meta_scoring')
+        activity.addEntry('event', '◎', `Meta Score ${(Number(payload.objective_score || 0) * 100).toFixed(0)}%`, {
+          detail: payload.stop_evaluation?.reason || undefined,
+          track: 'phase',
+          status: 'completed',
+        })
+        break
+
+      case 'meta_cycle_completed':
+        activity.addEntry('event', '✓', `Meta Cycle ${payload.cycle_index} 完了`, {
+          detail: `${(Number(payload.objective_score || 0) * 100).toFixed(0)}% / ${payload.stop_reason || 'continue'}`,
+          track: 'phase',
+          status: 'completed',
+        })
+        break
+
+      case 'meta_converged':
+        store.setMetaBestScore(Number(payload.best_score || 0))
+        store.setMetaStopReason(payload.stop_reason || '')
+        activity.addEntry('phase', '✓', `Meta 収束: ${(Number(payload.best_score || 0) * 100).toFixed(0)}%`, {
+          detail: payload.stop_reason || undefined,
+          track: 'phase',
+          status: 'completed',
+        })
+        break
+
       // === パイプライン イベント ===
       case 'pipeline_stage_started':
         store.setPipelineStage(payload.stage)
@@ -432,6 +537,26 @@ export function useSimulationSSE(simulationId: string) {
         }
         break
 
+      // === Unified モード ===
+      case 'unified_phase_changed':
+        store.setUnifiedPhase(payload.phase || 'idle')
+        store.setUnifiedPhaseIndex(payload.index || 0, payload.total || 3)
+        store.setStatus('running')
+        {
+          const phaseLabels: Record<string, string> = {
+            society_pulse: '社会の脈動を測定中',
+            council: '評議会議論を開始',
+            synthesis: '統合分析を実行中',
+          }
+          const label = phaseLabels[payload.phase] || `Unified Phase: ${payload.phase}`
+          activity.addEntry('phase', '◈', label, {
+            detail: `${payload.index || 0}/${payload.total || 3}`,
+            track: 'phase',
+            status: 'running',
+          })
+        }
+        break
+
       // === Society モード ===
       case 'society_started':
         store.setStatus('running')
@@ -456,6 +581,9 @@ export function useSimulationSSE(simulationId: string) {
       case 'society_selection_completed':
         store.setSocietyPhase('activation')
         store.setPhase('society_activation')
+        if (payload.selected_agents) {
+          societyGraphStore.setSelectedAgents(payload.selected_agents)
+        }
         activity.addEntry('event', '◎', `${payload.selected_count}人を選抜`, {
           detail: `${payload.total_population}人から${payload.selected_count}人を選出`,
           track: 'agent',
@@ -473,6 +601,7 @@ export function useSimulationSSE(simulationId: string) {
 
       case 'society_activation_progress':
         store.setSocietyActivationProgress(payload.completed, payload.total)
+        societyGraphStore.updateActivationProgress(payload.completed, payload.total)
         break
 
       case 'society_activation_completed':
@@ -506,6 +635,9 @@ export function useSimulationSSE(simulationId: string) {
         break
 
       case 'meeting_round_completed':
+        if (payload.arguments) {
+          societyGraphStore.setMeetingRound(payload.round, payload.arguments)
+        }
         activity.addEntry('event', '◉', `Meeting Round ${payload.round}: ${payload.round_name}`, {
           detail: `${payload.argument_count}件の発言`,
           track: 'agent',
@@ -514,6 +646,10 @@ export function useSimulationSSE(simulationId: string) {
         break
 
       case 'meeting_completed':
+        societyGraphStore.clearSpeaking()
+        if (payload.stance_shifts?.length) {
+          societyGraphStore.addStanceShifts(payload.stance_shifts)
+        }
         activity.addEntry('event', '◉', 'Meeting 完了', {
           track: 'phase',
           status: 'completed',
@@ -521,7 +657,12 @@ export function useSimulationSSE(simulationId: string) {
         break
 
       case 'society_social_graph_ready':
-        societyStore.loadSocialGraph(simulationId)
+        societyStore.loadSocialGraph(simulationId).then(() => {
+          societyGraphStore.hydrateWithSocialGraph(
+            Array.from(societyStore.agents.values()),
+            societyStore.socialEdges,
+          )
+        })
         societyStore.loadConversations(simulationId)
         activity.addEntry('event', '⬡', `ソーシャルグラフ準備完了 (${payload.edge_count}辺)`, {
           track: 'graph',

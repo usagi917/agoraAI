@@ -1,0 +1,38 @@
+name: policy_impact
+display_name: 政策影響シミュレーション
+description: 政策導入による社会的影響を、多様なステークホルダーの反応からシミュレーションします。
+category: 政策
+
+wizard_steps:
+  - key: policy_overview
+    label: 政策の概要
+    placeholder: "例: 育児休暇の男性取得義務化を検討しています"
+    type: textarea
+  - key: analysis_focus
+    label: 知りたいこと
+    type: multi_select
+    options:
+      - 世論支持率
+      - ステークホルダー反応
+      - リスク分析
+      - 対案比較
+  - key: target_region
+    label: 対象地域・層
+    placeholder: "例: 日本全国の20-50代労働者"
+    type: text
+
+prompt_template: |
+  以下の政策について、社会的影響をシミュレーションしてください。
+
+  【政策概要】
+  {policy_overview}
+
+  【分析フォーカス】
+  {analysis_focus}
+
+  【対象地域・層】
+  {target_region}
+
+  各ステークホルダー（企業経営者、労働者、行政機関、子育て世帯など）の反応を
+  具体的にシミュレーションし、賛否の分布、主要な懸念事項、予想される効果を
+  分析してください。

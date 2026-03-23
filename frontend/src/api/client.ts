@@ -149,6 +149,55 @@ export interface SectionDetail {
   quality: QualitySummary
 }
 
+export interface DecisionKeyReason {
+  reason: string
+  evidence?: string
+  confidence?: number
+  decision_impact?: string
+}
+
+export interface DecisionGuardrail {
+  condition: string
+  status?: string
+  why_it_matters?: string
+}
+
+export interface DecisionDealBreaker {
+  trigger: string
+  impact: string
+  recommended_response?: string
+}
+
+export interface DecisionUnknown {
+  question: string
+  importance?: string
+  how_to_validate?: string
+  decision_blocking?: boolean
+}
+
+export interface DecisionNextDecision {
+  decision: string
+  owner?: string
+  deadline?: string
+  input_needed?: string
+}
+
+export interface DecisionAction {
+  action: string
+  owner?: string
+  deadline?: string
+  expected_learning?: string
+  priority?: 'high' | 'medium' | 'low' | string
+}
+
+export interface DecisionOptionComparison {
+  label: string
+  upside?: string
+  downside?: string
+  fit?: string
+  when_to_choose?: string
+}
+
 export interface ScenarioReport {
   description: string
   probability?: number
@@ -171,6 +220,7 @@ export interface SimulationReportBase {
   type: string
   content?: string
   sections?: Record<string, any>
+  decision_brief?: DecisionBrief
   scenarios?: ScenarioReport[]
   diversity_score?: number
   entropy?: number
@@ -385,7 +435,106 @@ export interface SocietyFirstReportResponse extends SimulationReportBase {
   scenarios?: ScenarioReport[]
 }
 
-export type SimulationReportResponse = SimulationReportBase
+export interface MetaInterventionPlan {
+  intervention_id: string
+  label: string
+  change_type: string
+  hypothesis: string
+  target_issues: string[]
+  expected_effect: string
+  expected_delta: number
+  confidence: number
+  implementation_cost: string
+  selection_score?: number
+}
+
+export interface MetaSimulationCycle {
+  cycle_index: number
+  population_id: string
+  population_count: number
+  selected_count: number
+  aggregation: Record<string, any>
+  evaluation: Record<string, number>
+  meeting: Record<string, any>
+  issue_candidates: SocietyFirstIssueCandidate[]
+  selected_issues: SocietyFirstIssueCandidate[]
+  issue_colonies: SocietyFirstIssueColony[]
+  scenarios: ScenarioReport[]
+  pm_board: PMBoardReportResponse
+  interventions: MetaInterventionPlan[]
+  selected_intervention?: MetaInterventionPlan | null
+  score_breakdown?: {
+    society_score: number
+    swarm_score: number
+    pm_score: number
+    objective_score: number
+  }
+  objective_score: number
+  stop_evaluation?: Record<string, any>
+}
+
+export interface MetaSimulationReportResponse extends SimulationReportBase {
+  type: 'meta_simulation'
+  content: string
+  summary_markdown: string
+  baseline: Record<string, any>
+  cycles: MetaSimulationCycle[]
+  final_state: Record<string, any>
+  intervention_history: MetaInterventionPlan[]
+  pm_board?: PMBoardReportResponse
+  society_summary?: Record<string, any>
+  scenarios?: ScenarioReport[]
+}
+
+export interface DecisionBrief {
+  recommendation: 'Go' | 'No-Go' | '条件付きGo'
+  agreement_score?: number
+  agreement_breakdown?: { society: number; council: number; synthesis: number }
+  decision_summary?: string
+  why_now?: string
+  key_reasons?: DecisionKeyReason[]
+  guardrails?: DecisionGuardrail[]
+  deal_breakers?: DecisionDealBreaker[]
+  critical_unknowns?: DecisionUnknown[]
+  next_decisions?: DecisionNextDecision[]
+  recommended_actions?: DecisionAction[]
+  option_comparison?: DecisionOptionComparison[]
+  confidence_explainer?: string
+  evidence_gaps?: string[]
+  options?: Array<{ label: string; expected_effect: string; risk: string }>
+  strongest_counterargument?: string
+  risk_factors?: Array<{ condition: string; impact: string }>
+  next_steps?: string[]
+  time_horizon?: {
+    short_term: { period: string; prediction: string }
+    mid_term: { period: string; prediction: string }
+    long_term: { period: string; prediction: string }
+  }
+  stakeholder_reactions?: Array<{ group: string; reaction: string; percentage: number }>
+}
+
+export interface UnifiedReportResponse extends SimulationReportBase {
+  type: 'unified'
+  decision_brief: DecisionBrief
+  agreement_score: number
+  society_summary: Record<string, any>
+  council: {
+    participants: Array<{ display_name: string; role: string; stance: string }>
+    rounds: any[][]
+    synthesis: Record<string, any>
+    devil_advocate_summary: string
+  }
+}
+
+export type SimulationReportResponse =
+  | SingleReportResponse
+  | SwarmReportResponse
+  | PipelineReportResponse
+  | PMBoardReportResponse
+  | SocietyFirstReportResponse
+  | MetaSimulationReportResponse
+  | UnifiedReportResponse
+  | SimulationReportBase
 
 export interface SimulationTimelineEvent {
   id: string
@@ -412,7 +561,7 @@ export async function createSimulation(
     project_id: options.projectId || null,
     template_name: options.templateName || '',
     execution_profile: options.executionProfile || 'standard',
-    mode: options.mode || 'pipeline',
+    mode: options.mode || 'unified',
     prompt_text: options.promptText || '',
     evidence_mode: options.evidenceMode || 'strict',
   })
@@ -441,21 +590,6 @@ export async function getSimulationGraphHistory(simId: string): Promise<GraphSna
 
 export async function getSimulationReport(simId: string): Promise<SimulationReportResponse> {
   const { data } = await api.get(`/simulations/${simId}/report`)
-  return data
-}
-
-export async function getSimulationBacktest(simId: string): Promise<SocietyFirstBacktestResponse> {
-  const { data } = await api.get(`/simulations/${simId}/backtest`)
-  return data
-}
-
-export async function submitSimulationBacktest(
-  simId: string,
-  historicalCases: SocietyFirstHistoricalCase[],
-): Promise<SocietyFirstBacktestResponse> {
-  const { data } = await api.post(`/simulations/${simId}/backtest`, {
-    historical_cases: historicalCases,
-  })
   return data
 }
 
@@ -489,34 +623,6 @@ export interface PopulationResponse {
   created_at: string
 }
 
-export interface SocietyActivationResponse {
-  id: string
-  simulation_id: string
-  population_id: string
-  phase_data: {
-    aggregation: {
-      total_respondents: number
-      stance_distribution: Record<string, number>
-      average_confidence: number
-      top_concerns: string[]
-      top_priorities: string[]
-    }
-    representative_count: number
-  }
-  usage: Record<string, any>
-  created_at: string
-}
-
-export interface EvaluationMetric {
-  id: string
-  metric_name: string
-  score: number
-  details: Record<string, any>
-  baseline_type: string | null
-  baseline_score: number | null
-  created_at: string
-}
-
 export async function listPopulations(): Promise<PopulationResponse[]> {
   const { data } = await api.get('/society/populations')
   return data
@@ -524,21 +630,6 @@ export async function listPopulations(): Promise<PopulationResponse[]> {
 
 export async function generatePopulation(count: number = 1000, seed?: number) {
   const { data } = await api.post('/society/populations/generate', { count, seed })
-  return data
-}
-
-export async function getSocietyActivation(simId: string): Promise<SocietyActivationResponse> {
-  const { data } = await api.get(`/society/simulations/${simId}/activation`)
-  return data
-}
-
-export async function getSocietyEvaluation(simId: string): Promise<EvaluationMetric[]> {
-  const { data } = await api.get(`/society/simulations/${simId}/evaluation`)
-  return data
-}
-
-export async function getSocietyMeeting(simId: string) {
-  const { data } = await api.get(`/society/simulations/${simId}/meeting`)
   return data
 }
 
@@ -589,25 +680,6 @@ export interface SocialGraphResponse {
   nodes: SocialGraphNode[]
   edges: SocialGraphEdge[]
   population_id: string
-}
-
-export interface AgentListItem {
-  id: string
-  agent_index: number
-  demographics: AgentDemographics
-  big_five: Record<string, number>
-  stance: string
-  confidence: number
-  reason: string
-  concern: string
-  priority: string
-}
-
-export interface AgentListResponse {
-  agents: AgentListItem[]
-  total: number
-  page: number
-  page_size: number
 }
 
 export interface AgentConnection {
@@ -680,7 +752,7 @@ export interface MeetingSynthesis {
   overall_assessment?: string
 }
 
-export interface ConversationsResponse {
+interface ConversationsResponse {
   rounds: ConversationRound[]
   participants: MeetingParticipant[]
   synthesis: MeetingSynthesis
@@ -689,14 +761,6 @@ export interface ConversationsResponse {
 
 export async function getSocialGraph(simId: string): Promise<SocialGraphResponse> {
   const { data } = await api.get(`/society/simulations/${simId}/social-graph`)
-  return data
-}
-
-export async function getSocietyAgents(
-  simId: string,
-  filters?: { stance?: string; region?: string; occupation?: string; page?: number; page_size?: number },
-): Promise<AgentListResponse> {
-  const { data } = await api.get(`/society/simulations/${simId}/agents`, { params: filters })
   return data
 }
 
@@ -769,11 +833,6 @@ export async function getNarrative(simId: string): Promise<{ phase_data: Narrati
 }
 
 // === Sample Results API (API Key不要) ===
-
-export async function getSampleResults() {
-  const { data } = await api.get('/simulations/samples')
-  return data
-}
 
 export async function getSampleResult(sampleId: string) {
   const { data } = await api.get(`/simulations/samples/${sampleId}`)

@@ -14,7 +14,7 @@ class Simulation(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("projects.id"), nullable=True)
-    mode: Mapped[str] = mapped_column(String(20), default="pipeline")  # pipeline | single | swarm | hybrid | pm_board | society | society_first
+    mode: Mapped[str] = mapped_column(String(20), default="pipeline")  # pipeline | meta_simulation | single | swarm | hybrid | pm_board | society | society_first | unified
     prompt_text: Mapped[str] = mapped_column(Text, default="")
     template_name: Mapped[str] = mapped_column(String(100), default="")
     execution_profile: Mapped[str] = mapped_column(String(20), default="standard")

@@ -19,8 +19,15 @@ import {
   type RunConfig,
   type SocietyFirstReportResponse,
   type SocietyFirstBacktestResponse,
+  type SocietyFirstIntervention,
+  type SocietyFirstInterventionEvidence,
+  type MetaSimulationReportResponse,
+  type MetaInterventionPlan,
+  type UnifiedReportResponse,
+  type DecisionBrief,
 } from '../api/client'
 import { useForceGraph } from '../composables/useForceGraph'
+import DecisionBriefComponent from '../components/DecisionBrief.vue'
 import TemporalSlider from '../components/TemporalSlider.vue'
 import ProbabilityChart from '../components/ProbabilityChart.vue'
 import ScenarioCompare from '../components/ScenarioCompare.vue'
@@ -58,7 +65,7 @@ const isPlaying = ref(false)
 const colonies = ref<ColonyResponse[]>([])
 const cognitiveStore = useCognitiveStore()
 const societyStore = useSocietyStore()
-const activeTab = ref<'report' | 'scenarios' | 'pm_evaluation' | 'graph' | 'society'>('report')
+const activeTab = ref<'report' | 'scenarios' | 'pm_evaluation' | 'graph' | 'society' | 'decision_brief'>('report')
 const societySubTab = ref<'overview' | 'people' | 'journey' | 'conversations' | 'findings' | 'raw'>('overview')
 const isCognitiveMode = computed(() => cognitiveStore.cognitiveMode === 'advanced')
 const cognitiveSubTab = ref<'mind' | 'memory' | 'evaluation' | 'tom' | 'social' | 'kg'>('mind')
@@ -81,24 +88,116 @@ const copyState = ref<'idle' | 'success' | 'error'>('idle')
 let copyStateTimer: number | null = null
 
 const isPipelineMode = computed(() => sim.value?.mode === 'pipeline')
-const isSocietyMode = computed(() => sim.value?.mode === 'society' || sim.value?.mode === 'society_first')
+const isMetaMode = computed(() => sim.value?.mode === 'meta_simulation')
+const isUnifiedMode = computed(() => sim.value?.mode === 'unified')
+const isSocietyMode = computed(() => sim.value?.mode === 'society' || sim.value?.mode === 'society_first' || isMetaMode.value || isUnifiedMode.value)
 const societyFirstData = computed<SocietyFirstReportResponse | null>(() => (
   report.value?.type === 'society_first' ? report.value as SocietyFirstReportResponse : null
 ))
+const unifiedReport = computed<UnifiedReportResponse | null>(() => (
+  report.value?.type === 'unified' ? report.value as UnifiedReportResponse : null
+))
+const unifiedCouncil = computed(() => unifiedReport.value?.council || null)
+const metaReport = computed<MetaSimulationReportResponse | null>(() => (
+  report.value?.type === 'meta_simulation' ? report.value as MetaSimulationReportResponse : null
+))
+const metaBestCycle = computed(() => {
+  const cycles = metaReport.value?.cycles || []
+  const candidate = cycles.find(
+    (cycle) => cycle.cycle_index === metaReport.value?.final_state?.best_cycle_index,
+  )
+  return candidate || cycles[cycles.length - 1] || null
+})
 const societyResult = computed(() => (
-  societyFirstData.value?.society_summary
+  metaReport.value?.society_summary
+  || unifiedReport.value?.society_summary
+  || societyFirstData.value?.society_summary
   || sim.value?.metadata?.society_result
   || null
 ))
 const meetingReport = computed(() => societyResult.value?.meeting || null)
-const societyIssueCandidates = computed(() => societyFirstData.value?.issue_candidates || [])
-const selectedSocietyIssues = computed(() => societyFirstData.value?.selected_issues || [])
-const societyIssueColonies = computed(() => societyFirstData.value?.issue_colonies || [])
-const societyInterventions = computed(() => societyFirstData.value?.intervention_comparison || [])
+const societyIssueCandidates = computed(() => (
+  metaBestCycle.value?.issue_candidates
+  || societyFirstData.value?.issue_candidates
+  || []
+))
+const selectedSocietyIssues = computed(() => (
+  metaBestCycle.value?.selected_issues
+  || societyFirstData.value?.selected_issues
+  || []
+))
+const societyIssueColonies = computed(() => (
+  metaBestCycle.value?.issue_colonies
+  || societyFirstData.value?.issue_colonies
+  || []
+))
+interface SocietyInterventionViewModel {
+  interventionId: string
+  label: string
+  modeClass: 'observed' | 'heuristic'
+  modeLabel: string
+  description: string
+  issues: string[]
+  expectedEffect: string
+  isObserved: boolean
+  observedUplift?: number | null
+  observedDownside?: number | null
+  uncertainty?: number | null
+  supportingEvidence: SocietyFirstInterventionEvidence[]
+}
+
+function normalizeSocietyIntervention(
+  intervention: SocietyFirstIntervention | MetaInterventionPlan,
+): SocietyInterventionViewModel {
+  if ('change_summary' in intervention) {
+    const isObserved = intervention.comparison_mode === 'observed'
+    return {
+      interventionId: intervention.intervention_id,
+      label: intervention.label,
+      modeClass: isObserved ? 'observed' : 'heuristic',
+      modeLabel: isObserved ? '実測比較' : '仮説比較',
+      description: intervention.change_summary,
+      issues: intervention.affected_issues || [],
+      expectedEffect: intervention.expected_effect,
+      isObserved,
+      observedUplift: intervention.observed_uplift,
+      observedDownside: intervention.observed_downside,
+      uncertainty: intervention.uncertainty,
+      supportingEvidence: intervention.supporting_evidence || [],
+    }
+  }
+
+  return {
+    interventionId: intervention.intervention_id,
+    label: intervention.label,
+    modeClass: 'heuristic',
+    modeLabel: intervention.change_type || '仮説比較',
+    description: intervention.hypothesis,
+    issues: intervention.target_issues || [],
+    expectedEffect: intervention.expected_effect,
+    isObserved: false,
+    supportingEvidence: [],
+  }
+}
+
+const societyInterventions = computed<SocietyInterventionViewModel[]>(() => {
+  const metaInterventions = metaReport.value?.intervention_history
+  if (metaInterventions?.length) {
+    return metaInterventions.map(normalizeSocietyIntervention)
+  }
+
+  const societyFirstInterventions = societyFirstData.value?.intervention_comparison
+  if (societyFirstInterventions?.length) {
+    return societyFirstInterventions.map(normalizeSocietyIntervention)
+  }
+
+  return []
+})
 const societyBacktest = computed<SocietyFirstBacktestResponse | null>(() => societyFirstData.value?.backtest || null)
 const hasScenarios = computed(() => (report.value?.scenarios?.length ?? 0) > 0)
 const hasPmBoard = computed(() => {
   if (isPipelineMode.value) return !!report.value?.pm_board
+  if (isMetaMode.value) return !!metaReport.value?.pm_board
   return sim.value?.mode === 'pm_board' && report.value?.sections
 })
 const reportFailureMessage = computed(() => {
@@ -110,11 +209,26 @@ const pmBoardData = computed(() => {
   if (isPipelineMode.value && report.value?.type === 'pipeline') {
     return report.value.pm_board || null
   }
+  if (report.value?.type === 'meta_simulation') return report.value.pm_board || null
   if (report.value?.type === 'pm_board') return report.value as PMBoardReportResponse
   return null
 })
+const decisionBriefData = computed<DecisionBrief | null>(() => {
+  if (report.value?.decision_brief) return report.value.decision_brief
+  const reportSections = report.value?.sections as Record<string, any> | undefined
+  if (
+    reportSections
+    && typeof reportSections === 'object'
+    && reportSections.decision_brief
+  ) {
+    return reportSections.decision_brief as DecisionBrief
+  }
+  if (pmBoardData.value?.decision_brief) return pmBoardData.value.decision_brief
+  return null
+})
+const hasDecisionBrief = computed(() => !!decisionBriefData.value)
 const normalizedScenarios = computed(() => (
-  ((report.value?.type === 'pipeline' || report.value?.type === 'swarm' || report.value?.type === 'society_first')
+  ((report.value?.type === 'pipeline' || report.value?.type === 'swarm' || report.value?.type === 'society_first' || report.value?.type === 'meta_simulation')
     ? report.value.scenarios || []
     : []
   ).map((s) => ({
@@ -231,9 +345,11 @@ function backtestVerdictClass(verdict?: string | null) {
 }
 
 const totalRounds = computed(() => {
+  if (isMetaMode.value) return 0
   if (graphSnapshots.value.length === 0) return 0
   return graphSnapshots.value[graphSnapshots.value.length - 1].round
 })
+const showGraphViews = computed(() => !isMetaMode.value)
 
 function stopPlaybackLoop() {
   if (playbackFrame !== null) {
@@ -360,14 +476,18 @@ onMounted(async () => {
     }
 
     // デフォルトタブ設定
-    if (isSocietyMode.value) {
-      activeTab.value = 'society'
-    } else if (isPipelineMode.value) {
+    if (hasDecisionBrief.value) {
+      activeTab.value = 'decision_brief'
+    } else if (isMetaMode.value) {
       activeTab.value = 'report'
+    } else if (isSocietyMode.value) {
+      activeTab.value = 'society'
     } else if (sim.value.mode === 'pm_board') {
       activeTab.value = 'pm_evaluation'
     } else if (sim.value.mode === 'swarm' || sim.value.mode === 'hybrid') {
       activeTab.value = 'scenarios'
+    } else {
+      activeTab.value = 'report'
     }
 
     // Colony データ取得
@@ -376,13 +496,13 @@ onMounted(async () => {
     }
 
     // 最新グラフ表示
-    if (graphHistory.length > 0) {
+    if (showGraphViews.value && graphHistory.length > 0) {
       const latest = graphHistory[graphHistory.length - 1]
       currentRound.value = latest.round
       fallbackGraph.value = { nodes: latest.nodes, edges: latest.edges }
       await nextTick()
       setFullGraph(latest.nodes, latest.edges)
-    } else {
+    } else if (showGraphViews.value) {
       const graphData = await getSimulationGraph(simId).catch(() => null)
       if (graphData?.nodes?.length) {
         fallbackGraph.value = { nodes: graphData.nodes, edges: graphData.edges }
@@ -622,6 +742,14 @@ function renderMarkdown(content: string): string {
           PM評価
         </button>
         <button
+          v-if="hasDecisionBrief"
+          class="tab-btn"
+          :class="{ active: activeTab === 'decision_brief' }"
+          @click="activeTab = 'decision_brief'"
+        >
+          Decision Brief
+        </button>
+        <button
           v-if="isSocietyMode"
           class="tab-btn"
           :class="{ active: activeTab === 'society' }"
@@ -630,6 +758,7 @@ function renderMarkdown(content: string): string {
           Society 分析
         </button>
         <button
+          v-if="showGraphViews"
           class="tab-btn"
           :class="{ active: activeTab === 'graph' }"
           @click="activeTab = 'graph'"
@@ -751,25 +880,25 @@ function renderMarkdown(content: string): string {
               <div v-if="societyInterventions.length" class="society-section">
                 <h4 class="society-section-title">介入比較</h4>
                 <div class="society-intervention-grid">
-                  <div v-for="intervention in societyInterventions" :key="intervention.intervention_id" class="society-intervention-card">
+                  <div v-for="intervention in societyInterventions" :key="intervention.interventionId" class="society-intervention-card">
                     <div class="society-intervention-top">
                       <span class="society-intervention-label">{{ intervention.label }}</span>
-                      <span class="society-intervention-effect" :class="intervention.comparison_mode === 'observed' ? 'observed' : 'heuristic'">
-                        {{ intervention.comparison_mode === 'observed' ? '実測比較' : '仮説比較' }}
+                      <span class="society-intervention-effect" :class="intervention.modeClass">
+                        {{ intervention.modeLabel }}
                       </span>
                     </div>
-                    <p class="society-intervention-desc">{{ intervention.change_summary }}</p>
-                    <p class="society-intervention-issues">対象: {{ intervention.affected_issues.join(', ') }}</p>
-                    <template v-if="intervention.comparison_mode === 'observed'">
+                    <p class="society-intervention-desc">{{ intervention.description }}</p>
+                    <p class="society-intervention-issues">対象: {{ intervention.issues.join(', ') }}</p>
+                    <template v-if="intervention.isObserved">
                       <div class="society-intervention-metrics">
-                        <span>uplift {{ formatPointDelta(intervention.observed_uplift) }}</span>
-                        <span>downside {{ formatPointDelta(intervention.observed_downside ? -intervention.observed_downside : 0) }}</span>
+                        <span>uplift {{ formatPointDelta(intervention.observedUplift) }}</span>
+                        <span>downside {{ formatPointDelta(intervention.observedDownside ? -intervention.observedDownside : 0) }}</span>
                         <span>uncertainty {{ ((intervention.uncertainty || 0) * 100).toFixed(0) }}%</span>
                       </div>
-                      <div v-if="intervention.supporting_evidence?.length" class="society-evidence-list">
+                      <div v-if="intervention.supportingEvidence.length" class="society-evidence-list">
                         <div
-                          v-for="evidence in intervention.supporting_evidence.slice(0, 3)"
-                          :key="`${intervention.intervention_id}-${evidence.case_id}-${evidence.metric}`"
+                          v-for="evidence in intervention.supportingEvidence.slice(0, 3)"
+                          :key="`${intervention.interventionId}-${evidence.case_id}-${evidence.metric}`"
                           class="society-evidence-card"
                         >
                           <div class="society-evidence-top">
@@ -781,7 +910,7 @@ function renderMarkdown(content: string): string {
                       </div>
                     </template>
                     <template v-else>
-                      <p class="society-intervention-hint">{{ intervention.expected_effect }}</p>
+                      <p class="society-intervention-hint">{{ intervention.expectedEffect }}</p>
                     </template>
                   </div>
                 </div>
@@ -958,6 +1087,61 @@ function renderMarkdown(content: string): string {
 
           <!-- Report tab -->
           <div v-if="activeTab === 'report'" class="tab-panel">
+            <div v-if="metaReport" class="meta-report-panel">
+              <div class="meta-summary-grid">
+                <div class="stat-card">
+                  <span class="stat-label">最良サイクル</span>
+                  <span class="stat-value">{{ metaReport.final_state?.best_cycle_index || 0 }}</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-label">最良スコア</span>
+                  <span class="stat-value">{{ ((metaReport.final_state?.best_objective_score || 0) * 100).toFixed(0) }}%</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-label">停止理由</span>
+                  <span class="stat-value meta-stop-reason">{{ metaReport.final_state?.stop_reason || 'unknown' }}</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-label">介入履歴</span>
+                  <span class="stat-value">{{ metaReport.intervention_history?.length || 0 }}</span>
+                </div>
+              </div>
+              <div v-if="metaReport.final_state?.selected_intervention" class="society-section">
+                <h4 class="society-section-title">最終採択介入</h4>
+                <div class="society-intervention-card">
+                  <div class="society-intervention-top">
+                    <span class="society-intervention-label">{{ metaReport.final_state.selected_intervention.label }}</span>
+                    <span class="society-intervention-effect">{{ metaReport.final_state.selected_intervention.change_type }}</span>
+                  </div>
+                  <p class="society-intervention-desc">{{ metaReport.final_state.selected_intervention.hypothesis }}</p>
+                  <p class="society-intervention-issues">対象: {{ (metaReport.final_state.selected_intervention.target_issues || []).join(', ') }}</p>
+                </div>
+              </div>
+              <div v-if="metaReport.cycles?.length" class="society-section">
+                <h4 class="society-section-title">Cycle Explorer</h4>
+                <div class="meta-cycle-grid">
+                  <div v-for="cycle in metaReport.cycles" :key="cycle.cycle_index" class="meta-cycle-card">
+                    <div class="meta-cycle-head">
+                      <span class="society-issue-label">Cycle {{ cycle.cycle_index }}</span>
+                      <span class="society-issue-score">{{ ((cycle.objective_score || 0) * 100).toFixed(0) }}</span>
+                    </div>
+                    <p class="meta-cycle-copy">
+                      society {{ ((cycle.score_breakdown?.society_score || 0) * 100).toFixed(0) }}%
+                      · swarm {{ ((cycle.score_breakdown?.swarm_score || 0) * 100).toFixed(0) }}%
+                      · pm {{ ((cycle.score_breakdown?.pm_score || 0) * 100).toFixed(0) }}%
+                    </p>
+                    <p v-if="cycle.selected_intervention" class="meta-cycle-copy">
+                      介入: {{ cycle.selected_intervention.label }}
+                    </p>
+                    <div v-if="cycle.selected_issues?.length" class="society-chip-row">
+                      <span v-for="issue in cycle.selected_issues" :key="issue.issue_id" class="society-chip">
+                        {{ issue.label }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
             <div v-if="reportText" class="report-panel">
               <div class="report-toolbar">
                 <p class="report-toolbar-note">統合分析レポートをプレーンテキストでコピーできます。</p>
@@ -982,6 +1166,30 @@ function renderMarkdown(content: string): string {
               <ProbabilityChart :scenarios="normalizedScenarios" />
             </div>
             <div v-else class="empty-state">レポートが見つかりません</div>
+          </div>
+
+          <!-- Decision Brief tab -->
+          <div v-if="activeTab === 'decision_brief' && decisionBriefData" class="tab-panel">
+            <DecisionBriefComponent :brief="decisionBriefData" />
+
+            <div v-if="unifiedCouncil?.participants?.length" class="brief-council-section">
+              <h4 class="brief-council-title">評議会メンバー</h4>
+              <div class="brief-council-grid">
+                <div
+                  v-for="(p, i) in unifiedCouncil.participants"
+                  :key="i"
+                  class="brief-council-chip"
+                  :class="p.role"
+                >
+                  {{ p.display_name }}
+                  <span v-if="p.stance" class="brief-council-stance">{{ p.stance }}</span>
+                </div>
+              </div>
+              <div v-if="unifiedCouncil.devil_advocate_summary" class="brief-devil-advocate">
+                <h4 class="brief-council-title">反証役サマリー</h4>
+                <p>{{ unifiedCouncil.devil_advocate_summary }}</p>
+              </div>
+            </div>
           </div>
 
           <!-- Scenarios tab -->
@@ -1173,7 +1381,7 @@ function renderMarkdown(content: string): string {
           </div>
 
           <!-- Graph tab -->
-          <div v-if="activeTab === 'graph'" class="tab-panel">
+          <div v-if="activeTab === 'graph' && showGraphViews" class="tab-panel">
             <div class="graph-tab-layout">
               <div ref="graphContainer" class="graph-snapshot-large"></div>
               <div v-if="graphError" class="graph-error-note">{{ graphError }}</div>
@@ -1226,7 +1434,7 @@ function renderMarkdown(content: string): string {
         <!-- Right: Side Panel -->
         <div class="results-side">
           <!-- 3D Graph (when not in graph tab) -->
-          <div v-if="activeTab !== 'graph'" class="side-card">
+          <div v-if="activeTab !== 'graph' && showGraphViews" class="side-card">
             <div class="side-header">
               <h3>3D Graph</h3>
             </div>
@@ -1312,6 +1520,34 @@ function renderMarkdown(content: string): string {
 
 <style scoped>
 .results-page { display: flex; flex-direction: column; gap: var(--section-gap); }
+.meta-report-panel { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1rem; }
+.meta-summary-grid,
+.meta-cycle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.85rem;
+}
+.meta-cycle-card {
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-card) 88%, #16344b 12%);
+}
+.meta-cycle-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+}
+.meta-cycle-copy {
+  margin-top: 0.55rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+.meta-stop-reason {
+  font-size: 0.85rem;
+  text-transform: capitalize;
+}
 
 .loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 400px; gap: 1rem; color: var(--text-muted); }
 .loading-dots { display: flex; gap: 4px; }
@@ -1705,4 +1941,15 @@ function renderMarkdown(content: string): string {
 .shift-name { font-weight: 600; }
 .shift-flow { font-family: var(--font-mono); color: var(--accent); }
 .society-assessment { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.7; }
+
+/* Decision Brief council section */
+.brief-council-section { margin-top: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
+.brief-council-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem; }
+.brief-council-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.brief-council-chip { font-size: 0.78rem; padding: 0.3rem 0.6rem; border-radius: 999px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); display: flex; align-items: center; gap: 0.35rem; }
+.brief-council-chip.expert { border-color: rgba(99,102,241,0.3); color: var(--accent); }
+.brief-council-chip.devil_advocate { border-color: rgba(239,68,68,0.3); color: var(--danger); }
+.brief-council-stance { font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-muted); }
+.brief-devil-advocate { padding: 0.85rem; border-left: 3px solid var(--danger); background: rgba(239,68,68,0.05); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.brief-devil-advocate p { font-size: 0.84rem; color: var(--text-secondary); line-height: 1.7; }
 </style>

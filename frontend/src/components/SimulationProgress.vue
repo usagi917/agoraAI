@@ -31,14 +31,36 @@ const pmBoardPhases = [
   { key: 'completed', label: '完了' },
 ]
 
+const unifiedPhases = [
+  { key: 'society_pulse', label: '社会の脈動' },
+  { key: 'council', label: '評議会' },
+  { key: 'synthesis', label: '統合分析' },
+]
+
+const metaPhases = [
+  { key: 'meta_world_building', label: '世界構築' },
+  { key: 'meta_society', label: '社会反応' },
+  { key: 'meta_issue_mining', label: '論点抽出' },
+  { key: 'meta_issue_swarm', label: 'Issue Colony' },
+  { key: 'meta_pm_board', label: 'PM介入' },
+  { key: 'meta_scoring', label: '収束判定' },
+  { key: 'completed', label: '完了' },
+]
+
 const phases = computed(() => {
+  if (store.isUnifiedMode) return unifiedPhases
   if (store.isPipelineMode) return pipelinePhases
+  if (store.isMetaMode) return metaPhases
   if (store.mode === 'pm_board') return pmBoardPhases
   if (store.mode === 'swarm' || store.mode === 'hybrid') return swarmPhases
   return singlePhases
 })
 
 const currentPhaseIndex = computed(() => {
+  if (store.isUnifiedMode) {
+    const idx = unifiedPhases.findIndex(p => p.key === store.unifiedPhase)
+    return idx >= 0 ? idx : 0
+  }
   if (store.isPipelineMode) {
     const idx = pipelinePhases.findIndex(p => p.key === store.pipelineStage)
     return idx >= 0 ? idx : 0
@@ -54,6 +76,9 @@ const progressInfo = computed(() => {
   if (store.status === 'generating_report' && store.reportSections.length > 0) {
     return `Report ${store.completedReportSections}/${store.reportSections.length}`
   }
+  if (store.isUnifiedMode) {
+    return `Phase ${store.unifiedPhaseIndex}/${store.unifiedPhaseTotal}`
+  }
   if (store.isPipelineMode) {
     if (store.pipelineStage === 'single') {
       return `Round ${store.currentRound}/${store.totalRounds || '?'}`
@@ -65,6 +90,10 @@ const progressInfo = computed(() => {
       return 'PM分析中'
     }
     return ''
+  }
+  if (store.isMetaMode) {
+    const score = store.metaBestScore > 0 ? `score ${(store.metaBestScore * 100).toFixed(0)}%` : ''
+    return `Cycle ${store.metaCycleIndex}/${store.metaMaxCycles || '?'}${score ? ` · ${score}` : ''}`
   }
   if (store.mode === 'swarm' || store.mode === 'hybrid') {
     return `${store.completedColonies}/${store.colonies.length} Colony`

@@ -4,7 +4,6 @@ import pytest
 
 from src.app.services.quality import (
     build_prompt_evidence_ref,
-    build_document_evidence_ref,
     build_quality_summary,
     enforce_quality_gate,
     extract_quality,
@@ -23,18 +22,6 @@ def test_build_prompt_evidence_ref_builds_prompt_source():
     assert ref is not None
     assert ref["source_type"] == "prompt_input"
     assert ref["label"] == "User prompt"
-
-
-def test_build_document_evidence_ref_uses_document_metadata():
-    document = SimpleNamespace(
-        id="doc-1",
-        filename="memo.md",
-        text_content="Important market evidence",
-    )
-    ref = build_document_evidence_ref(document)
-    assert ref["source_type"] == "document"
-    assert ref["source_id"] == "doc-1"
-    assert ref["label"] == "memo.md"
 
 
 def test_build_quality_summary_marks_fallback_as_draft():

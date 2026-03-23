@@ -19,7 +19,7 @@ const router = useRouter()
 const templates = ref<TemplateResponse[]>([])
 const selectedTemplate = ref('')
 const selectedProfile = ref('standard')
-const selectedMode = ref('society_first')
+const selectedMode = ref('unified')
 const promptText = ref('')
 const files = ref<File[]>([])
 const isLoading = ref(false)
@@ -28,9 +28,111 @@ const runtimeHealth = ref<HealthResponse | null>(null)
 const bootstrapError = ref('')
 const showAdvancedOptions = ref(false)
 
+// Question Wizard state
+const questionTemplates = [
+  {
+    id: 'market_entry',
+    icon: '📊',
+    title: 'この市場に参入すべきか？',
+    desc: '市場環境・競合・参入障壁を社会反応から分析',
+    steps: [
+      { key: 'industry', label: '業界・市場', placeholder: '例: EV バッテリー市場、日本のペットフード市場' },
+      { key: 'strengths', label: '自社の強み・制約', placeholder: '例: 独自の固体電池技術を保有、量産体制は未整備' },
+      { key: 'focus', label: '特に知りたいこと', placeholder: '例: 競合の反応、顧客受容性、規制リスク' },
+    ],
+  },
+  {
+    id: 'product_acceptance',
+    icon: '📦',
+    title: 'この製品は受け入れられるか？',
+    desc: '消費者・ステークホルダーの受容性を予測',
+    steps: [
+      { key: 'product', label: '製品・サービスの概要', placeholder: '例: AIチャットボットによる健康相談サービス' },
+      { key: 'target', label: 'ターゲット層', placeholder: '例: 30-50代の健康意識が高い都市部の会社員' },
+      { key: 'concern', label: '懸念事項', placeholder: '例: プライバシー、正確性、既存サービスとの差別化' },
+    ],
+  },
+  {
+    id: 'policy_impact',
+    icon: '📜',
+    title: 'この政策を導入したらどうなるか？',
+    desc: '政策影響・世論支持・ステークホルダー反応を予測',
+    steps: [
+      { key: 'policy', label: '政策の概要', placeholder: '例: 週休3日制の義務化' },
+      { key: 'region', label: '対象地域・層', placeholder: '例: 日本全国、従業員50人以上の企業' },
+      { key: 'interest', label: '知りたいこと', placeholder: '例: 世論支持率、経済影響、ステークホルダー反応' },
+    ],
+  },
+  {
+    id: 'scenario_compare',
+    icon: '🔄',
+    title: 'AとBどちらが良いか？',
+    desc: '2つの選択肢を社会反応ベースで比較',
+    steps: [
+      { key: 'optionA', label: '選択肢A', placeholder: '例: 新工場を国内に建設' },
+      { key: 'optionB', label: '選択肢B', placeholder: '例: 東南アジアの既存工場を拡張' },
+      { key: 'criteria', label: '比較基準', placeholder: '例: コスト、リスク、ステークホルダー受容性' },
+    ],
+  },
+]
+
+const selectedQuestionTemplate = ref<string | null>(null)
+const wizardStepValues = ref<Record<string, string>>({})
+
+const activeTemplate = computed(() =>
+  questionTemplates.find(t => t.id === selectedQuestionTemplate.value) ?? null,
+)
+
+const wizardComplete = computed(() => {
+  if (!activeTemplate.value) return false
+  return activeTemplate.value.steps.every(s => wizardStepValues.value[s.key]?.trim())
+})
+
+// 質問テンプレートIDとバックエンドテンプレート名のマッピング
+const questionToBackendTemplate: Record<string, string> = {
+  market_entry: 'market_entry',
+  policy_impact: 'policy_impact',
+  product_acceptance: 'scenario_exploration',
+  scenario_compare: 'scenario_exploration',
+}
+
+function selectQuestionTemplate(templateId: string) {
+  selectedQuestionTemplate.value = templateId
+  wizardStepValues.value = {}
+
+  // バックエンドテンプレートを自動選択
+  const backendName = questionToBackendTemplate[templateId]
+  if (backendName) {
+    const match = templates.value.find(t => t.name === backendName)
+    if (match) {
+      selectedTemplate.value = match.name
+    }
+  }
+}
+
+function clearQuestionTemplate() {
+  selectedQuestionTemplate.value = null
+  wizardStepValues.value = {}
+}
+
+function buildPromptFromWizard(): string {
+  if (!activeTemplate.value) return ''
+  const tmpl = activeTemplate.value
+  const parts: string[] = [`【${tmpl.title}】`]
+  for (const step of tmpl.steps) {
+    const val = wizardStepValues.value[step.key]?.trim()
+    if (val) {
+      parts.push(`${step.label}: ${val}`)
+    }
+  }
+  return parts.join('\n')
+}
+
 const modes = [
+  { value: 'unified', label: 'Unified', desc: '統合シミュレーション', detail: '社会の脈動 → 評議会 → Decision Brief', badge: 'Default' },
   { value: 'pipeline', label: 'Pipeline', desc: '3段階分析', detail: '因果推論 → 多視点 → PM評価' },
-  { value: 'society_first', label: 'Society First', desc: '社会反応起点', detail: '社会反応 → Issue Colony → 市場仮説', badge: 'New' },
+  { value: 'meta_simulation', label: 'Meta Simulation', desc: '反復統合シミュレーション', detail: 'world → society → issue swarms → PM → intervention replay', badge: 'Beta' },
+  { value: 'society_first', label: 'Society First', desc: '社会反応起点', detail: '社会反応 → Issue Colony → 市場仮説' },
   { value: 'society', label: 'Society', desc: '社会シミュレーション', detail: '1,000人の住民 → 選抜 → 活性化 → 評価', badge: 'Experimental' },
   { value: 'single', label: 'Single', desc: '単一エージェント', detail: '因果推論のみ' },
   { value: 'swarm', label: 'Swarm', desc: '多視点分析', detail: '複数コロニー並列実行' },
@@ -48,12 +150,16 @@ const canLaunchLive = computed(() => {
 })
 const launchDisabled = computed(() => {
   if (!canLaunchLive.value) return true
-  return (!promptText.value.trim() && files.value.length === 0) || isLoading.value
+  const hasWizardInput = wizardComplete.value
+  const hasManualInput = promptText.value.trim() || files.value.length > 0
+  return (!hasWizardInput && !hasManualInput) || isLoading.value
 })
 const launchLabel = computed(() => {
   if (isLoading.value) return '起動中...'
   if (!canLaunchLive.value) return 'ライブ実行は利用不可'
-  return selectedMode.value === 'society_first' ? 'Society First を実行' : 'シミュレーション実行'
+  if (selectedMode.value === 'unified') return '統合シミュレーション実行'
+  if (selectedMode.value === 'society_first') return 'Society First を実行'
+  return 'シミュレーション実行'
 })
 
 onMounted(async () => {
@@ -73,7 +179,12 @@ onMounted(async () => {
 
 async function handleLaunch() {
   if (!canLaunchLive.value) return
-  if (!promptText.value.trim() && files.value.length === 0) return
+
+  // Build final prompt: wizard prompt takes priority, then manual input
+  const wizardPrompt = buildPromptFromWizard()
+  const finalPrompt = wizardPrompt || promptText.value.trim()
+
+  if (!finalPrompt && files.value.length === 0) return
   if (!selectedTemplate.value && files.value.length > 0) return
 
   isLoading.value = true
@@ -88,12 +199,15 @@ async function handleLaunch() {
       }
     }
 
+    // Use 'unified' mode by default; advanced settings allow override
+    const launchMode = showAdvancedOptions.value ? selectedMode.value : 'unified'
+
     const sim = await createSimulation({
       projectId,
       templateName: selectedTemplate.value,
       executionProfile: selectedProfile.value,
-      mode: selectedMode.value,
-      promptText: promptText.value,
+      mode: launchMode,
+      promptText: finalPrompt,
       evidenceMode: 'strict',
     })
 
@@ -131,8 +245,8 @@ function getPipelineStageLabel(stage: string) {
   <div class="launchpad-page">
     <!-- Hero -->
     <section class="hero">
-      <h2 class="hero-title">Society First<br />Market Lab</h2>
-      <p class="hero-desc">1つの指示から社会反応を先に広く観測し、重要論点だけを Issue Colony で深掘りします。初回導線は `society_first` を既定にし、他モードは詳細設定に退避しています。</p>
+      <h2 class="hero-title">Unified<br />Simulation Lab</h2>
+      <p class="hero-desc">1つの質問から社会の脈動を測定し、10人の評議会が議論し、意思決定に直結する Decision Brief を生成します。質問テンプレートを選ぶか、自由にプロンプトを入力してください。</p>
     </section>
 
     <section v-if="bootstrapError || (runtimeHealth && !runtimeHealth.live_simulation_available)" class="runtime-notice" :class="{ warning: runtimeHealth && !runtimeHealth.live_simulation_available, error: bootstrapError }">
@@ -174,10 +288,54 @@ function getPipelineStageLabel(stage: string) {
       </div>
     </section>
 
+    <!-- Question Wizard -->
+    <section class="section">
+      <div class="section-header">
+        <h3 class="section-title">質問テンプレート</h3>
+        <span class="section-badge">{{ questionTemplates.length }} 種類</span>
+      </div>
+      <div class="question-templates">
+        <button
+          v-for="qt in questionTemplates"
+          :key="qt.id"
+          class="question-card"
+          :class="{ selected: selectedQuestionTemplate === qt.id }"
+          :data-testid="`question-${qt.id}`"
+          @click="selectQuestionTemplate(qt.id)"
+        >
+          <span class="question-icon">{{ qt.icon }}</span>
+          <div class="question-card-body">
+            <span class="question-title">{{ qt.title }}</span>
+            <span class="question-desc">{{ qt.desc }}</span>
+          </div>
+        </button>
+      </div>
+
+      <!-- Wizard Step Form -->
+      <div v-if="activeTemplate" class="wizard-form">
+        <div class="wizard-form-header">
+          <h4 class="wizard-form-title">{{ activeTemplate.title }}</h4>
+          <button class="btn btn-ghost wizard-clear" @click="clearQuestionTemplate">テンプレートを解除</button>
+        </div>
+        <div class="wizard-steps">
+          <div v-for="step in activeTemplate.steps" :key="step.key" class="wizard-step">
+            <label class="wizard-label" :for="`wizard-${step.key}`">{{ step.label }}</label>
+            <input
+              :id="`wizard-${step.key}`"
+              v-model="wizardStepValues[step.key]"
+              class="wizard-input"
+              type="text"
+              :placeholder="step.placeholder"
+            />
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Input Panel -->
     <section class="section">
       <div class="section-header">
-        <h3 class="section-title">指示</h3>
+        <h3 class="section-title">{{ activeTemplate ? '追加の指示（任意）' : '指示' }}</h3>
       </div>
       <InputPanel
         v-model="promptText"
@@ -185,7 +343,7 @@ function getPipelineStageLabel(stage: string) {
         @update:files="files = $event"
       />
       <p class="section-note">
-        指示 1 つで開始できます。既定では `society_first` + `strict evidence` で実行し、文書を添付すると検証可能性が上がります。
+        テンプレートを使わない場合は、ここに質問を直接入力してください。既定では統合モード + strict evidence で実行し、文書を添付すると検証可能性が上がります。
       </p>
     </section>
 
@@ -199,24 +357,25 @@ function getPipelineStageLabel(stage: string) {
       <div class="default-flow-card">
         <div class="default-flow-top">
           <div>
-            <div class="default-flow-eyebrow">Primary Flow</div>
-            <h4 class="default-flow-title">Society First を既定で起動</h4>
+            <div class="default-flow-eyebrow">Unified Flow</div>
+            <h4 class="default-flow-title">統合シミュレーションを既定で起動</h4>
           </div>
           <span class="mode-badge primary">Default</span>
         </div>
         <p class="default-flow-copy">
-          社会反応を広く生成し、重要論点を抽出してから Issue Colony で深掘りします。mode を理解しなくてもこのまま実行開始できます。
+          1,000人の社会反応を測定し、10人の名前付き評議会が3ラウンド議論。最終的に Decision Brief を生成します。モードを理解しなくてもこのまま実行開始できます。
         </p>
         <div class="default-flow-pills">
-          <span class="profile-detail">社会反応 → Issue Mining</span>
-          <span class="profile-detail">Issue Colony → シナリオ比較</span>
-          <span class="profile-detail">次の検証アクション</span>
+          <span class="profile-detail">社会の脈動 (~90秒)</span>
+          <span class="profile-detail">評議会議論 (~60秒)</span>
+          <span class="profile-detail">統合分析 + Decision Brief (~30秒)</span>
         </div>
       </div>
       <div v-if="showAdvancedOptions" class="advanced-panel">
         <div class="advanced-section">
           <div class="section-header">
             <h3 class="section-title">実行モード</h3>
+            <span class="section-badge">上級者向け</span>
           </div>
           <div class="profile-grid">
             <div
@@ -447,6 +606,78 @@ function getPipelineStageLabel(stage: string) {
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+
+.question-templates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 0.75rem;
+}
+
+.question-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: var(--panel-padding);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.25s, box-shadow 0.25s;
+  text-align: left;
+}
+
+.question-card:hover { border-color: rgba(255,255,255,0.12); }
+.question-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+.question-icon { font-size: 1.4rem; flex-shrink: 0; margin-top: 0.1rem; }
+
+.question-card-body { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+
+.question-title { font-size: 0.88rem; font-weight: 600; color: var(--text-primary); }
+.question-desc { font-size: 0.76rem; color: var(--text-muted); line-height: 1.45; }
+
+.wizard-form {
+  margin-top: 1rem;
+  padding: var(--panel-padding);
+  background: linear-gradient(135deg, rgba(99,102,241,0.08), rgba(16,185,129,0.05));
+  border: 1px solid rgba(99,102,241,0.18);
+  border-radius: var(--radius);
+}
+
+.wizard-form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.wizard-form-title { font-size: 0.92rem; font-weight: 600; }
+.wizard-clear { font-size: 0.72rem; }
+
+.wizard-steps { display: flex; flex-direction: column; gap: 0.85rem; }
+
+.wizard-step { display: flex; flex-direction: column; gap: 0.3rem; }
+
+.wizard-label { font-size: 0.78rem; font-weight: 500; color: var(--text-secondary); }
+
+.wizard-input {
+  padding: 0.6rem 0.8rem;
+  background: rgba(0,0,0,0.25);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  transition: border-color 0.2s;
+}
+
+.wizard-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.wizard-input::placeholder { color: var(--text-muted); font-size: 0.8rem; }
 
 .advanced-panel {
   margin-top: 1rem;

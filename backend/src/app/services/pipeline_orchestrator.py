@@ -11,7 +11,7 @@ from src.app.database import async_session
 from src.app.models.run import Run
 from src.app.models.swarm import Swarm
 from src.app.models.simulation import Simulation
-from src.app.services.simulator import run_simulation, PROFILE_ROUNDS
+from src.app.services.simulator import run_simulation
 from src.app.services.swarm_orchestrator import run_swarm
 from src.app.services.pm_board_orchestrator import run_pm_board
 from src.app.services.colony_factory import generate_colony_configs

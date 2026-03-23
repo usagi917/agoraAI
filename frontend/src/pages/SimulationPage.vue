@@ -25,6 +25,8 @@ import ColonyGrid from '../components/ColonyGrid.vue'
 import ActivityFeed from '../components/ActivityFeed.vue'
 import SocietyProgress from '../components/SocietyProgress.vue'
 import OpinionDistribution from '../components/OpinionDistribution.vue'
+import LiveSocietyGraph from '../components/LiveSocietyGraph.vue'
+import { useSocietyGraphStore } from '../stores/societyGraphStore'
 
 const LIVE_SESSION_VERSION = 1
 
@@ -50,6 +52,7 @@ let persistTimer: ReturnType<typeof setTimeout> | null = null
 const store = useSimulationStore()
 const graphStore = useGraphStore()
 const activityStore = useActivityStore()
+const societyGraphStore = useSocietyGraphStore()
 const sse = useSimulationSSE(simId)
 
 const entityTypeColors: Record<string, string> = {
@@ -69,6 +72,7 @@ const showColonyGrid = computed(() => {
 })
 
 const thinkingMode = computed<ThinkingVisualMode>(() => {
+  if (store.isSocietyMode) return 'society'
   if (store.phase === 'graphrag') return 'graphrag'
   if (store.phase === 'report' || store.status === 'generating_report') return 'report'
   if (showColonyGrid.value || store.pipelineStage === 'swarm') return 'swarm'
@@ -88,6 +92,15 @@ const {
 
 const stageLabel = computed(() => {
   if (store.isSocietyMode) {
+    if (store.isUnifiedMode) {
+      switch (store.unifiedPhase) {
+        case 'society_pulse': return '社会の脈動を測定中'
+        case 'council': return `評議会 Round ${societyGraphStore.currentRound}`
+        case 'synthesis': return '統合分析中'
+        case 'completed': return '完了'
+        default: return '準備中...'
+      }
+    }
     if (store.mode === 'society_first') {
       if (store.phase === 'issue_mining') return '重要論点を抽出中'
       if (store.phase === 'colony_execution') return 'Issue Colony 深掘り中'
@@ -163,6 +176,34 @@ const phaseOverlay = computed(() => {
 
 const emptyState = computed(() => {
   if (store.isSocietyMode) {
+    if (store.isUnifiedMode) {
+      switch (store.unifiedPhase) {
+        case 'society_pulse':
+          return {
+            eyebrow: 'Society Pulse',
+            title: '1,000人の社会反応を測定しています',
+            detail: '人口統計・性格・価値観をサンプリングし、テーマに対する意見を収集中です。',
+          }
+        case 'council':
+          return {
+            eyebrow: 'Council Deliberation',
+            title: '10人の評議会が議論しています',
+            detail: '名前付きの代表者と専門家が3ラウンドの構造化議論を行っています。',
+          }
+        case 'synthesis':
+          return {
+            eyebrow: 'Synthesis',
+            title: 'Decision Brief を生成しています',
+            detail: '社会反応と評議会議論を統合し、意思決定に直結するレポートを作成中です。',
+          }
+        default:
+          return {
+            eyebrow: 'Unified Simulation',
+            title: '統合シミュレーションを準備しています',
+            detail: '社会の脈動 → 評議会 → Decision Brief の3フェーズで分析します。',
+          }
+      }
+    }
     const currentPhase = store.phase
     if (store.mode === 'society_first') {
       if (currentPhase === 'issue_mining') {
@@ -515,6 +556,7 @@ onUnmounted(() => {
   clearLiveSurface()
   graphStore.reset()
   activityStore.clear()
+  societyGraphStore.reset()
   selectedEntity.value = null
 })
 
@@ -575,7 +617,7 @@ function goToResults() {
     <!-- Status Bar -->
     <div class="status-bar">
       <div class="status-left">
-        <span class="status-mono">{{ graphStore.nodes.length }} nodes / {{ graphStore.edges.length }} edges</span>
+        <span class="status-mono">{{ store.isSocietyMode ? `${societyGraphStore.nodeCount} agents / ${societyGraphStore.edgeCount} edges` : `${graphStore.nodes.length} nodes / ${graphStore.edges.length} edges` }}</span>
         <span class="status-divider">|</span>
         <span class="status-mono">{{ formattedTime }}</span>
         <span class="status-divider">|</span>
@@ -600,8 +642,43 @@ function goToResults() {
       {{ store.error }}
     </div>
 
-    <!-- Society Opinion Distribution (inline) -->
-    <div v-if="store.isSocietyMode && Object.keys(store.opinionDistribution).length > 0" class="society-inline-panel">
+    <!-- Unified Mode: Interim Results Dashboard -->
+    <div v-if="store.isUnifiedMode && store.unifiedPhase !== 'idle'" class="unified-interim-panel">
+      <!-- Phase 1 results: opinion distribution -->
+      <div v-if="Object.keys(store.opinionDistribution).length > 0" class="pulse-summary">
+        <div class="panel-header">
+          <h3>社会反応速報</h3>
+          <span class="panel-count">{{ store.unifiedPhaseIndex }}/{{ store.unifiedPhaseTotal }}</span>
+        </div>
+        <div class="stance-bars">
+          <div
+            v-for="(share, stance) in store.opinionDistribution"
+            :key="stance"
+            class="stance-bar-row"
+          >
+            <span class="stance-bar-label">{{ stance }}</span>
+            <div class="stance-bar-track">
+              <div
+                class="stance-bar-fill"
+                :style="{ width: `${(share as number) * 100}%` }"
+              />
+            </div>
+            <span class="stance-bar-value">{{ ((share as number) * 100).toFixed(0) }}%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phase 2 progress: council round -->
+      <div v-if="store.unifiedPhase === 'council' || (store.unifiedPhase === 'synthesis' && societyGraphStore.currentRound > 0)" class="council-highlight">
+        <div class="panel-header">
+          <h3>評議会議論</h3>
+        </div>
+        <p class="council-round-info">Round {{ societyGraphStore.currentRound }} / 3</p>
+      </div>
+    </div>
+
+    <!-- Society Opinion Distribution (inline, non-unified) -->
+    <div v-else-if="store.isSocietyMode && Object.keys(store.opinionDistribution).length > 0" class="society-inline-panel">
       <div class="panel-header">
         <h3>意見分布</h3>
       </div>
@@ -614,42 +691,56 @@ function goToResults() {
       <div class="main-panel">
         <div class="graph-panel">
           <div class="panel-header">
-            <h3>3D Knowledge Graph</h3>
+            <h3>{{ store.isSocietyMode ? '3D Social Graph' : '3D Knowledge Graph' }}</h3>
             <div class="panel-metrics">
-              <span class="metric"><span class="metric-val">{{ graphStore.nodes.length }}</span> nodes</span>
-              <span class="metric"><span class="metric-val">{{ graphStore.edges.length }}</span> edges</span>
+              <template v-if="store.isSocietyMode">
+                <span class="metric"><span class="metric-val">{{ societyGraphStore.nodeCount }}</span> agents</span>
+                <span class="metric"><span class="metric-val">{{ societyGraphStore.edgeCount }}</span> edges</span>
+              </template>
+              <template v-else>
+                <span class="metric"><span class="metric-val">{{ graphStore.nodes.length }}</span> nodes</span>
+                <span class="metric"><span class="metric-val">{{ graphStore.edges.length }}</span> edges</span>
+              </template>
             </div>
           </div>
           <div class="graph-container" :class="graphContainerClass">
-            <div ref="graphCanvas" class="graph-canvas-host"></div>
-            <div v-if="graphError" class="graph-error-state">
-              <div class="graph-empty-shell">
-                <div class="graph-empty-eyebrow">Graph Unavailable</div>
-                <div class="graph-empty-title">3D グラフを表示できません</div>
-                <p class="graph-empty-detail">{{ graphError }}</p>
-              </div>
-            </div>
-            <div v-else-if="graphStore.nodes.length === 0" class="graph-empty" :class="graphContainerClass">
-              <div class="graph-empty-backdrop"></div>
-              <div class="graph-empty-shell">
-                <div class="graph-empty-eyebrow">{{ emptyState.eyebrow }}</div>
-                <div class="graph-empty-title">{{ emptyState.title }}</div>
-                <p class="graph-empty-detail">{{ emptyState.detail }}</p>
-                <div class="loading-dots"><span></span><span></span><span></span></div>
-                <div class="graph-empty-pills">
-                  <span class="graph-pill">{{ stageLabel }}</span>
-                  <span v-if="store.totalRounds > 0" class="graph-pill">Round {{ store.currentRound }}/{{ store.totalRounds }}</span>
-                  <span v-if="store.reportSections.length > 0" class="graph-pill">Report {{ store.completedReportSections }}/{{ store.reportSections.length }}</span>
+            <!-- Society mode: Live Social Graph -->
+            <LiveSocietyGraph
+              v-if="store.isSocietyMode"
+              :simulation-id="simId"
+            />
+            <!-- Other modes: Knowledge Graph -->
+            <template v-else>
+              <div ref="graphCanvas" class="graph-canvas-host"></div>
+              <div v-if="graphError" class="graph-error-state">
+                <div class="graph-empty-shell">
+                  <div class="graph-empty-eyebrow">Graph Unavailable</div>
+                  <div class="graph-empty-title">3D グラフを表示できません</div>
+                  <p class="graph-empty-detail">{{ graphError }}</p>
                 </div>
               </div>
-            </div>
-            <div v-if="phaseOverlay && !graphError" class="phase-overlay">
-              <span class="phase-icon">{{ phaseOverlay.icon }}</span>
-              <span class="phase-label">{{ phaseOverlay.label }}</span>
-            </div>
+              <div v-else-if="graphStore.nodes.length === 0" class="graph-empty" :class="graphContainerClass">
+                <div class="graph-empty-backdrop"></div>
+                <div class="graph-empty-shell">
+                  <div class="graph-empty-eyebrow">{{ emptyState.eyebrow }}</div>
+                  <div class="graph-empty-title">{{ emptyState.title }}</div>
+                  <p class="graph-empty-detail">{{ emptyState.detail }}</p>
+                  <div class="loading-dots"><span></span><span></span><span></span></div>
+                  <div class="graph-empty-pills">
+                    <span class="graph-pill">{{ stageLabel }}</span>
+                    <span v-if="store.totalRounds > 0" class="graph-pill">Round {{ store.currentRound }}/{{ store.totalRounds }}</span>
+                    <span v-if="store.reportSections.length > 0" class="graph-pill">Report {{ store.completedReportSections }}/{{ store.reportSections.length }}</span>
+                  </div>
+                </div>
+              </div>
+              <div v-if="phaseOverlay && !graphError" class="phase-overlay">
+                <span class="phase-icon">{{ phaseOverlay.icon }}</span>
+                <span class="phase-label">{{ phaseOverlay.label }}</span>
+              </div>
+            </template>
           </div>
-          <button v-if="graphStore.nodes.length > 0 && !graphError" class="reset-camera-btn" @click="resetCamera" title="中心に戻す">&#8962;</button>
-          <div v-if="graphStore.nodes.length > 0 && !graphError" class="graph-legend">
+          <button v-if="!store.isSocietyMode && graphStore.nodes.length > 0 && !graphError" class="reset-camera-btn" @click="resetCamera" title="中心に戻す">&#8962;</button>
+          <div v-if="!store.isSocietyMode && graphStore.nodes.length > 0 && !graphError" class="graph-legend">
             <span class="legend-item" v-for="(color, type) in entityTypeColors" :key="type">
               <span class="legend-dot" :style="{ background: color, boxShadow: `0 0 6px ${color}` }"></span>
               <span class="legend-label">{{ type }}</span>
@@ -1109,5 +1200,75 @@ function goToResults() {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--panel-padding);
+}
+
+.unified-interim-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.pulse-summary {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--panel-padding);
+}
+
+.stance-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.stance-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.stance-bar-label {
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  width: 5.5rem;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.stance-bar-track {
+  flex: 1;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.stance-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--success), var(--accent));
+  border-radius: 4px;
+  transition: width 0.6s ease;
+}
+
+.stance-bar-value {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  width: 2.5rem;
+  flex-shrink: 0;
+}
+
+.council-highlight {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--panel-padding);
+}
+
+.council-round-info {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
 }
 </style>

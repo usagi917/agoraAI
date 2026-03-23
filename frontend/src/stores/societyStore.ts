@@ -17,7 +17,7 @@ import {
   getConversations,
 } from '../api/client'
 
-export interface SocietyFilters {
+interface SocietyFilters {
   stance: string | null
   region: string | null
   occupation: string | null

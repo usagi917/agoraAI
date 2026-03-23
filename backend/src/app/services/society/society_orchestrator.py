@@ -151,6 +151,16 @@ async def run_society(simulation_id: str) -> None:
             await sse_manager.publish(simulation_id, "society_selection_completed", {
                 "selected_count": len(selected_agents),
                 "total_population": len(agents),
+                "selected_agents": [
+                    {
+                        "agent_index": a.get("agent_index", i),
+                        "name": f"Agent-{a.get('agent_index', i)}",
+                        "occupation": a.get("demographics", {}).get("occupation", ""),
+                        "age": a.get("demographics", {}).get("age", 0),
+                        "region": a.get("demographics", {}).get("region", ""),
+                    }
+                    for i, a in enumerate(selected_agents)
+                ],
             })
 
             # === Phase 3: Activation ===

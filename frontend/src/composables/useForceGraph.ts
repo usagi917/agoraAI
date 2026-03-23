@@ -1,6 +1,7 @@
 import { ref, onMounted, onUnmounted, watch, type Ref } from 'vue'
 import ForceGraph3D, { type ForceGraph3DInstance } from '3d-force-graph'
 import * as THREE from 'three'
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import type { GraphNode, GraphEdge } from '../stores/graphStore'
 import { startThinkingAnimation, type ThinkingVisualMode } from './useThinkingParticles'
 
@@ -21,6 +22,13 @@ const STANCE_COLORS: Record<string, string> = {
   '中立': '#a3a3a3',
   '条件付き反対': '#fca5a5',
   '反対': '#ef4444',
+}
+
+export const RELATION_TYPE_STYLES: Record<string, { color: string; width: number; particleColor: string }> = {
+  trust: { color: '#4FC3F7', width: 0.8, particleColor: '#80D8FF' },
+  influence: { color: '#BA68C8', width: 0.6, particleColor: '#CE93D8' },
+  conflict: { color: '#EF5350', width: 0.5, particleColor: '#FF8A80' },
+  default: { color: '#90A4AE', width: 0.4, particleColor: '#B0BEC5' },
 }
 
 const GRAPH_LAYOUT = {
@@ -81,7 +89,10 @@ interface InternalLink {
   direction: string
   color: string
   opacity: number
+  relationType: string
 }
+
+export type { InternalLink }
 
 interface TransitionNodeFrame extends Position {
   label: string
@@ -99,6 +110,7 @@ interface TransitionLinkFrame {
   direction: string
   color: string
   opacity: number
+  relationType: string
 }
 
 interface GraphTransitionNode {
@@ -156,9 +168,13 @@ function hasPosition(node: PositionedNode | undefined): node is Position {
 
 function getNodeVisuals(type: string, importanceScore: number, stance?: string) {
   if (type === 'agent' && stance) {
+    // Council members (importance_score > 0.8) get larger nodes
+    const isCouncil = importanceScore > 0.8
+    const baseSize = isCouncil ? 5.0 : 2.5
+    const scaleMultiplier = isCouncil ? 5.0 : 3.5
     return {
       color: STANCE_COLORS[stance] || TYPE_COLORS.agent,
-      size: 2.5 + importanceScore * 3.5,
+      size: baseSize + importanceScore * scaleMultiplier,
     }
   }
   return {
@@ -199,7 +215,7 @@ function toGraphEdgeMap(edges: GraphEdge[]) {
 
 function getLinkColor(
   sourceId: string,
-  ...nodeMaps: Array<Map<string, Pick<GraphNode, 'type'> | InternalNode>>
+  ...nodeMaps: Array<Map<string, Pick<GraphNode, 'type' | 'stance'> | InternalNode>>
 ) {
   for (const nodeMap of nodeMaps) {
     const node = nodeMap.get(sourceId)
@@ -213,6 +229,31 @@ function getLinkColor(
   }
 
   return TYPE_COLORS.unknown
+}
+
+function getStanceAwareLinkColor(
+  sourceId: string,
+  targetId: string,
+  nodeMap: Map<string, InternalNode | GraphNode>,
+): string {
+  const sourceNode = nodeMap.get(sourceId) as (InternalNode & { stance?: string }) | undefined
+  const targetNode = nodeMap.get(targetId) as (InternalNode & { stance?: string }) | undefined
+
+  if (!sourceNode || !targetNode) return TYPE_COLORS.unknown
+
+  // Only apply stance coloring for agent nodes
+  if (sourceNode.type === 'agent' && targetNode.type === 'agent') {
+    const srcStance = (sourceNode as any).stance || (sourceNode as any).group
+    const tgtStance = (targetNode as any).stance || (targetNode as any).group
+    if (srcStance && tgtStance) {
+      if (srcStance === tgtStance) {
+        return '#22c55e' // Same stance: green
+      }
+      return '#ef4444' // Different stance: red
+    }
+  }
+
+  return getLinkColor(sourceId, nodeMap as any)
 }
 
 function setFixedPosition(node: InternalNode, position: Position) {
@@ -247,7 +288,7 @@ function updateLabelSprite(group: THREE.Group, node: InternalNode, force = false
   ctx.fillStyle = '#ffffff'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  const displayLabel = node.label.length > 12 ? `${node.label.slice(0, 12)}...` : node.label
+  const displayLabel = node.label.length > 20 ? `${node.label.slice(0, 20)}...` : node.label
   ctx.fillText(displayLabel, canvas.width / 2, canvas.height / 2)
   texture.needsUpdate = true
   group.userData.lastLabel = node.label
@@ -309,9 +350,16 @@ function updateInternalNode(node: InternalNode, next: GraphNode) {
   node.opacity = DEFAULT_NODE_OPACITY
 }
 
+interface ForceGraphOptions {
+  nodeExtension?: (node: InternalNode, group: THREE.Group) => void
+}
+
+export type { InternalNode }
+
 export function useForceGraph(
   containerRef: Ref<HTMLElement | null>,
   thinkingModeRef?: Ref<ThinkingVisualMode>,
+  options?: ForceGraphOptions,
 ) {
   const graph = ref<ForceGraph3DInstance | null>(null)
   const graphError = ref('')
@@ -324,6 +372,11 @@ export function useForceGraph(
   const internalLinks: InternalLink[] = []
   let thinkingCleanup: (() => void) | null = null
   let externalNodeClickCallback: ((nodeId: string) => void) | null = null
+  let externalLinkHoverCallback: ((link: InternalLink | null) => void) | null = null
+  let externalLinkClickCallback: ((link: InternalLink | null) => void) | null = null
+  let bloomPassRef: UnrealBloomPass | null = null
+  const bloomEnabled = ref(true)
+  const activeSpeakerIds = new Set<string>()
 
   function restartThinkingAnimation() {
     if (!sceneRef || internalNodes.length > 0) return
@@ -401,6 +454,9 @@ export function useForceGraph(
     group.add(sprite)
 
     applyNodeThreeObjectVisuals(node, group, true)
+    if (options?.nodeExtension) {
+      options.nodeExtension(node, group)
+    }
     return group
   }
 
@@ -516,11 +572,21 @@ export function useForceGraph(
         .showNavInfo(false)
         .nodeThreeObject((node: any) => createNodeThreeObject(node as InternalNode))
         .nodeThreeObjectExtend(false)
-        .linkWidth((link: any) => 0.3 + (link as InternalLink).weight * 0.6)
+        .linkWidth((link: any) => {
+          const l = link as InternalLink
+          const style = RELATION_TYPE_STYLES[l.relationType] || RELATION_TYPE_STYLES.default
+          return style.width + l.weight * 0.4
+        })
         .linkColor((link: any) => (link as InternalLink).color)
         .linkDirectionalArrowRelPos(0.95)
         .linkDirectionalParticleWidth(1.2)
-        .linkDirectionalParticleSpeed(0.005)
+        .linkDirectionalParticleSpeed((link: any) => {
+          if (activeSpeakerIds.size === 0) return 0.005
+          const l = link as InternalLink
+          const srcId = typeof l.source === 'string' ? l.source : l.source.id
+          const tgtId = typeof l.target === 'string' ? l.target : l.target.id
+          return (activeSpeakerIds.has(srcId) || activeSpeakerIds.has(tgtId)) ? 0.01 : 0.005
+        })
         .linkCurvature(0.15)
         .d3AlphaDecay(GRAPH_LAYOUT.alphaDecay)
         .d3VelocityDecay(GRAPH_LAYOUT.velocityDecay)
@@ -532,8 +598,19 @@ export function useForceGraph(
         .linkVisibility((link: any) => ((link as InternalLink).opacity ?? 0) > 0.02)
         .linkDirectionalArrowLength((link: any) => (((link as InternalLink).opacity ?? 0) > 0.05 ? 3 : 0))
         .linkDirectionalArrowColor((link: any) => (link as InternalLink).color)
-        .linkDirectionalParticles((link: any) => (((link as InternalLink).opacity ?? 0) > 0.12 ? 2 : 0))
-        .linkDirectionalParticleColor((link: any) => (link as InternalLink).color)
+        .linkDirectionalParticles((link: any) => {
+          const l = link as InternalLink
+          if (((l.opacity ?? 0) <= 0.12)) return 0
+          if (activeSpeakerIds.size === 0) return 2
+          const srcId = typeof l.source === 'string' ? l.source : l.source.id
+          const tgtId = typeof l.target === 'string' ? l.target : l.target.id
+          return (activeSpeakerIds.has(srcId) || activeSpeakerIds.has(tgtId)) ? 4 : 2
+        })
+        .linkDirectionalParticleColor((link: any) => {
+          const l = link as InternalLink
+          const style = RELATION_TYPE_STYLES[l.relationType] || RELATION_TYPE_STYLES.default
+          return style.particleColor
+        })
 
       fg.d3Force('charge')?.strength(GRAPH_LAYOUT.chargeStrength)
       fg.d3Force('link')?.distance(GRAPH_LAYOUT.linkDistance)
@@ -567,6 +644,21 @@ export function useForceGraph(
 
       createNebula(scene)
 
+      // Bloom post-processing
+      try {
+        const bloomPass = new UnrealBloomPass(
+          new THREE.Vector2(width, height),
+          0.35,  // strength
+          0.5,   // radius
+          0.65,  // threshold
+        )
+        bloomPassRef = bloomPass
+        fg.postProcessingComposer().addPass(bloomPass)
+      } catch {
+        // Graceful fallback if post-processing is unavailable
+        bloomPassRef = null
+      }
+
       const controls = fg.controls() as any
       controls.autoRotate = true
       controls.autoRotateSpeed = 0.3
@@ -596,6 +688,21 @@ export function useForceGraph(
         container.style.cursor = node ? 'pointer' : 'default'
       })
 
+      fg.onLinkHover((link: any) => {
+        if (!link) {
+          if (externalLinkHoverCallback) externalLinkHoverCallback(null)
+          return
+        }
+        container.style.cursor = 'pointer'
+        if (externalLinkHoverCallback) externalLinkHoverCallback(link as InternalLink)
+      })
+
+      fg.onLinkClick((link: any) => {
+        if (externalLinkClickCallback) {
+          externalLinkClickCallback(link ? (link as InternalLink) : null)
+        }
+      })
+
       graphError.value = ''
       graph.value = fg
       syncGraphData()
@@ -609,6 +716,9 @@ export function useForceGraph(
         const w = containerRef.value.clientWidth
         const h = containerRef.value.clientHeight
         graph.value.width(w).height(h)
+        if (bloomPassRef) {
+          bloomPassRef.setSize(w, h)
+        }
       })
       resizeObserver.observe(container)
     } catch (error) {
@@ -715,14 +825,17 @@ export function useForceGraph(
       const nodeMap = new Map(internalNodes.map((node) => [node.id, node]))
       for (const e of diff.added_edges) {
         if (!existing.has(e.id)) {
+          const relationType = e.relation_type || 'default'
+          const style = RELATION_TYPE_STYLES[relationType] || RELATION_TYPE_STYLES.default
           internalLinks.push({
             id: e.id,
             source: e.source,
             target: e.target,
             weight: e.weight || 0.5,
             direction: e.direction || 'directed',
-            color: getLinkColor(e.source, nodeMap),
+            color: relationType !== 'default' ? style.color : getLinkColor(e.source, nodeMap),
             opacity: DEFAULT_LINK_OPACITY,
+            relationType,
           })
         }
       }
@@ -790,10 +903,16 @@ export function useForceGraph(
       return nextNode
     })
 
-    const nextNodeMap = new Map(nextNodes.map((node) => [node.id, node]))
+    // Build a map from source GraphNodes that includes stance data for link coloring
+    const graphNodeMap = new Map(nodes.map((n) => [n.id, n]))
 
     const nextLinks = edges.map((edge) => {
-      const color = getLinkColor(edge.source, nextNodeMap)
+      const relationType = edge.relation_type || 'default'
+      // Use relation type color if available, fall back to stance-aware coloring
+      const style = RELATION_TYPE_STYLES[relationType] || RELATION_TYPE_STYLES.default
+      const color = relationType !== 'default'
+        ? style.color
+        : getStanceAwareLinkColor(edge.source, edge.target, graphNodeMap as any)
 
       return {
         id: edge.id,
@@ -803,6 +922,7 @@ export function useForceGraph(
         direction: edge.direction || 'directed',
         color,
         opacity: DEFAULT_LINK_OPACITY,
+        relationType,
       }
     })
 
@@ -863,6 +983,7 @@ export function useForceGraph(
       direction: edge.direction || 'directed',
       color,
       opacity,
+      relationType: edge.relation_type || 'default',
     }
   }
 
@@ -1047,7 +1168,7 @@ export function useForceGraph(
       const basisEdge = toEdge || fromEdge
       if (!basisEdge) continue
 
-      const renderLink = {
+      const renderLink: InternalLink = {
         id: edgeId,
         source: basisEdge.source,
         target: basisEdge.target,
@@ -1055,6 +1176,7 @@ export function useForceGraph(
         direction: basisEdge.direction || 'directed',
         color: getLinkColor(basisEdge.source, toNodeMap, fromNodeMap, currentNodeMap),
         opacity: DEFAULT_LINK_OPACITY,
+        relationType: basisEdge.relation_type || 'default',
       }
 
       const fromFrame = fromEdge
@@ -1132,6 +1254,7 @@ export function useForceGraph(
       link.direction = normalized < 0.5 ? from.direction : to.direction
       link.color = lerpColor(from.color, to.color, normalized)
       link.opacity = lerp(from.opacity, to.opacity, normalized)
+      link.relationType = normalized < 0.5 ? from.relationType : to.relationType
     }
 
     refreshGraph()
@@ -1196,6 +1319,31 @@ export function useForceGraph(
     externalNodeClickCallback = callback
   }
 
+  function onLinkHover(callback: ((link: InternalLink | null) => void) | null) {
+    externalLinkHoverCallback = callback
+  }
+
+  function onLinkClick(callback: ((link: InternalLink | null) => void) | null) {
+    externalLinkClickCallback = callback
+  }
+
+  function setActiveSpeakers(ids: string[]) {
+    activeSpeakerIds.clear()
+    for (const id of ids) activeSpeakerIds.add(id)
+  }
+
+  function toggleBloom(enabled?: boolean) {
+    const value = enabled ?? !bloomEnabled.value
+    bloomEnabled.value = value
+    if (bloomPassRef) {
+      bloomPassRef.strength = value ? 0.35 : 0
+    }
+  }
+
+  function getInternalNodes(): InternalNode[] {
+    return internalNodes
+  }
+
   return {
     graph,
     graphError,
@@ -1207,5 +1355,11 @@ export function useForceGraph(
     getNodeById,
     resetCamera,
     onNodeClick,
+    onLinkHover,
+    onLinkClick,
+    getInternalNodes,
+    toggleBloom,
+    bloomEnabled,
+    setActiveSpeakers,
   }
 }

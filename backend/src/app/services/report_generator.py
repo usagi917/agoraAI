@@ -17,6 +17,10 @@ from src.app.llm.prompts import (
 from src.app.models.report import Report
 from src.app.models.run import Run
 from src.app.services.cost_tracker import record_usage
+from src.app.services.decision_briefing import (
+    build_single_decision_brief,
+    render_decision_brief_markdown,
+)
 from src.app.services.quality import (
     build_quality_summary,
     build_section_detail,
@@ -189,6 +193,16 @@ async def generate_report(
             fallback_used=False,
             evidence_refs=all_evidence_refs,
             evidence_mode=normalized_evidence_mode,
+        )
+        decision_brief = build_single_decision_brief(
+            prompt_text=prompt_text,
+            report_content=report_content,
+            sections=sections_data,
+            quality=sections_data["quality"],
+        )
+        sections_data["decision_brief"] = decision_brief
+        report_content = (
+            f"{render_decision_brief_markdown(decision_brief)}\n\n---\n\n{report_content}"
         )
         enforce_quality_gate(
             sections_data["quality"],
