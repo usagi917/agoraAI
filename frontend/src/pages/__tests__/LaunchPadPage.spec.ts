@@ -45,7 +45,7 @@ describe('LaunchPadPage', () => {
     apiMocks.createSimulation.mockResolvedValue({ id: 'sim-1' })
   })
 
-  it('uses unified as the default primary flow and launches with strict evidence mode', async () => {
+  it('shows simplified input section and launches unified mode with strict evidence', async () => {
     const wrapper = mount(LaunchPadPage, {
       global: {
         stubs: {
@@ -56,9 +56,12 @@ describe('LaunchPadPage', () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('統合シミュレーションを既定で起動')
+    // New simplified UI shows "何を分析しますか？" instead of old flow card
+    expect(wrapper.text()).toContain('何を分析しますか？')
+    expect(wrapper.text()).toContain('分析を開始')
 
-    await wrapper.get('#simulation-prompt').setValue('EV battery market analysis')
+    // Type in the free prompt textarea
+    await wrapper.get('.prompt-textarea').setValue('EV battery market analysis')
     await wrapper.get('[data-testid="launch-button"]').trigger('click')
     await flushPromises()
 

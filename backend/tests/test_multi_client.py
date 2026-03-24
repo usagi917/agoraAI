@@ -147,4 +147,4 @@ class TestMultiLLMClientBatch:
 
         results = await client.call_batch_by_provider(calls)
         assert len(results) == 1
-        assert results[0][0] == ""  # empty content on error
+        assert results[0][0]["_error"] is True  # error dict on failure

@@ -16,8 +16,12 @@ from src.app.services.society.population_generator import get_default_population
 from src.app.services.society.agent_selector import select_agents
 from src.app.services.society.activation_layer import run_activation
 from src.app.services.society.evaluation import evaluate_society_simulation
+from src.app.services.society.persona_generator import generate_persona_narratives
 from src.app.services.society.representative_selector import select_representatives
 from src.app.services.society.demographic_analyzer import analyze_demographics
+from src.app.services.society.kg_enricher import enrich_agents_from_kg
+from src.app.models.conversation_log import ConversationLog
+from src.app.services.conversation_log_store import persist_conversation_logs
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -37,6 +41,8 @@ async def run_society_pulse(
     session: Any,
     sim: Simulation,
     theme: str,
+    kg_entities: list[dict] | None = None,
+    kg_relations: list[dict] | None = None,
 ) -> SocietyPulseResult:
     """Society Pulse フェーズを実行する。
 
@@ -85,6 +91,27 @@ async def run_society_pulse(
         ],
     })
 
+    # === KG Enrichment (Optional) ===
+    if kg_entities:
+        enrich_agents_from_kg(
+            selected_agents,
+            kg_entities,
+            kg_relations or [],
+            theme,
+        )
+        logger.info("KG enrichment applied to %d selected agents", len(selected_agents))
+
+    # === Persona Narrative Generation ===
+    await sse_manager.publish(simulation_id, "persona_generation_started", {
+        "agent_count": len(selected_agents),
+    })
+    try:
+        selected_agents = await generate_persona_narratives(selected_agents, theme)
+        generated = sum(1 for a in selected_agents if a.get("persona_narrative"))
+        logger.info("Persona narratives: %d/%d generated", generated, len(selected_agents))
+    except Exception as e:
+        logger.warning("Persona generation failed, continuing without: %s", e)
+
     # === Activation ===
     await sse_manager.publish(simulation_id, "society_activation_started", {
         "agent_count": len(selected_agents),
@@ -106,16 +133,53 @@ async def run_society_pulse(
 
     # 個別回答を保存
     individual_responses = []
+    activation_logs: list[ConversationLog] = []
     for agent, resp in zip(selected_agents, activation_result["responses"]):
         individual_responses.append({
             "agent_id": agent["id"],
             "agent_index": agent.get("agent_index", 0),
             "stance": resp["stance"],
             "confidence": resp["confidence"],
-            "reason": (resp.get("reason") or "")[:300],
-            "concern": (resp.get("concern") or "")[:300],
+            "reason": resp.get("reason") or "",
+            "personal_story": resp.get("personal_story") or "",
+            "concern": resp.get("concern") or "",
             "priority": resp.get("priority", ""),
         })
+
+        # ConversationLog に activation 発言を保存
+        demo = agent.get("demographics", {})
+        agent_name = f"{demo.get('occupation', '不明')}・{demo.get('age', '?')}歳・{demo.get('region', '不明')}"
+        reason = resp.get("reason") or ""
+        personal_story = resp.get("personal_story") or ""
+        concern = resp.get("concern") or ""
+        content_parts = []
+        if resp.get("stance"):
+            content_parts.append(f"【スタンス】{resp['stance']}（信頼度: {resp.get('confidence', 0):.0%}）")
+        if reason:
+            content_parts.append(f"【理由】{reason}")
+        if personal_story:
+            content_parts.append(f"【体験談】{personal_story}")
+        if concern:
+            content_parts.append(f"【懸念】{concern}")
+
+        if content_parts and not resp.get("_failed"):
+            activation_logs.append(ConversationLog(
+                simulation_id=simulation_id,
+                phase="activation",
+                round_number=0,
+                participant_name=agent_name,
+                participant_role="citizen",
+                participant_index=agent.get("agent_index", 0),
+                content_text="\n".join(content_parts),
+                content_json=resp,
+                stance=resp.get("stance", ""),
+            ))
+
+    await persist_conversation_logs(
+        session,
+        activation_logs,
+        context="activation conversation logs",
+    )
 
     activation_record = SocietyResult(
         id=str(uuid.uuid4()),
@@ -189,11 +253,12 @@ async def run_society_pulse(
     ))
 
     # === Representatives ===
-    representatives = select_representatives(
+    representatives = await select_representatives(
         selected_agents,
         activation_result["responses"],
         max_citizen_reps=6,
         max_experts=4,
+        theme=theme,
     )
 
     return SocietyPulseResult(

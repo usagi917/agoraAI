@@ -46,7 +46,7 @@ export interface ConversationEdge {
   intensity: number
 }
 
-export interface StanceShiftEvent {
+interface StanceShiftEvent {
   agentId: string
   fromStance: string
   toStance: string

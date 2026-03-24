@@ -103,11 +103,12 @@ describe('LaunchPadPage — template-specific wizard steps', () => {
     )
   })
 
-  it('renders unified mode as the default launch flow', async () => {
+  it('renders simplified unified input section', async () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('統合シミュレーション')
+    expect(wrapper.text()).toContain('何を分析しますか？')
+    expect(wrapper.text()).toContain('分析を開始')
   })
 
   it('shows wizard steps specific to the selected question template', async () => {

@@ -27,6 +27,13 @@ import SocietyProgress from '../components/SocietyProgress.vue'
 import OpinionDistribution from '../components/OpinionDistribution.vue'
 import LiveSocietyGraph from '../components/LiveSocietyGraph.vue'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
+import {
+  getDefaultLiveSecondaryTab,
+  getLivePrimaryView,
+  getLiveSecondaryTabs,
+  type LivePrimaryView,
+  type LiveSecondaryTab,
+} from './layoutRules'
 
 const LIVE_SESSION_VERSION = 1
 
@@ -46,6 +53,7 @@ const sim = ref<SimulationResponse | null>(null)
 const graphCanvas = ref<HTMLElement | null>(null)
 const selectedEntity = ref<any>(null)
 const elapsedTime = ref(0)
+const activeSecondaryTab = ref<LiveSecondaryTab>('progress')
 let timer: ReturnType<typeof setInterval> | null = null
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -299,6 +307,29 @@ const emptyState = computed(() => {
 })
 
 const graphContainerClass = computed(() => `tone-${thinkingMode.value}`)
+const liveLayoutContext = computed(() => ({
+  mode: sim.value?.mode,
+  hasColonies: showColonyGrid.value,
+  hasActivity: activityStore.entries.length > 0 || !!store.promptText,
+}))
+const livePrimaryView = computed<LivePrimaryView>(() => getLivePrimaryView(liveLayoutContext.value))
+const liveSecondaryTabs = computed<LiveSecondaryTab[]>(() => getLiveSecondaryTabs(liveLayoutContext.value))
+const liveSecondaryLabels: Record<LiveSecondaryTab, string> = {
+  progress: 'Progress',
+  activity: 'Activity',
+  society: 'Society',
+  colonies: 'Colonies',
+}
+const livePrimaryTitle = computed(() => (
+  livePrimaryView.value === 'society'
+    ? '社会反応を主役にライブ進行を追う'
+    : '知識グラフと進捗を主役にライブ進行を追う'
+))
+const livePrimaryDescription = computed(() => (
+  livePrimaryView.value === 'society'
+    ? '社会系モードでは、意見分布とネットワークの変化を優先表示します。'
+    : '通常モードでは、グラフの変化とフェーズ進行を優先表示します。'
+))
 
 function liveStateKey(id: string) {
   return `agent-ai:live:${id}`
@@ -524,6 +555,7 @@ async function bootstrapSimulation() {
     sim.value = e2eSimulation
     applySimulationState(sim.value)
     restorePersistedLiveState(persisted, sim.value)
+    activeSecondaryTab.value = getDefaultLiveSecondaryTab(liveLayoutContext.value)
     startElapsedTimer(sim.value.started_at)
     if (sim.value.status !== 'completed' && sim.value.status !== 'failed') {
       sse.start()
@@ -536,6 +568,7 @@ async function bootstrapSimulation() {
   restorePersistedLiveState(persisted, sim.value)
   startElapsedTimer(sim.value.started_at)
   await hydrateLiveData(sim.value)
+  activeSecondaryTab.value = getDefaultLiveSecondaryTab(liveLayoutContext.value)
 
   if (sim.value.status !== 'completed' && sim.value.status !== 'failed') {
     sse.start()
@@ -589,11 +622,14 @@ watch(graph, (fg) => {
   fg.onNodeClick((node: any) => {
     const storeNode = graphStore.nodes.find((n: any) => n.id === node.id)
     selectedEntity.value = storeNode || node
+    const focusX = Number.isFinite(node.displayX) ? node.displayX : node.x || 0
+    const focusY = Number.isFinite(node.displayY) ? node.displayY : node.y || 0
+    const focusZ = Number.isFinite(node.displayZ) ? node.displayZ : node.z || 0
     const distance = 100
-    const distRatio = 1 + distance / Math.hypot(node.x || 0, node.y || 0, node.z || 0)
+    const distRatio = 1 + distance / Math.hypot(focusX, focusY, focusZ)
     fg.cameraPosition(
-      { x: (node.x || 0) * distRatio, y: (node.y || 0) * distRatio, z: (node.z || 0) * distRatio },
-      { x: node.x, y: node.y, z: node.z },
+      { x: focusX * distRatio, y: focusY * distRatio, z: focusZ * distRatio },
+      { x: focusX, y: focusY, z: focusZ },
       1000,
     )
   })
@@ -644,6 +680,26 @@ function goToResults() {
 
     <!-- Unified Mode: Interim Results Dashboard -->
     <div v-if="store.isUnifiedMode && store.unifiedPhase !== 'idle'" class="unified-interim-panel">
+      <!-- Phase Stepper -->
+      <div class="unified-stepper">
+        <div
+          v-for="(step, i) in [
+            { key: 'society_pulse', label: 'Society Pulse', icon: '◇' },
+            { key: 'council', label: 'Council', icon: '◉' },
+            { key: 'synthesis', label: 'Synthesis', icon: '◈' },
+          ]"
+          :key="step.key"
+          class="stepper-step"
+          :class="{
+            'stepper-active': store.unifiedPhase === step.key,
+            'stepper-done': store.unifiedPhaseIndex > i + 1 || store.unifiedPhase === 'completed',
+          }"
+        >
+          <span class="stepper-icon">{{ step.icon }}</span>
+          <span class="stepper-label">{{ step.label }}</span>
+        </div>
+      </div>
+
       <!-- Phase 1 results: opinion distribution -->
       <div v-if="Object.keys(store.opinionDistribution).length > 0" class="pulse-summary">
         <div class="panel-header">
@@ -687,8 +743,25 @@ function goToResults() {
 
     <!-- Main Layout -->
     <div class="sim-layout">
-      <!-- Left: Graph + Colony Grid -->
       <div class="main-panel">
+        <div class="live-hero" data-testid="simulation-primary-view">
+          <div class="live-hero-copy">
+            <span class="live-hero-eyebrow">{{ livePrimaryView === 'society' ? 'Society Live' : 'Graph Live' }}</span>
+            <h3 class="live-hero-title">{{ livePrimaryTitle }}</h3>
+            <p class="live-hero-description">{{ livePrimaryDescription }}</p>
+          </div>
+          <div class="live-hero-stats">
+            <div class="live-hero-stat">
+              <span class="live-hero-stat-label">Status</span>
+              <strong>{{ store.status }}</strong>
+            </div>
+            <div class="live-hero-stat">
+              <span class="live-hero-stat-label">Phase</span>
+              <strong>{{ stageLabel }}</strong>
+            </div>
+          </div>
+        </div>
+
         <div class="graph-panel">
           <div class="panel-header">
             <h3>{{ store.isSocietyMode ? '3D Social Graph' : '3D Knowledge Graph' }}</h3>
@@ -747,72 +820,104 @@ function goToResults() {
             </span>
           </div>
         </div>
-
-        <!-- Colony Grid (swarm stage in pipeline, or standalone swarm/hybrid) -->
-        <div v-if="showColonyGrid" class="colony-overlay">
-          <div class="panel-header">
-            <h3>Colony Grid</h3>
-            <span class="panel-count">{{ store.completedColonies }}/{{ store.colonies.length }}</span>
-          </div>
-          <ColonyGrid :colonies="store.colonies" />
-        </div>
       </div>
 
-      <!-- Right: Side Panel -->
       <div class="side-panel">
-        <!-- Entity Detail -->
-        <div v-if="selectedEntity" class="panel-card entity-detail">
+        <div class="panel-card">
           <div class="panel-header">
-            <h3>Entity Inspector</h3>
-            <button class="btn-icon" @click="selectedEntity = null">&#10005;</button>
+            <h3>Details</h3>
           </div>
-          <div class="entity-name">{{ selectedEntity.label }}</div>
-          <div class="entity-meta">
-            <span class="entity-type-badge">{{ selectedEntity.type }}</span>
-            <span class="entity-score">重要度 {{ ((selectedEntity.importance_score || 0) * 100).toFixed(0) }}%</span>
-          </div>
-          <div class="detail-grid">
-            <div v-if="selectedEntity.stance" class="detail-item">
-              <span class="detail-key">立場</span>
-              <span class="detail-val">{{ selectedEntity.stance }}</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-key">ステータス</span>
-              <span class="detail-val">{{ selectedEntity.status }}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Prompt Info -->
-        <div v-if="store.promptText" class="panel-card">
-          <div class="panel-header"><h3>Prompt</h3></div>
-          <p class="prompt-text">{{ store.promptText }}</p>
-        </div>
-
-        <!-- Report Progress (WP6) -->
-        <div v-if="store.reportSections.length > 0" class="panel-card">
-          <div class="panel-header">
-            <h3>Report Progress</h3>
-            <span class="panel-count">{{ store.completedReportSections }}/{{ store.reportSections.length }}</span>
-          </div>
-          <div v-if="store.reportError" class="report-error-banner">
-            {{ store.reportError }}
-          </div>
-          <div class="report-sections">
-            <div
-              v-for="(sec, i) in store.reportSections"
-              :key="i"
-              class="report-section-item"
-              :class="{ done: sec.done }"
+          <div class="secondary-switcher-buttons">
+            <button
+              v-for="tab in liveSecondaryTabs"
+              :key="tab"
+              class="live-tab-btn"
+              :class="{ active: activeSecondaryTab === tab }"
+              @click="activeSecondaryTab = tab"
             >
-              <span class="section-check">{{ sec.done ? '✓' : '…' }}</span>
-              <span class="section-name">{{ sec.name }}</span>
+              {{ liveSecondaryLabels[tab] }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="activeSecondaryTab === 'progress'" class="panel-stack">
+          <div v-if="selectedEntity" class="panel-card entity-detail">
+            <div class="panel-header">
+              <h3>Entity Inspector</h3>
+              <button class="btn-icon" @click="selectedEntity = null">&#10005;</button>
+            </div>
+            <div class="entity-name">{{ selectedEntity.label }}</div>
+            <div class="entity-meta">
+              <span class="entity-type-badge">{{ selectedEntity.type }}</span>
+              <span class="entity-score">重要度 {{ ((selectedEntity.importance_score || 0) * 100).toFixed(0) }}%</span>
+            </div>
+            <div class="detail-grid">
+              <div v-if="selectedEntity.stance" class="detail-item">
+                <span class="detail-key">立場</span>
+                <span class="detail-val">{{ selectedEntity.stance }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="detail-key">ステータス</span>
+                <span class="detail-val">{{ selectedEntity.status }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="store.promptText" class="panel-card">
+            <div class="panel-header"><h3>Prompt</h3></div>
+            <p class="prompt-text">{{ store.promptText }}</p>
+          </div>
+
+          <div v-if="store.reportSections.length > 0" class="panel-card">
+            <div class="panel-header">
+              <h3>Report Progress</h3>
+              <span class="panel-count">{{ store.completedReportSections }}/{{ store.reportSections.length }}</span>
+            </div>
+            <div v-if="store.reportError" class="report-error-banner">
+              {{ store.reportError }}
+            </div>
+            <div class="report-sections">
+              <div
+                v-for="(sec, i) in store.reportSections"
+                :key="i"
+                class="report-section-item"
+                :class="{ done: sec.done }"
+              >
+                <span class="section-check">{{ sec.done ? '✓' : '…' }}</span>
+                <span class="section-name">{{ sec.name }}</span>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Activity Feed -->
-        <ActivityFeed :status="store.status" />
+        <div v-if="activeSecondaryTab === 'society' && store.isSocietyMode" class="panel-stack">
+          <div class="panel-card">
+            <div class="panel-header">
+              <h3>意見分布</h3>
+            </div>
+            <OpinionDistribution :distribution="store.opinionDistribution" />
+          </div>
+          <div class="panel-card">
+            <div class="panel-header">
+              <h3>社会進行</h3>
+            </div>
+            <p class="prompt-text">Round {{ societyGraphStore.currentRound }} / 活性化 {{ societyGraphStore.activationCompleted }}/{{ societyGraphStore.activationTotal }}</p>
+            <p class="prompt-text">{{ stageLabel }}</p>
+          </div>
+        </div>
+
+        <div v-if="activeSecondaryTab === 'activity'" class="panel-card">
+          <ActivityFeed :status="store.status" />
+        </div>
+
+        <div v-if="activeSecondaryTab === 'colonies'" class="panel-card">
+          <div class="panel-header">
+            <h3>Colony Grid</h3>
+            <span v-if="showColonyGrid" class="panel-count">{{ store.completedColonies }}/{{ store.colonies.length }}</span>
+          </div>
+          <ColonyGrid v-if="showColonyGrid" :colonies="store.colonies" />
+          <p v-else class="prompt-text">現在のフェーズでは colony は表示されません。</p>
+        </div>
       </div>
     </div>
   </div>
@@ -863,6 +968,67 @@ function goToResults() {
 
 .main-panel { display: flex; flex-direction: column; gap: 0.75rem; }
 
+.live-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(13rem, 0.8fr);
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01)),
+    radial-gradient(circle at top left, rgba(79, 70, 229, 0.18), transparent 40%);
+}
+
+.live-hero-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.live-hero-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.live-hero-title {
+  font-size: 1.2rem;
+  line-height: 1.2;
+}
+
+.live-hero-description {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.live-hero-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.live-hero-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.03);
+}
+
+.live-hero-stat-label {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
 .graph-panel {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -884,6 +1050,24 @@ function goToResults() {
 }
 
 .panel-header h3 { font-size: 0.82rem; font-weight: 600; }
+.panel-stack { display: flex; flex-direction: column; gap: 0.75rem; }
+.secondary-switcher-buttons { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.live-tab-btn {
+  padding: 0.45rem 0.8rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.live-tab-btn.active {
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border-color: var(--accent);
+}
 .panel-metrics { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 .metric { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); }
 .metric-val { color: var(--accent); font-weight: 600; }
@@ -1206,6 +1390,57 @@ function goToResults() {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.unified-stepper {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.stepper-step {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.5rem;
+  font-size: 0.78rem;
+  color: var(--text-tertiary);
+  border-right: 1px solid var(--border);
+  transition: background 0.2s, color 0.2s;
+}
+
+.stepper-step:last-child {
+  border-right: none;
+}
+
+.stepper-step.stepper-active {
+  background: rgba(var(--accent-rgb, 99, 102, 241), 0.12);
+  color: var(--accent, #6366f1);
+  font-weight: 600;
+}
+
+.stepper-step.stepper-done {
+  color: var(--text-secondary);
+}
+
+.stepper-step.stepper-done .stepper-icon::after {
+  content: ' ✓';
+  font-size: 0.7rem;
+}
+
+.stepper-icon {
+  font-size: 0.9rem;
+}
+
+.stepper-label {
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
 }
 
 .pulse-summary {

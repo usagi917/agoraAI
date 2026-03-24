@@ -16,6 +16,7 @@ from src.app.models.social_edge import SocialEdge
 from src.app.models.simulation import Simulation
 from src.app.models.society_result import SocietyResult
 from src.app.models.evaluation_result import EvaluationResult
+from src.app.models.conversation_log import ConversationLog
 from src.app.services.society.population_generator import (
     generate_population,
     get_default_population_size,
@@ -599,6 +600,51 @@ async def get_agent_detail(
                 "connected_to": c.target_id if c.agent_id == agent_id else c.agent_id,
             }
             for c in connections
+        ],
+    }
+
+
+@router.get("/simulations/{sim_id}/transcript")
+async def get_transcript(
+    sim_id: str,
+    phase: str | None = Query(None, description="activation | meeting | synthesis"),
+    round_number: int | None = Query(None, alias="round"),
+    session: AsyncSession = Depends(get_session),
+):
+    """シミュレーションの全会話トランスクリプトを時系列で返す。"""
+    query = (
+        select(ConversationLog)
+        .where(ConversationLog.simulation_id == sim_id)
+        .order_by(ConversationLog.phase, ConversationLog.round_number, ConversationLog.created_at)
+    )
+    if phase:
+        query = query.where(ConversationLog.phase == phase)
+    if round_number is not None:
+        query = query.where(ConversationLog.round_number == round_number)
+
+    result = await session.execute(query)
+    logs = result.scalars().all()
+
+    if not logs:
+        raise HTTPException(status_code=404, detail="トランスクリプトが見つかりません")
+
+    return {
+        "simulation_id": sim_id,
+        "total_entries": len(logs),
+        "entries": [
+            {
+                "id": log.id,
+                "phase": log.phase,
+                "round_number": log.round_number,
+                "participant_name": log.participant_name,
+                "participant_role": log.participant_role,
+                "content_text": log.content_text,
+                "stance": log.stance,
+                "stance_changed": log.stance_changed,
+                "addressed_to": log.addressed_to,
+                "created_at": log.created_at.isoformat(),
+            }
+            for log in logs
         ],
     }
 

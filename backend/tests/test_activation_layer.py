@@ -26,8 +26,9 @@ class TestParseActivationResponse:
 
     def test_parse_string_response(self):
         result = _parse_activation_response("just some text")
-        assert result["stance"] == "中立"
-        assert result["confidence"] == 0.5
+        assert result["stance"] == ""
+        assert result["confidence"] == 0.0
+        assert result["_failed"] is True
 
     def test_parse_empty_dict(self):
         result = _parse_activation_response({})

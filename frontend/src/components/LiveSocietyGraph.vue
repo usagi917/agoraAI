@@ -55,7 +55,8 @@ const showConversationToast = computed(() =>
 )
 
 const stanceLegend = Object.entries(STANCE_COLORS)
-const edgeLegend = Object.entries(RELATION_TYPE_STYLES).filter(([k]) => k !== 'default')
+const socialRelTypes = ['friend', 'family', 'colleague', 'neighbor', 'acquaintance']
+const edgeLegend = Object.entries(RELATION_TYPE_STYLES).filter(([k]) => socialRelTypes.includes(k))
 
 const hoveredEdgeInfo = computed(() => {
   const e = societyGraphStore.hoveredEdge

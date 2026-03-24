@@ -832,6 +832,39 @@ export async function getNarrative(simId: string): Promise<{ phase_data: Narrati
   return data
 }
 
+// === Transcript API ===
+
+export interface TranscriptEntry {
+  id: string
+  phase: string
+  round_number: number
+  participant_name: string
+  participant_role: string
+  content_text: string
+  stance: string
+  stance_changed: boolean
+  addressed_to: string
+  created_at: string
+}
+
+export interface TranscriptResponse {
+  simulation_id: string
+  total_entries: number
+  entries: TranscriptEntry[]
+}
+
+export async function getTranscript(
+  simId: string,
+  phase?: string,
+  round?: number,
+): Promise<TranscriptResponse> {
+  const params: Record<string, string> = {}
+  if (phase) params.phase = phase
+  if (round != null) params.round = String(round)
+  const { data } = await api.get(`/society/simulations/${simId}/transcript`, { params })
+  return data
+}
+
 // === Sample Results API (API Key不要) ===
 
 export async function getSampleResult(sampleId: string) {

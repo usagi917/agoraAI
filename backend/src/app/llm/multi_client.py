@@ -152,6 +152,7 @@ class MultiLLMClient:
         self,
         calls: list[dict],
         max_concurrency: int = 20,
+        max_retries: int = 2,
     ) -> list[tuple[dict | str, dict]]:
         """プロバイダ別にグループ化してバッチ呼び出しを行う。
 
@@ -167,13 +168,29 @@ class MultiLLMClient:
 
         async def _single(call_params: dict):
             async with sem:
-                return await self.call(
-                    provider_name=call_params["provider"],
-                    system_prompt=call_params["system_prompt"],
-                    user_prompt=call_params["user_prompt"],
-                    temperature=call_params.get("temperature", 0.5),
-                    max_tokens=call_params.get("max_tokens", 1024),
-                )
+                last_exc: Exception | None = None
+                for attempt in range(max_retries + 1):
+                    try:
+                        return await self.call(
+                            provider_name=call_params["provider"],
+                            system_prompt=call_params["system_prompt"],
+                            user_prompt=call_params["user_prompt"],
+                            temperature=call_params.get("temperature", 0.5),
+                            max_tokens=call_params.get("max_tokens", 1024),
+                        )
+                    except Exception as e:
+                        last_exc = e
+                        if attempt < max_retries:
+                            wait = 0.5 * (2 ** attempt)
+                            logger.warning(
+                                "Batch call attempt %d/%d failed for %s: %s. Retrying in %.1fs",
+                                attempt + 1, max_retries + 1,
+                                call_params.get("provider", "unknown"),
+                                type(e).__name__, wait,
+                            )
+                            await asyncio.sleep(wait)
+                # All retries exhausted
+                raise last_exc  # type: ignore[misc]
 
         results = await asyncio.gather(
             *[_single(c) for c in calls],
@@ -181,16 +198,27 @@ class MultiLLMClient:
         )
 
         processed = []
-        for r in results:
+        fail_count = 0
+        for i, r in enumerate(results):
             if isinstance(r, Exception):
-                logger.warning("Batch call failed: %s", r)
+                fail_count += 1
+                provider = calls[i].get("provider", "unknown")
+                logger.error(
+                    "Batch call permanently failed for provider=%s (index=%d): %s: %s",
+                    provider, i, type(r).__name__, r,
+                )
                 processed.append((
-                    "",
-                    {"model": "unknown", "provider": "unknown",
-                     "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    {"_error": True, "_error_type": type(r).__name__, "_error_msg": str(r)[:200]},
+                    {"model": "unknown", "provider": provider,
+                     "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                     "_failed": True},
                 ))
             else:
                 processed.append(r)
+
+        if fail_count > 0:
+            logger.error("Batch completed with %d/%d failures", fail_count, len(calls))
+
         return processed
 
     async def close(self) -> None:

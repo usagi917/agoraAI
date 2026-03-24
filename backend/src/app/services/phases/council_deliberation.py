@@ -1,14 +1,15 @@
-"""Council Deliberation フェーズ: 名前生成 + 反証役 + 3ラウンド議論"""
+"""Council Deliberation フェーズ: 名前生成 + 反証役 + 3ラウンド議論 + KG進化"""
 
 import logging
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from src.app.config import settings
 from src.app.llm.multi_client import multi_llm_client
 from src.app.models.simulation import Simulation
 from src.app.services.phases.society_pulse import SocietyPulseResult
+from src.app.services.society.kg_updater import extract_kg_updates_from_round, apply_kg_updates
 from src.app.services.society.meeting_layer import run_meeting
 from src.app.sse.manager import sse_manager
 
@@ -22,6 +23,8 @@ class CouncilResult:
     synthesis: dict
     devil_advocate_summary: str
     usage: dict
+    kg_entities: list[dict] = field(default_factory=list)
+    kg_relations: list[dict] = field(default_factory=list)
 
 
 def _assign_devil_advocates(
@@ -135,10 +138,13 @@ async def run_council(
     sim: Simulation,
     pulse: SocietyPulseResult,
     theme: str,
+    kg_entities: list[dict] | None = None,
+    kg_relations: list[dict] | None = None,
 ) -> CouncilResult:
     """Council Deliberation フェーズを実行する。
 
     10人の代表者に名前を付与し、反証役を指定して3ラウンドの議論を行う。
+    議論の各ラウンドからKGを進化させる。
     """
     simulation_id = sim.id
     participants = list(pulse.representatives)
@@ -177,26 +183,69 @@ async def run_council(
         theme,
         simulation_id=simulation_id,
         num_rounds=3,
+        session=session,
     )
 
-    # 反証サマリーを抽出
-    devil_advocate_names = [
-        p.get("display_name", "")
-        for p in participants
-        if p.get("is_devil_advocate")
-    ]
+    # 反証サマリーを抽出（participant_index ベースでマッチング）
+    devil_advocate_indices = {
+        i for i, p in enumerate(participants) if p.get("is_devil_advocate")
+    }
     devil_arguments = []
     for round_args in meeting_result.get("rounds", []):
         for arg in round_args:
-            if arg.get("participant_name", "") in devil_advocate_names:
-                devil_arguments.append(arg.get("argument", ""))
+            if arg.get("participant_index") in devil_advocate_indices:
+                text = (arg.get("argument") or "").strip()
+                if text:
+                    devil_arguments.append(text)
 
-    devil_advocate_summary = "反証役の主な主張: " + " / ".join(devil_arguments[:3]) if devil_arguments else "反証なし"
+    if devil_arguments:
+        devil_advocate_summary = "反証役の主な主張: " + " / ".join(devil_arguments[:3])
+    else:
+        # 引数が空の場合: devil advocate の初期スタンス・懸念からフォールバック生成
+        fallback_parts = []
+        for p in participants:
+            if p.get("is_devil_advocate"):
+                stance = p.get("stance", "")
+                concern = p.get("response", {}).get("concern", "") if p.get("response") else ""
+                reason = p.get("response", {}).get("reason", "") if p.get("response") else ""
+                part = concern or reason or stance
+                if part:
+                    fallback_parts.append(part)
+        if fallback_parts:
+            devil_advocate_summary = "反証役の懸念: " + " / ".join(fallback_parts[:3])
+        else:
+            devil_advocate_summary = "反証なし"
+
+    # === KG 進化: ラウンドごとに新エンティティ・関係を抽出 ===
+    evolved_entities = list(kg_entities) if kg_entities else []
+    evolved_relations = list(kg_relations) if kg_relations else []
+
+    if evolved_entities:
+        existing_names = {e.get("name", "") for e in evolved_entities}
+        for round_idx, round_args in enumerate(meeting_result.get("rounds", [])):
+            try:
+                updates = await extract_kg_updates_from_round(
+                    round_args, theme, existing_names,
+                )
+                if updates.get("new_entities") or updates.get("updated_entities"):
+                    evolved_entities, evolved_relations = apply_kg_updates(
+                        evolved_entities, evolved_relations, updates,
+                    )
+                    existing_names = {e.get("name", "") for e in evolved_entities}
+                    logger.info(
+                        "KG evolved after round %d: +%d entities, +%d relations",
+                        round_idx + 1,
+                        len(updates.get("new_entities", [])),
+                        len(updates.get("new_relations", [])),
+                    )
+            except Exception as e:
+                logger.warning("KG evolution failed for round %d: %s", round_idx + 1, e)
 
     await sse_manager.publish(simulation_id, "meeting_completed", {
         "rounds": len(meeting_result.get("rounds", [])),
         "synthesis_available": bool(meeting_result.get("synthesis")),
         "devil_advocate_summary": devil_advocate_summary[:200],
+        "kg_evolved": len(evolved_entities) > len(kg_entities or []),
     })
 
     # 参加者サマリーを構築
@@ -218,4 +267,6 @@ async def run_council(
         synthesis=meeting_result.get("synthesis", {}),
         devil_advocate_summary=devil_advocate_summary,
         usage=meeting_result.get("usage", {}),
+        kg_entities=evolved_entities,
+        kg_relations=evolved_relations,
     )

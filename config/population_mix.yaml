@@ -4,11 +4,11 @@
 activation_layer:
   # 50-200人の軽量LLM呼び出し（コスト重視）
   weights:
-    openai: 0.3
-    gemini: 0.5
+    openai: 0.5
+    gemini: 0.3
     anthropic: 0.2
-  temperature: 0.5
-  max_tokens: 1024
+  temperature: 0.75
+  max_tokens: 2048
 
 meeting_layer:
   # 5-10人のフルBDI議論（品質重視）

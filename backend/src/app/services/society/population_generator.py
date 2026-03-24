@@ -241,6 +241,99 @@ def _assign_llm_backend(index: int, total: int, mix_config: dict) -> str:
     return _sample_categorical(providers, probs)
 
 
+def _generate_contradiction(big_five: dict, values: dict) -> str:
+    """Big Five traits と values の矛盾から内面的葛藤を生成する（ルールベース）。"""
+    contradictions = []
+
+    o = big_five.get("O", 0.5)
+    a = big_five.get("A", 0.5)
+    e = big_five.get("E", 0.5)
+    n = big_five.get("N", 0.5)
+    c = big_five.get("C", 0.5)
+
+    value_keys = set(values.keys())
+
+    # 開放性が高いが伝統を重視
+    if o > 0.65 and "tradition" in value_keys:
+        contradictions.append("新しいものに惹かれるが、伝統も捨てきれない")
+    # 協調性が高いが個人の自由を重視
+    if a > 0.65 and "freedom" in value_keys:
+        contradictions.append("協調的だが個人の自由を強く求める矛盾を抱えている")
+    # 神経症傾向が高いが成長志向
+    if n > 0.65 and "growth" in value_keys:
+        contradictions.append("不安を感じやすいが経済成長への期待も強い")
+    # 外向性が低いがコミュニティ重視
+    if e < 0.35 and "community" in value_keys:
+        contradictions.append("内向的だがコミュニティの絆を重視している")
+    # 誠実性が高いが革新志向
+    if c > 0.65 and "innovation" in value_keys:
+        contradictions.append("計画的で慎重だが変化を求める気持ちもある")
+    # 安全志向と自由志向が共存
+    if "security" in value_keys and "freedom" in value_keys:
+        contradictions.append("安定を求めながらも自由に生きたい")
+
+    if contradictions:
+        return random.choice(contradictions)
+    return ""
+
+
+def _generate_hidden_motivation(
+    demographics: dict, life_event: str, values: dict
+) -> str:
+    """life_event と income/occupation から隠された動機を生成する（ルールベース）。"""
+    income = demographics.get("income_bracket", "")
+    occupation = demographics.get("occupation", "")
+    age = demographics.get("age", 40)
+
+    motivations = []
+
+    # 経済的状況に基づく動機
+    if income in ("low", "lower_middle"):
+        if life_event == "失業した":
+            motivations.append("経済的不安から雇用安定を最優先する")
+        elif life_event == "投資で損をした":
+            motivations.append("損失の経験からリスク回避を強く求める")
+        else:
+            motivations.append("生活費の負担から経済的な支援策に敏感")
+    elif income in ("high", "very_high"):
+        if "growth" in values:
+            motivations.append("さらなる資産形成と事業拡大の機会を狙っている")
+        else:
+            motivations.append("現在の生活水準を維持するための安定策を重視")
+
+    # ライフイベントに基づく動機
+    if life_event == "子供が生まれた":
+        motivations.append("子供の将来のために社会の安全性を最優先している")
+    elif life_event == "親の介護をしている":
+        motivations.append("介護負担から福祉・医療制度の充実を切実に求めている")
+    elif life_event == "起業した":
+        motivations.append("事業の成功のためにビジネス環境の改善を望んでいる")
+    elif life_event == "退職した":
+        motivations.append("年金と医療の安定確保が最大の関心事")
+
+    # 年齢に基づく動機
+    if age < 30:
+        motivations.append("将来への不確実性から長期的なキャリア展望を気にしている")
+    elif age > 65:
+        motivations.append("残りの人生の安心のために社会保障を重視")
+
+    if motivations:
+        return random.choice(motivations)
+    return ""
+
+
+def _generate_memory_summary(demographics: dict, life_event: str) -> str:
+    """region + occupation + life_event から生活要約を生成する。"""
+    region = demographics.get("region", "不明")
+    occupation = demographics.get("occupation", "不明")
+    age = demographics.get("age", "不明")
+
+    summary = f"{region}で{occupation}として働く{age}歳"
+    if life_event:
+        summary += f"。{life_event}"
+    return summary
+
+
 def generate_agent_profile(
     index: int,
     population_id: str,
@@ -251,6 +344,8 @@ def generate_agent_profile(
     """1人分の住民プロフィールを生成する。"""
     demographics = _generate_demographics(pop_config)
     big_five = _generate_big_five(pop_config)
+    values = _generate_values()
+    life_event = random.choice(LIFE_EVENTS)
 
     return {
         "id": str(uuid.uuid4()),
@@ -258,16 +353,16 @@ def generate_agent_profile(
         "agent_index": index,
         "demographics": demographics,
         "big_five": big_five,
-        "values": _generate_values(),
-        "life_event": random.choice(LIFE_EVENTS),
-        "contradiction": "",  # Phase 2 で LLM 生成
+        "values": values,
+        "life_event": life_event,
+        "contradiction": _generate_contradiction(big_five, values),
         "information_source": random.choice(INFORMATION_SOURCES),
         "local_context": f"{demographics['region']}在住の{demographics['occupation']}",
-        "hidden_motivation": "",  # Phase 2 で LLM 生成
+        "hidden_motivation": _generate_hidden_motivation(demographics, life_event, values),
         "speech_style": random.choice(SPEECH_STYLES),
         "shock_sensitivity": _generate_shock_sensitivity(),
         "llm_backend": _assign_llm_backend(index, total, mix_config),
-        "memory_summary": "",
+        "memory_summary": _generate_memory_summary(demographics, life_event),
     }
 
 

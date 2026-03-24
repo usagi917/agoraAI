@@ -7,8 +7,12 @@ Decision Brief 付きの統合レポートを生成する。
 import logging
 from datetime import datetime, timezone
 
+from sqlalchemy import select
+
 from src.app.database import async_session
 from src.app.models.simulation import Simulation
+from src.app.models.kg_node import KGNode
+from src.app.models.kg_edge import KGEdge
 from src.app.services.phases.society_pulse import run_society_pulse
 from src.app.services.phases.council_deliberation import run_council
 from src.app.services.phases.synthesis import run_synthesis
@@ -34,6 +38,52 @@ async def run_unified(simulation_id: str) -> None:
         theme = sim.prompt_text
 
         try:
+            # === KG データ取得（利用可能な場合） ===
+            kg_entities: list[dict] = []
+            kg_relations: list[dict] = []
+            if sim.run_id:
+                try:
+                    nodes_result = await session.execute(
+                        select(KGNode).where(KGNode.run_id == sim.run_id)
+                    )
+                    kg_nodes = nodes_result.scalars().all()
+                    kg_entities = [
+                        {
+                            "name": n.label,
+                            "type": n.node_type,
+                            "description": n.description or "",
+                            "importance_score": (n.properties or {}).get("importance_score", 0.5),
+                            "aliases": n.aliases or [],
+                            "source_chunk": (n.properties or {}).get("source_chunk", 0),
+                        }
+                        for n in kg_nodes
+                    ]
+
+                    edges_result = await session.execute(
+                        select(KGEdge).where(KGEdge.run_id == sim.run_id)
+                    )
+                    kg_edges = edges_result.scalars().all()
+                    # ノードIDからラベルへのマップを構築
+                    node_id_to_label = {n.id: n.label for n in kg_nodes}
+                    kg_relations = [
+                        {
+                            "source": node_id_to_label.get(e.source_node_id, ""),
+                            "target": node_id_to_label.get(e.target_node_id, ""),
+                            "type": e.relation_type or "related",
+                            "evidence": e.evidence_text or "",
+                            "confidence": e.confidence or 0.5,
+                        }
+                        for e in kg_edges
+                    ]
+
+                    if kg_entities:
+                        logger.info(
+                            "Loaded KG data: %d entities, %d relations",
+                            len(kg_entities), len(kg_relations),
+                        )
+                except Exception as e:
+                    logger.warning("Failed to load KG data, proceeding without: %s", e)
+
             # === Phase 1: Society Pulse ===
             await sse_manager.publish(simulation_id, "unified_phase_changed", {
                 "phase": "society_pulse",
@@ -41,7 +91,11 @@ async def run_unified(simulation_id: str) -> None:
                 "total": 3,
             })
 
-            pulse = await run_society_pulse(session, sim, theme)
+            pulse = await run_society_pulse(
+                session, sim, theme,
+                kg_entities=kg_entities or None,
+                kg_relations=kg_relations or None,
+            )
 
             # チェックポイント保存
             sim.metadata_json = {
@@ -61,7 +115,11 @@ async def run_unified(simulation_id: str) -> None:
                 "total": 3,
             })
 
-            council = await run_council(session, sim, pulse, theme)
+            council = await run_council(
+                session, sim, pulse, theme,
+                kg_entities=kg_entities or None,
+                kg_relations=kg_relations or None,
+            )
 
             sim.metadata_json = {
                 **dict(sim.metadata_json or {}),
@@ -80,7 +138,16 @@ async def run_unified(simulation_id: str) -> None:
                 "total": 3,
             })
 
-            synthesis = await run_synthesis(session, sim, pulse, council, theme)
+            # Council で進化したKGがあればそちらを優先
+            synthesis_kg_entities = council.kg_entities if council.kg_entities else (kg_entities or None)
+            synthesis_kg_relations = council.kg_relations if council.kg_relations else (kg_relations or None)
+
+            synthesis = await run_synthesis(
+                session, sim, pulse, council, theme,
+                kg_entities=synthesis_kg_entities,
+                kg_relations=synthesis_kg_relations,
+                use_react=True,
+            )
 
             # 最終結果保存
             sim.metadata_json = {

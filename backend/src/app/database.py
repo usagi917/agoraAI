@@ -29,7 +29,7 @@ def _normalize_aware_datetime(value: object) -> object:
 
 
 @event.listens_for(AsyncSession.sync_session_class, "before_flush")
-def _normalize_model_datetimes(session: Session, flush_context, instances) -> None:
+def _normalize_model_datetimes(session: Session, _flush_context, _instances) -> None:
     for obj in set(session.new).union(session.dirty):
         mapper = inspect(obj).mapper
         for attr in mapper.column_attrs:
@@ -55,10 +55,14 @@ async def _get_sqlite_columns(conn: AsyncConnection, table_name: str) -> set[str
     return {row[1] for row in result.fetchall()}
 
 
-async def _apply_sqlite_compatibility_migrations(conn: AsyncConnection) -> None:
-    existing_tables = await conn.run_sync(
+async def _get_existing_tables(conn: AsyncConnection) -> set[str]:
+    return await conn.run_sync(
         lambda sync_conn: set(sync_conn.dialect.get_table_names(sync_conn))
     )
+
+
+async def _apply_sqlite_compatibility_migrations(conn: AsyncConnection) -> None:
+    existing_tables = await _get_existing_tables(conn)
 
     if "projects" in existing_tables:
         project_columns = await _get_sqlite_columns(conn, "projects")
@@ -83,6 +87,46 @@ async def _apply_sqlite_compatibility_migrations(conn: AsyncConnection) -> None:
             )
 
 
+async def _apply_postgres_compatibility_migrations(conn: AsyncConnection) -> None:
+    from src.app.models.conversation_log import (
+        CONVERSATION_LOG_PARTICIPANT_ROLE_MAX_LENGTH,
+        CONVERSATION_LOG_STANCE_MAX_LENGTH,
+    )
+
+    existing_tables = await _get_existing_tables(conn)
+    if "conversation_logs" not in existing_tables:
+        return
+
+    result = await conn.execute(
+        text(
+            """
+            SELECT column_name, character_maximum_length
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'conversation_logs'
+              AND column_name IN ('participant_role', 'stance')
+            """
+        )
+    )
+    column_lengths = {row[0]: row[1] for row in result.fetchall()}
+
+    if (column_lengths.get("participant_role") or 0) < CONVERSATION_LOG_PARTICIPANT_ROLE_MAX_LENGTH:
+        await conn.execute(
+            text(
+                f"ALTER TABLE conversation_logs ALTER COLUMN participant_role "
+                f"TYPE VARCHAR({CONVERSATION_LOG_PARTICIPANT_ROLE_MAX_LENGTH})"
+            )
+        )
+
+    if (column_lengths.get("stance") or 0) < CONVERSATION_LOG_STANCE_MAX_LENGTH:
+        await conn.execute(
+            text(
+                f"ALTER TABLE conversation_logs ALTER COLUMN stance "
+                f"TYPE VARCHAR({CONVERSATION_LOG_STANCE_MAX_LENGTH})"
+            )
+        )
+
+
 async def init_db():
     _ensure_sqlite_database_dir()
     async with engine.begin() as conn:
@@ -91,6 +135,8 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
         if settings.is_sqlite:
             await _apply_sqlite_compatibility_migrations(conn)
+        elif make_url(settings.database_url).get_backend_name().startswith("postgresql"):
+            await _apply_postgres_compatibility_migrations(conn)
 
 
 async def get_db() -> AsyncSession:

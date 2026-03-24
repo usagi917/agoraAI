@@ -3,6 +3,12 @@ import ForceGraph3D, { type ForceGraph3DInstance } from '3d-force-graph'
 import * as THREE from 'three'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import type { GraphNode, GraphEdge } from '../stores/graphStore'
+import {
+  createSwimMotionState,
+  sampleSwimMotion,
+  type MotionVector,
+  type SwimMotionState,
+} from './forceGraphMotion'
 import { startThinkingAnimation, type ThinkingVisualMode } from './useThinkingParticles'
 
 const TYPE_COLORS: Record<string, string> = {
@@ -25,19 +31,27 @@ const STANCE_COLORS: Record<string, string> = {
 }
 
 export const RELATION_TYPE_STYLES: Record<string, { color: string; width: number; particleColor: string }> = {
-  trust: { color: '#4FC3F7', width: 0.8, particleColor: '#80D8FF' },
-  influence: { color: '#BA68C8', width: 0.6, particleColor: '#CE93D8' },
-  conflict: { color: '#EF5350', width: 0.5, particleColor: '#FF8A80' },
-  default: { color: '#90A4AE', width: 0.4, particleColor: '#B0BEC5' },
+  // Knowledge graph
+  trust:        { color: '#4FC3F7', width: 1.5, particleColor: '#80D8FF' },
+  influence:    { color: '#BA68C8', width: 1.2, particleColor: '#CE93D8' },
+  conflict:     { color: '#EF5350', width: 1.0, particleColor: '#FF8A80' },
+  // Social graph
+  friend:       { color: '#66BB6A', width: 1.8, particleColor: '#A5D6A7' },
+  family:       { color: '#FF7043', width: 2.0, particleColor: '#FFAB91' },
+  colleague:    { color: '#42A5F5', width: 1.4, particleColor: '#90CAF9' },
+  neighbor:     { color: '#FFCA28', width: 1.0, particleColor: '#FFE082' },
+  acquaintance: { color: '#78909C', width: 0.7, particleColor: '#B0BEC5' },
+  // Fallback
+  default:      { color: '#90A4AE', width: 0.6, particleColor: '#B0BEC5' },
 }
 
 const GRAPH_LAYOUT = {
-  chargeStrength: -75,
-  linkDistance: 38,
-  alphaDecay: 0.02,
-  velocityDecay: 0.3,
+  chargeStrength: -30,
+  linkDistance: 25,
+  alphaDecay: 0.008,
+  velocityDecay: 0.4,
   warmupTicks: 100,
-  cooldownTime: 5000,
+  cooldownTime: 15000,
 } as const
 
 const TRANSITION_LAYOUT = {
@@ -54,7 +68,7 @@ const TRANSITION_LAYOUT = {
 } as const
 
 const DEFAULT_NODE_OPACITY = 1
-const DEFAULT_LINK_OPACITY = 0.4
+const DEFAULT_LINK_OPACITY = 0.85
 const LABEL_OPACITY = 0.9
 const MIN_NODE_SIZE = 0.0001
 
@@ -69,9 +83,14 @@ interface InternalNode extends Position {
   label: string
   type: string
   importance_score: number
+  activity_score: number
   color: string
   size: number
   opacity: number
+  displayX: number
+  displayY: number
+  displayZ: number
+  swimState: SwimMotionState
   __threeObj?: THREE.Object3D
   vx?: number
   vy?: number
@@ -136,6 +155,9 @@ interface PositionedNode {
   x?: number
   y?: number
   z?: number
+  displayX?: number
+  displayY?: number
+  displayZ?: number
 }
 
 interface LayoutNode extends Position {
@@ -159,11 +181,33 @@ function lerpColor(fromColor: string, toColor: string, progress: number) {
   return `#${color.getHexString()}`
 }
 
+function toMotionVector(position: PositionedNode): MotionVector {
+  return {
+    x: position.x ?? 0,
+    y: position.y ?? 0,
+    z: position.z ?? 0,
+  }
+}
+
 function hasPosition(node: PositionedNode | undefined): node is Position {
   return !!node
     && Number.isFinite(node.x)
     && Number.isFinite(node.y)
     && Number.isFinite(node.z)
+}
+
+function getRenderedPosition(node: PositionedNode | undefined): Position {
+  if (!node) return { x: 0, y: 0, z: 0 }
+
+  const x = Number.isFinite(node.displayX) ? node.displayX : node.x
+  const y = Number.isFinite(node.displayY) ? node.displayY : node.y
+  const z = Number.isFinite(node.displayZ) ? node.displayZ : node.z
+
+  return {
+    x: Number.isFinite(x) ? x! : 0,
+    y: Number.isFinite(y) ? y! : 0,
+    z: Number.isFinite(z) ? z! : 0,
+  }
 }
 
 function getNodeVisuals(type: string, importanceScore: number, stance?: string) {
@@ -344,6 +388,7 @@ function updateInternalNode(node: InternalNode, next: GraphNode) {
   node.label = next.label
   node.type = next.type
   node.importance_score = next.importance_score || 0.5
+  node.activity_score = next.activity_score || 0
   const visuals = getNodeVisuals(node.type, node.importance_score, next.stance)
   node.color = visuals.color
   node.size = visuals.size
@@ -397,8 +442,40 @@ export function useForceGraph(
     thinkingCleanup = null
   }
 
+  function applySwimMotionToNode(node: InternalNode, group: THREE.Group, coords?: Position) {
+    const basePosition = coords || getRenderedPosition(node)
+    const motion = sampleSwimMotion({
+      coords: toMotionVector(basePosition),
+      velocity: {
+        x: node.vx ?? 0,
+        y: node.vy ?? 0,
+        z: node.vz ?? 0,
+      },
+      time: performance.now() / 1000,
+      state: node.swimState,
+      activity: activeSpeakerIds.has(node.id) ? 1 : node.activity_score,
+    })
+
+    node.displayX = basePosition.x + motion.offset.x
+    node.displayY = basePosition.y + motion.offset.y
+    node.displayZ = basePosition.z + motion.offset.z
+    group.position.set(node.displayX, node.displayY, node.displayZ)
+
+    const motionRoot = group.getObjectByName('motionRoot') as THREE.Group | undefined
+    if (motionRoot) {
+      motionRoot.rotation.order = 'YXZ'
+      motionRoot.rotation.set(motion.pitch, motion.yaw, motion.roll)
+      const stretch = 1 + motion.thrust * 0.08
+      const squash = 1 - motion.thrust * 0.035
+      motionRoot.scale.set(squash, squash, stretch)
+    }
+  }
+
   function createNodeThreeObject(node: InternalNode): THREE.Object3D {
     const group = new THREE.Group()
+    const motionRoot = new THREE.Group()
+    motionRoot.name = 'motionRoot'
+    group.add(motionRoot)
 
     const core = new THREE.Mesh(
       new THREE.SphereGeometry(1, 24, 24),
@@ -409,7 +486,7 @@ export function useForceGraph(
       }),
     )
     core.name = 'core'
-    group.add(core)
+    motionRoot.add(core)
 
     const innerGlow = new THREE.Mesh(
       new THREE.SphereGeometry(1, 16, 16),
@@ -420,7 +497,7 @@ export function useForceGraph(
       }),
     )
     innerGlow.name = 'innerGlow'
-    group.add(innerGlow)
+    motionRoot.add(innerGlow)
 
     const halo = new THREE.Mesh(
       new THREE.SphereGeometry(1, 16, 16),
@@ -431,7 +508,7 @@ export function useForceGraph(
       }),
     )
     halo.name = 'halo'
-    group.add(halo)
+    motionRoot.add(halo)
 
     const canvas = document.createElement('canvas')
     const ctx = canvas.getContext('2d')!
@@ -454,6 +531,7 @@ export function useForceGraph(
     group.add(sprite)
 
     applyNodeThreeObjectVisuals(node, group, true)
+    applySwimMotionToNode(node, group)
     if (options?.nodeExtension) {
       options.nodeExtension(node, group)
     }
@@ -499,21 +577,31 @@ export function useForceGraph(
     }
   }
 
-  function buildInternalNode(node: GraphNode, seedPosition?: Position): InternalNode {
+  function buildInternalNode(
+    node: GraphNode,
+    seedPosition?: Position,
+    existing?: Pick<InternalNode, 'swimState' | 'displayX' | 'displayY' | 'displayZ'>,
+  ): InternalNode {
     const importanceScore = node.importance_score || 0.5
     const visuals = getNodeVisuals(node.type, importanceScore, node.stance)
+    const position = seedPosition ?? { x: 0, y: 0, z: 0 }
 
     return {
       id: node.id,
       label: node.label,
       type: node.type,
       importance_score: importanceScore,
+      activity_score: node.activity_score || 0,
       color: visuals.color,
       size: visuals.size,
       opacity: DEFAULT_NODE_OPACITY,
-      x: seedPosition?.x ?? 0,
-      y: seedPosition?.y ?? 0,
-      z: seedPosition?.z ?? 0,
+      x: position.x,
+      y: position.y,
+      z: position.z,
+      displayX: existing?.displayX ?? position.x,
+      displayY: existing?.displayY ?? position.y,
+      displayZ: existing?.displayZ ?? position.z,
+      swimState: existing?.swimState ?? createSwimMotionState(node.id, importanceScore, node.type),
     }
   }
 
@@ -554,6 +642,7 @@ export function useForceGraph(
   }
 
   let cameraInitialized = false
+  let breathingInterval: ReturnType<typeof setInterval> | null = null
 
   function initGraph() {
     if (!containerRef.value) return
@@ -572,22 +661,40 @@ export function useForceGraph(
         .showNavInfo(false)
         .nodeThreeObject((node: any) => createNodeThreeObject(node as InternalNode))
         .nodeThreeObjectExtend(false)
+        .nodePositionUpdate((nodeObj: THREE.Object3D, coords: Position, node: any) => {
+          applySwimMotionToNode(node as InternalNode, nodeObj as THREE.Group, coords)
+          return true
+        })
         .linkWidth((link: any) => {
           const l = link as InternalLink
           const style = RELATION_TYPE_STYLES[l.relationType] || RELATION_TYPE_STYLES.default
-          return style.width + l.weight * 0.4
+          return Math.max(0.8, style.width + l.weight * 1.0)
         })
         .linkColor((link: any) => (link as InternalLink).color)
-        .linkDirectionalArrowRelPos(0.95)
-        .linkDirectionalParticleWidth(1.2)
-        .linkDirectionalParticleSpeed((link: any) => {
-          if (activeSpeakerIds.size === 0) return 0.005
+        .linkMaterial((link: any) => {
           const l = link as InternalLink
+          const style = RELATION_TYPE_STYLES[l.relationType] || RELATION_TYPE_STYLES.default
+          return new THREE.MeshBasicMaterial({
+            color: style.color,
+            transparent: true,
+            opacity: l.opacity ?? DEFAULT_LINK_OPACITY,
+            depthWrite: false,
+          })
+        })
+        .linkDirectionalArrowRelPos(0.95)
+        .linkDirectionalParticleWidth(2.0)
+        .linkDirectionalParticleSpeed((link: any) => {
+          const l = link as InternalLink
+          const baseSpeed = 0.003 + l.weight * 0.008
+          if (activeSpeakerIds.size === 0) return baseSpeed
           const srcId = typeof l.source === 'string' ? l.source : l.source.id
           const tgtId = typeof l.target === 'string' ? l.target : l.target.id
-          return (activeSpeakerIds.has(srcId) || activeSpeakerIds.has(tgtId)) ? 0.01 : 0.005
+          return (activeSpeakerIds.has(srcId) || activeSpeakerIds.has(tgtId)) ? baseSpeed * 2 : baseSpeed
         })
-        .linkCurvature(0.15)
+        .linkCurvature((link: any) => {
+          const l = link as InternalLink
+          return l.weight > 0.7 ? 0.2 : 0.1
+        })
         .d3AlphaDecay(GRAPH_LAYOUT.alphaDecay)
         .d3VelocityDecay(GRAPH_LAYOUT.velocityDecay)
         .warmupTicks(GRAPH_LAYOUT.warmupTicks)
@@ -601,10 +708,14 @@ export function useForceGraph(
         .linkDirectionalParticles((link: any) => {
           const l = link as InternalLink
           if (((l.opacity ?? 0) <= 0.12)) return 0
-          if (activeSpeakerIds.size === 0) return 2
-          const srcId = typeof l.source === 'string' ? l.source : l.source.id
-          const tgtId = typeof l.target === 'string' ? l.target : l.target.id
-          return (activeSpeakerIds.has(srcId) || activeSpeakerIds.has(tgtId)) ? 4 : 2
+          const style = RELATION_TYPE_STYLES[l.relationType] || RELATION_TYPE_STYLES.default
+          const base = Math.max(1, Math.ceil(style.width * 1.5))
+          if (activeSpeakerIds.size > 0) {
+            const srcId = typeof l.source === 'string' ? l.source : l.source.id
+            const tgtId = typeof l.target === 'string' ? l.target : l.target.id
+            if (activeSpeakerIds.has(srcId) || activeSpeakerIds.has(tgtId)) return base + 3
+          }
+          return base
         })
         .linkDirectionalParticleColor((link: any) => {
           const l = link as InternalLink
@@ -612,8 +723,14 @@ export function useForceGraph(
           return style.particleColor
         })
 
-      fg.d3Force('charge')?.strength(GRAPH_LAYOUT.chargeStrength)
-      fg.d3Force('link')?.distance(GRAPH_LAYOUT.linkDistance)
+      fg.d3Force('charge')?.strength((node: any) => {
+        const n = node as InternalNode
+        return n.importance_score > 0.8 ? -60 : GRAPH_LAYOUT.chargeStrength
+      })
+      fg.d3Force('link')?.distance((link: any) => {
+        const l = link as InternalLink
+        return 15 + (1 - l.weight) * 25
+      })
 
       const renderer = fg.renderer() as THREE.WebGLRenderer
       renderer.toneMapping = THREE.ACESFilmicToneMapping
@@ -625,9 +742,9 @@ export function useForceGraph(
 
       const scene = fg.scene()
       sceneRef = scene
-      scene.fog = new THREE.FogExp2(0x020210, 0.0008)
+      scene.fog = new THREE.FogExp2(0x020210, 0.0004)
 
-      const ambientLight = new THREE.AmbientLight(0x080820, 1.2)
+      const ambientLight = new THREE.AmbientLight(0x080820, 1.6)
       scene.add(ambientLight)
 
       const purpleLight = new THREE.PointLight(0x9933ff, 1.5, 500)
@@ -648,9 +765,9 @@ export function useForceGraph(
       try {
         const bloomPass = new UnrealBloomPass(
           new THREE.Vector2(width, height),
-          0.35,  // strength
-          0.5,   // radius
-          0.65,  // threshold
+          0.55,  // strength
+          0.8,   // radius
+          0.4,   // threshold
         )
         bloomPassRef = bloomPass
         fg.postProcessingComposer().addPass(bloomPass)
@@ -668,15 +785,45 @@ export function useForceGraph(
           cameraInitialized = true
           fg.cameraPosition({ x: 0, y: 50, z: 350 })
         }
+        if (!breathingInterval && internalNodes.length > 0) {
+          breathingInterval = setInterval(() => {
+            if (internalNodes.length > 0) {
+              ;(fg as any).d3AlphaTarget(0.015)
+              setTimeout(() => (fg as any).d3AlphaTarget(0), 2000)
+            }
+          }, 4000)
+        }
+      })
+
+      let tickCount = 0
+      fg.onEngineTick(() => {
+        tickCount++
+        if (tickCount % 2 !== 0) return
+        const time = performance.now() / 1000
+        for (const node of internalNodes) {
+          const group = node.__threeObj as THREE.Group | undefined
+          if (!group) continue
+          const core = group.getObjectByName('core') as THREE.Mesh | undefined
+          if (!core) continue
+          const phase = (node.id.charCodeAt(0) || 0) * 0.1
+          const size = Math.max(node.size, MIN_NODE_SIZE)
+          const breathScale = 1.0 + 0.03 * Math.sin(time * 1.5 + phase)
+          core.scale.setScalar(size * 0.6 * breathScale)
+          const halo = group.getObjectByName('halo') as THREE.Mesh | undefined
+          if (halo) {
+            halo.scale.setScalar(size * 2.8 * (1.0 + 0.05 * Math.sin(time * 1.2 + phase + 1)))
+          }
+        }
       })
 
       fg.onNodeClick((node: any) => {
         const n = node as InternalNode
+        const focus = getRenderedPosition(n)
         const distance = 100
-        const distRatio = 1 + distance / Math.hypot(n.x || 0, n.y || 0, n.z || 0)
+        const distRatio = 1 + distance / Math.hypot(focus.x || 0, focus.y || 0, focus.z || 0)
         fg.cameraPosition(
-          { x: (n.x || 0) * distRatio, y: (n.y || 0) * distRatio, z: (n.z || 0) * distRatio },
-          { x: n.x, y: n.y, z: n.z } as any,
+          { x: focus.x * distRatio, y: focus.y * distRatio, z: focus.z * distRatio },
+          focus as any,
           1000,
         )
         if (externalNodeClickCallback) {
@@ -813,6 +960,7 @@ export function useForceGraph(
               })),
               new Map(internalNodes.map((node) => [node.id, node])),
             ),
+            undefined,
           )
           internalNodes.push(node)
           newNodes.push(node)
@@ -850,8 +998,8 @@ export function useForceGraph(
             label: u.label ?? node.label,
             type: u.type ?? node.type,
             importance_score: u.importance_score ?? node.importance_score,
+            activity_score: u.activity_score ?? node.activity_score,
             stance: '',
-            activity_score: 0,
             sentiment_score: 0,
             status: '',
             group: '',
@@ -898,7 +1046,7 @@ export function useForceGraph(
       const position = hasPosition(existing)
         ? { x: existing.x, y: existing.y, z: existing.z }
         : resolveSpawnPosition(node.id, edges, nodeMap)
-      const nextNode = buildInternalNode(node, position)
+      const nextNode = buildInternalNode(node, position, existing)
       clearFixedPosition(nextNode)
       return nextNode
     })
@@ -1118,7 +1266,7 @@ export function useForceGraph(
       let toFrame: TransitionNodeFrame
 
       if (fromGraphNode && toGraphNode) {
-        renderNode = buildInternalNode(fromGraphNode, sourcePosition)
+        renderNode = buildInternalNode(fromGraphNode, sourcePosition, currentNode)
         fromFrame = currentNode
           ? buildTransitionNodeFrameFromInternal(currentNode, sourcePosition)
           : buildTransitionNodeFrameFromGraph(fromGraphNode, sourcePosition)
@@ -1129,7 +1277,7 @@ export function useForceGraph(
       } else if (toGraphNode) {
         const spawnPosition = resolveSpawnPosition(nodeId, toEdges, currentNodeMap, currentCenter)
         const targetPosition = targetPositions.get(nodeId) || spawnPosition
-        renderNode = buildInternalNode(toGraphNode, spawnPosition)
+        renderNode = buildInternalNode(toGraphNode, spawnPosition, currentNode)
         fromFrame = buildTransitionNodeFrameFromGraph(toGraphNode, spawnPosition, {
           opacity: 0,
           sizeMultiplier: TRANSITION_LAYOUT.newNodeScaleFrom,
@@ -1142,7 +1290,7 @@ export function useForceGraph(
           y: lerp(sourcePosition.y, currentCenter.y, TRANSITION_LAYOUT.removedNodeDrift),
           z: lerp(sourcePosition.z, currentCenter.z, TRANSITION_LAYOUT.removedNodeDrift),
         }
-        renderNode = buildInternalNode(fromGraphNode!, sourcePosition)
+        renderNode = buildInternalNode(fromGraphNode!, sourcePosition, currentNode)
         fromFrame = buildTransitionNodeFrameFromInternal(baseNode, sourcePosition)
         toFrame = {
           ...buildTransitionNodeFrameFromInternal(baseNode, driftTarget),
@@ -1305,6 +1453,10 @@ export function useForceGraph(
   }
 
   onUnmounted(() => {
+    if (breathingInterval) {
+      clearInterval(breathingInterval)
+      breathingInterval = null
+    }
     resizeObserver?.disconnect()
     stopThinkingAnimation()
     graph.value?._destructor?.()
@@ -1336,7 +1488,7 @@ export function useForceGraph(
     const value = enabled ?? !bloomEnabled.value
     bloomEnabled.value = value
     if (bloomPassRef) {
-      bloomPassRef.strength = value ? 0.35 : 0
+      bloomPassRef.strength = value ? 0.55 : 0
     }
   }
 

@@ -32,6 +32,7 @@ from src.app.models.agent_profile import AgentProfile
 from src.app.models.social_edge import SocialEdge
 from src.app.models.society_result import SocietyResult
 from src.app.models.evaluation_result import EvaluationResult
+from src.app.models.conversation_log import ConversationLog
 
 
 def _import_all_models():
@@ -74,4 +75,5 @@ __all__ = [
     "SocialEdge",
     "SocietyResult",
     "EvaluationResult",
+    "ConversationLog",
 ]

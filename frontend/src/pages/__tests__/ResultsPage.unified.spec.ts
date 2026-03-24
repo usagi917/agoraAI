@@ -139,7 +139,6 @@ describe('ResultsPage — unified report', () => {
           TemporalSlider: true,
           ProbabilityChart: true,
           ScenarioCompare: true,
-          SocietyTimeline: true,
           AgreementHeatmap: true,
           AgentMindView: true,
           MemoryStreamViewer: true,
@@ -147,20 +146,16 @@ describe('ResultsPage — unified report', () => {
           ToMMapVisualization: true,
           SocialNetworkDynamics: true,
           KnowledgeGraphExplorer: true,
-          PeopleGraph: true,
-          SimulationJourney: true,
-          ConversationPanel: true,
-          FindingsExplorer: true,
         },
       },
     })
   }
 
-  it('shows Decision Brief tab for unified mode', async () => {
+  it('shows the decision workspace as the primary view for unified mode', async () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Decision Brief')
+    expect(wrapper.get('[data-testid="results-primary-view"]').text()).toContain('Decision Workspace')
   })
 
   it('defaults to decision brief tab when a brief is available', async () => {
@@ -171,13 +166,9 @@ describe('ResultsPage — unified report', () => {
     expect(wrapper.text()).toContain('価格受容性が成立すること')
   })
 
-  it('shows report text after switching to report tab', async () => {
+  it('keeps report text visible below the decision brief workspace', async () => {
     const wrapper = mountPage()
     await flushPromises()
-
-    const reportTab = wrapper.findAll('.tab-btn').find(btn => btn.text().includes('統合レポート'))
-    expect(reportTab).toBeTruthy()
-    await reportTab!.trigger('click')
 
     expect(wrapper.text()).toContain('統合レポート')
     expect(wrapper.text()).toContain('市場参入は推奨されます')
@@ -193,9 +184,6 @@ describe('ResultsPage — unified report', () => {
   it('shows council participants info for unified mode', async () => {
     const wrapper = mountPage()
     await flushPromises()
-
-    const briefTab = wrapper.findAll('.tab-btn').find(btn => btn.text().includes('Decision Brief'))
-    await briefTab!.trigger('click')
 
     expect(wrapper.text()).toContain('田中太郎')
     expect(wrapper.text()).toContain('佐藤花子')

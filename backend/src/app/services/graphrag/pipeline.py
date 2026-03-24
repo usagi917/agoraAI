@@ -15,6 +15,7 @@ from src.app.services.graphrag.entity_extractor import EntityExtractor
 from src.app.services.graphrag.relation_extractor import RelationExtractor
 from src.app.services.graphrag.dedup_resolver import DedupResolver
 from src.app.services.graphrag.community_detector import CommunityDetector
+from src.app.services.graphrag.ontology_generator import generate_ontology
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +28,12 @@ class KnowledgeGraph:
         entities: list[dict],
         relations: list[dict],
         communities: list[dict],
+        ontology: dict | None = None,
     ):
         self.entities = entities
         self.relations = relations
         self.communities = communities
+        self.ontology = ontology or {}
 
     def to_world_state_data(self) -> dict:
         """KGからworld_stateデータを構築する。"""
@@ -89,17 +92,30 @@ class GraphRAGPipeline:
         session: AsyncSession,
         run_id: str,
         document_text: str,
+        theme: str = "",
     ) -> KnowledgeGraph:
         """GraphRAGパイプラインを実行する。
 
+        0. 動的オントロジー生成（テーマ特化スキーマ設計）
         1. セマンティックチャンク分割
         2. エンティティ抽出（並列）
         3. 重複解決
-        4. 関係抽出（並列）
+        4. 関係抽出（並列）+ クロスチャンク関係抽出
         5. コミュニティ検出 + サマリー生成
         6. DB保存
         """
         logger.info(f"Starting GraphRAG pipeline for run {run_id} (doc_len={len(document_text)})")
+
+        # 0. 動的オントロジー生成
+        ontology = await generate_ontology(
+            theme=theme or "general",
+            document_preview=document_text[:2000],
+        )
+        logger.info(
+            "Ontology generated: %d entity types, %d relation types",
+            len(ontology.get("entity_types", [])),
+            len(ontology.get("relation_types", [])),
+        )
 
         # 1. チャンク分割
         chunker = SemanticChunker(self.chunk_size, self.chunk_overlap)
@@ -110,7 +126,7 @@ class GraphRAGPipeline:
         extractor = EntityExtractor()
         all_entities = []
         for pass_num in range(self.extraction_passes):
-            entities = await extractor.extract_from_chunks(chunks, run_id)
+            entities = await extractor.extract_from_chunks(chunks, run_id, ontology=ontology)
             all_entities.extend(entities)
             logger.info(f"Pass {pass_num + 1}: extracted {len(entities)} entities")
 
@@ -118,9 +134,11 @@ class GraphRAGPipeline:
         resolver = DedupResolver(threshold=self.dedup_threshold)
         deduped_entities = await resolver.deduplicate(all_entities)
 
-        # 4. 関係抽出
+        # 4. 関係抽出（イントラチャンク + クロスチャンク）
         rel_extractor = RelationExtractor()
-        relations = await rel_extractor.extract_relations(deduped_entities, chunks)
+        relations = await rel_extractor.extract_relations(
+            deduped_entities, chunks, ontology=ontology,
+        )
 
         # 5. コミュニティ検出
         detector = CommunityDetector(min_size=self.community_min_size)
@@ -186,6 +204,7 @@ class GraphRAGPipeline:
             entities=deduped_entities,
             relations=relations,
             communities=communities,
+            ontology=ontology,
         )
 
         logger.info(

@@ -19,14 +19,14 @@ const router = useRouter()
 const templates = ref<TemplateResponse[]>([])
 const selectedTemplate = ref('')
 const selectedProfile = ref('standard')
-const selectedMode = ref('unified')
+// mode is always 'unified' — no selector needed
 const promptText = ref('')
 const files = ref<File[]>([])
 const isLoading = ref(false)
 const recentSimulations = ref<SimulationListItem[]>([])
 const runtimeHealth = ref<HealthResponse | null>(null)
 const bootstrapError = ref('')
-const showAdvancedOptions = ref(false)
+// advanced options removed for simplicity
 
 // Question Wizard state
 const questionTemplates = [
@@ -128,21 +128,9 @@ function buildPromptFromWizard(): string {
   return parts.join('\n')
 }
 
-const modes = [
-  { value: 'unified', label: 'Unified', desc: '統合シミュレーション', detail: '社会の脈動 → 評議会 → Decision Brief', badge: 'Default' },
-  { value: 'pipeline', label: 'Pipeline', desc: '3段階分析', detail: '因果推論 → 多視点 → PM評価' },
-  { value: 'meta_simulation', label: 'Meta Simulation', desc: '反復統合シミュレーション', detail: 'world → society → issue swarms → PM → intervention replay', badge: 'Beta' },
-  { value: 'society_first', label: 'Society First', desc: '社会反応起点', detail: '社会反応 → Issue Colony → 市場仮説' },
-  { value: 'society', label: 'Society', desc: '社会シミュレーション', detail: '1,000人の住民 → 選抜 → 活性化 → 評価', badge: 'Experimental' },
-  { value: 'single', label: 'Single', desc: '単一エージェント', detail: '因果推論のみ' },
-  { value: 'swarm', label: 'Swarm', desc: '多視点分析', detail: '複数コロニー並列実行' },
-]
-
-const profiles = [
-  { value: 'preview', label: 'Preview', desc: '高速確認', detail: '因果推論2R → 多視点3C → PM評価' },
-  { value: 'standard', label: 'Standard', desc: '標準分析', detail: '因果推論4R → 多視点5C → PM評価' },
-  { value: 'quality', label: 'Quality', desc: '詳細分析', detail: '因果推論6R → 多視点8C → PM評価' },
-]
+// Advanced mode/profile options kept for programmatic use only
+const _modes = ['unified', 'pipeline', 'meta_simulation', 'society_first', 'society', 'single', 'swarm'] as const
+void _modes
 
 const canLaunchLive = computed(() => {
   if (bootstrapError.value) return false
@@ -154,13 +142,7 @@ const launchDisabled = computed(() => {
   const hasManualInput = promptText.value.trim() || files.value.length > 0
   return (!hasWizardInput && !hasManualInput) || isLoading.value
 })
-const launchLabel = computed(() => {
-  if (isLoading.value) return '起動中...'
-  if (!canLaunchLive.value) return 'ライブ実行は利用不可'
-  if (selectedMode.value === 'unified') return '統合シミュレーション実行'
-  if (selectedMode.value === 'society_first') return 'Society First を実行'
-  return 'シミュレーション実行'
-})
+// launchLabel は inline で処理
 
 onMounted(async () => {
   try {
@@ -199,8 +181,8 @@ async function handleLaunch() {
       }
     }
 
-    // Use 'unified' mode by default; advanced settings allow override
-    const launchMode = showAdvancedOptions.value ? selectedMode.value : 'unified'
+    // Always use unified mode
+    const launchMode = 'unified'
 
     const sim = await createSimulation({
       projectId,
@@ -245,8 +227,52 @@ function getPipelineStageLabel(stage: string) {
   <div class="launchpad-page">
     <!-- Hero -->
     <section class="hero">
+      <div class="hero-eyebrow">Swarm Intelligence Engine</div>
       <h2 class="hero-title">Unified<br />Simulation Lab</h2>
-      <p class="hero-desc">1つの質問から社会の脈動を測定し、10人の評議会が議論し、意思決定に直結する Decision Brief を生成します。質問テンプレートを選ぶか、自由にプロンプトを入力してください。</p>
+      <p class="hero-desc">1つの質問から社会の脈動を測定し、10人の評議会が議論し、意思決定に直結する Decision Brief を生成します。</p>
+
+      <!-- 3-Phase Visual Workflow -->
+      <div class="phase-workflow">
+        <div class="phase-card">
+          <div class="phase-number">01</div>
+          <div class="phase-icon">◇</div>
+          <h4 class="phase-name">Society Pulse</h4>
+          <p class="phase-detail">1,000人のAIエージェントから<br />意見を収集・分析</p>
+          <div class="phase-tags">
+            <span class="phase-tag">人口生成</span>
+            <span class="phase-tag">KGエンリッチ</span>
+            <span class="phase-tag">ペルソナ生成</span>
+          </div>
+        </div>
+        <div class="phase-connector">
+          <svg width="32" height="16" viewBox="0 0 32 16"><path d="M0 8h28l-6-6M22 14l6-6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" /></svg>
+        </div>
+        <div class="phase-card">
+          <div class="phase-number">02</div>
+          <div class="phase-icon">◉</div>
+          <h4 class="phase-name">Council</h4>
+          <p class="phase-detail">10人の代表者が名前付きで<br />3ラウンドの議論</p>
+          <div class="phase-tags">
+            <span class="phase-tag">反証役</span>
+            <span class="phase-tag">KG進化</span>
+            <span class="phase-tag">信念変化</span>
+          </div>
+        </div>
+        <div class="phase-connector">
+          <svg width="32" height="16" viewBox="0 0 32 16"><path d="M0 8h28l-6-6M22 14l6-6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" /></svg>
+        </div>
+        <div class="phase-card">
+          <div class="phase-number">03</div>
+          <div class="phase-icon">◈</div>
+          <h4 class="phase-name">Synthesis</h4>
+          <p class="phase-detail">ReACTパターンで<br />Decision Brief を生成</p>
+          <div class="phase-tags">
+            <span class="phase-tag">クロス検証</span>
+            <span class="phase-tag">エビデンス</span>
+            <span class="phase-tag">時間軸予測</span>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section v-if="bootstrapError || (runtimeHealth && !runtimeHealth.live_simulation_available)" class="runtime-notice" :class="{ warning: runtimeHealth && !runtimeHealth.live_simulation_available, error: bootstrapError }">
@@ -269,31 +295,31 @@ function getPipelineStageLabel(stage: string) {
       <div class="sample-grid">
         <router-link to="/sample/sample-business-001" class="sample-card">
           <div class="sample-card-top">
-            <span class="sample-mode-tag">PIPELINE</span>
+            <span class="sample-mode-tag unified">UNIFIED</span>
             <span class="sample-category">ビジネス分析</span>
           </div>
           <h4 class="sample-card-title">EVバッテリー市場参入分析</h4>
-          <p class="sample-card-desc">市場規模・競合環境・技術トレンド・参入戦略を網羅した分析レポートと3Dナレッジグラフ</p>
+          <p class="sample-card-desc">1,000人の社会反応 + 10人の評議会議論 + Decision Briefの統合レポート</p>
           <span class="sample-card-cta">結果を見る &rarr;</span>
         </router-link>
         <router-link to="/sample/sample-pmboard-001" class="sample-card">
           <div class="sample-card-top">
-            <span class="sample-mode-tag">PIPELINE</span>
-            <span class="sample-category">事業検討</span>
+            <span class="sample-mode-tag unified">UNIFIED</span>
+            <span class="sample-category">政策シミュレーション</span>
           </div>
           <h4 class="sample-card-title">建設プロジェクト管理SaaS</h4>
-          <p class="sample-card-desc">前提条件・リスク・勝利仮説・GTM戦略・30/60/90日計画を含むPM Board分析</p>
+          <p class="sample-card-desc">社会受容性分析 + ステークホルダー反応予測 + Go/No-Go判定</p>
           <span class="sample-card-cta">結果を見る &rarr;</span>
         </router-link>
       </div>
     </section>
 
-    <!-- Question Wizard -->
-    <section class="section">
-      <div class="section-header">
-        <h3 class="section-title">質問テンプレート</h3>
-        <span class="section-badge">{{ questionTemplates.length }} 種類</span>
-      </div>
+    <!-- Unified Input Section -->
+    <section class="section input-section">
+      <h3 class="input-section-title">何を分析しますか？</h3>
+      <p class="input-section-hint">テンプレートを選ぶか、自由に入力してください</p>
+
+      <!-- Question Template Cards -->
       <div class="question-templates">
         <button
           v-for="qt in questionTemplates"
@@ -304,21 +330,18 @@ function getPipelineStageLabel(stage: string) {
           @click="selectQuestionTemplate(qt.id)"
         >
           <span class="question-icon">{{ qt.icon }}</span>
-          <div class="question-card-body">
-            <span class="question-title">{{ qt.title }}</span>
-            <span class="question-desc">{{ qt.desc }}</span>
-          </div>
+          <span class="question-title">{{ qt.title }}</span>
         </button>
       </div>
 
-      <!-- Wizard Step Form -->
-      <div v-if="activeTemplate" class="wizard-form">
-        <div class="wizard-form-header">
-          <h4 class="wizard-form-title">{{ activeTemplate.title }}</h4>
-          <button class="btn btn-ghost wizard-clear" @click="clearQuestionTemplate">テンプレートを解除</button>
+      <!-- Wizard Fields (inline, appears when template selected) -->
+      <div v-if="activeTemplate" class="wizard-inline">
+        <div class="wizard-inline-header">
+          <span class="wizard-inline-title">{{ activeTemplate.title }}</span>
+          <button class="wizard-clear-btn" @click="clearQuestionTemplate">&times;</button>
         </div>
-        <div class="wizard-steps">
-          <div v-for="step in activeTemplate.steps" :key="step.key" class="wizard-step">
+        <div class="wizard-fields">
+          <div v-for="step in activeTemplate.steps" :key="step.key" class="wizard-field">
             <label class="wizard-label" :for="`wizard-${step.key}`">{{ step.label }}</label>
             <input
               :id="`wizard-${step.key}`"
@@ -330,121 +353,28 @@ function getPipelineStageLabel(stage: string) {
           </div>
         </div>
       </div>
-    </section>
 
-    <!-- Input Panel -->
-    <section class="section">
-      <div class="section-header">
-        <h3 class="section-title">{{ activeTemplate ? '追加の指示（任意）' : '指示' }}</h3>
+      <!-- Free Prompt (visible when no template, or as additional input) -->
+      <div v-if="!activeTemplate" class="free-prompt">
+        <textarea
+          v-model="promptText"
+          class="prompt-textarea"
+          placeholder="もし〜なら？ — 分析したい仮説やシナリオを入力してください"
+          rows="3"
+        />
       </div>
-      <InputPanel
-        v-model="promptText"
-        :files="files"
-        @update:files="files = $event"
-      />
-      <p class="section-note">
-        テンプレートを使わない場合は、ここに質問を直接入力してください。既定では統合モード + strict evidence で実行し、文書を添付すると検証可能性が上がります。
-      </p>
-    </section>
 
-    <section class="section">
-      <div class="section-header">
-        <h3 class="section-title">既定の実行導線</h3>
-        <button class="btn btn-ghost section-toggle" type="button" @click="showAdvancedOptions = !showAdvancedOptions">
-          {{ showAdvancedOptions ? '詳細設定を閉じる' : '詳細設定を開く' }}
-        </button>
-      </div>
-      <div class="default-flow-card">
-        <div class="default-flow-top">
-          <div>
-            <div class="default-flow-eyebrow">Unified Flow</div>
-            <h4 class="default-flow-title">統合シミュレーションを既定で起動</h4>
-          </div>
-          <span class="mode-badge primary">Default</span>
-        </div>
-        <p class="default-flow-copy">
-          1,000人の社会反応を測定し、10人の名前付き評議会が3ラウンド議論。最終的に Decision Brief を生成します。モードを理解しなくてもこのまま実行開始できます。
-        </p>
-        <div class="default-flow-pills">
-          <span class="profile-detail">社会の脈動 (~90秒)</span>
-          <span class="profile-detail">評議会議論 (~60秒)</span>
-          <span class="profile-detail">統合分析 + Decision Brief (~30秒)</span>
-        </div>
-      </div>
-      <div v-if="showAdvancedOptions" class="advanced-panel">
-        <div class="advanced-section">
-          <div class="section-header">
-            <h3 class="section-title">実行モード</h3>
-            <span class="section-badge">上級者向け</span>
-          </div>
-          <div class="profile-grid">
-            <div
-              v-for="m in modes"
-              :key="m.value"
-              class="profile-card"
-              :class="{ selected: selectedMode === m.value }"
-              :data-testid="`mode-card-${m.value}`"
-              @click="selectedMode = m.value"
-            >
-              <div class="mode-card-top">
-                <h4 class="profile-name">{{ m.label }}</h4>
-                <span v-if="m.badge" class="mode-badge">{{ m.badge }}</span>
-              </div>
-              <p class="profile-desc">{{ m.desc }}</p>
-              <span class="profile-detail">{{ m.detail }}</span>
-            </div>
-          </div>
-          <p v-if="selectedMode === 'society'" class="section-note section-note-warning">
-            `society` は experimental 扱いです。迷う場合は `society_first` を使ってください。
-          </p>
-        </div>
+      <!-- File Upload (compact) -->
+      <details class="file-drop-details">
+        <summary class="file-drop-summary">ファイルを添付（任意）</summary>
+        <InputPanel
+          v-model="promptText"
+          :files="files"
+          @update:files="files = $event"
+        />
+      </details>
 
-        <div class="advanced-section">
-          <div class="section-header">
-            <h3 class="section-title">テンプレート</h3>
-            <span class="section-badge">{{ templates.length }} 件</span>
-          </div>
-          <div class="template-grid">
-            <div
-              v-for="tmpl in templates"
-              :key="tmpl.name"
-              class="template-card"
-              :class="{ selected: selectedTemplate === tmpl.name }"
-              @click="selectedTemplate = tmpl.name"
-            >
-              <div class="template-card-top">
-                <div class="template-indicator" :class="{ active: selectedTemplate === tmpl.name }"></div>
-                <span class="template-category">{{ tmpl.category }}</span>
-              </div>
-              <h4 class="template-name">{{ tmpl.display_name }}</h4>
-              <p class="template-desc">{{ tmpl.description }}</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="advanced-section">
-          <div class="section-header">
-            <h3 class="section-title">実行プロファイル</h3>
-          </div>
-          <div class="profile-grid">
-            <div
-              v-for="p in profiles"
-              :key="p.value"
-              class="profile-card"
-              :class="{ selected: selectedProfile === p.value }"
-              @click="selectedProfile = p.value"
-            >
-              <h4 class="profile-name">{{ p.label }}</h4>
-              <p class="profile-desc">{{ p.desc }}</p>
-              <span class="profile-detail">{{ p.detail }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Launch Button -->
-    <section class="section launch-section">
+      <!-- Launch Button (inline) -->
       <button
         data-testid="launch-button"
         class="btn btn-primary launch-button"
@@ -453,8 +383,11 @@ function getPipelineStageLabel(stage: string) {
         @click="handleLaunch"
       >
         <span v-if="isLoading" class="spinner"></span>
-        {{ launchLabel }}
+        {{ isLoading ? '起動中...' : '分析を開始' }}
       </button>
+      <p class="launch-note">
+        約3分 — 1,000人の社会反応 → 評議会議論 → Decision Brief
+      </p>
     </section>
 
     <!-- History -->
@@ -503,21 +436,175 @@ function getPipelineStageLabel(stage: string) {
 
 .hero {
   text-align: center;
-  padding: clamp(1.5rem, 4vw, 3rem) 0 0.5rem;
+  padding: clamp(2rem, 5vw, 3.5rem) 0 1rem;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Swarm particle background */
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: -40% -20%;
+  background:
+    radial-gradient(1.5px 1.5px at 20% 30%, rgba(99, 102, 241, 0.4) 50%, transparent 100%),
+    radial-gradient(1px 1px at 60% 20%, rgba(139, 92, 246, 0.3) 50%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 80% 60%, rgba(59, 130, 246, 0.35) 50%, transparent 100%),
+    radial-gradient(1px 1px at 40% 80%, rgba(99, 102, 241, 0.25) 50%, transparent 100%),
+    radial-gradient(1px 1px at 10% 70%, rgba(139, 92, 246, 0.2) 50%, transparent 100%),
+    radial-gradient(1.5px 1.5px at 90% 40%, rgba(59, 130, 246, 0.3) 50%, transparent 100%);
+  background-size: 200px 200px, 300px 300px, 250px 250px, 350px 350px, 180px 180px, 280px 280px;
+  animation: swarmDrift 25s linear infinite;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.7;
+}
+
+@keyframes swarmDrift {
+  0% { transform: translate(0, 0) rotate(0deg); }
+  25% { transform: translate(15px, -10px) rotate(2deg); }
+  50% { transform: translate(-5px, 15px) rotate(-1deg); }
+  75% { transform: translate(-15px, -5px) rotate(1deg); }
+  100% { transform: translate(0, 0) rotate(0deg); }
+}
+
+.hero > * { position: relative; z-index: 1; }
+
+.hero-eyebrow {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6, #3b82f6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 0.6rem;
 }
 
 .hero-title {
-  font-size: clamp(2rem, 4vw, 2.75rem);
-  font-weight: 700;
+  font-size: clamp(2.2rem, 5vw, 3.2rem);
+  font-weight: 800;
   letter-spacing: -0.04em;
-  line-height: 1.08;
+  line-height: 1.05;
+  background: linear-gradient(180deg, #fff 30%, rgba(255,255,255,0.7) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .hero-desc {
-  margin: 0.75rem auto 0;
-  font-size: clamp(0.88rem, 0.4vw + 0.8rem, 0.98rem);
+  margin: 0.85rem auto 0;
+  font-size: clamp(0.88rem, 0.4vw + 0.8rem, 0.96rem);
   color: var(--text-secondary);
-  max-width: 42rem;
+  max-width: 38rem;
+  line-height: 1.65;
+}
+
+/* 3-Phase Workflow */
+.phase-workflow {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 0;
+  margin-top: 2.5rem;
+  padding: 0 1rem;
+}
+
+.phase-card {
+  flex: 1;
+  max-width: 14rem;
+  background: linear-gradient(165deg, rgba(99, 102, 241, 0.06) 0%, rgba(15, 15, 30, 0.8) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 12px;
+  padding: 1.5rem 1rem 1.25rem;
+  text-align: center;
+  position: relative;
+  transition: border-color 0.3s, box-shadow 0.3s, transform 0.3s;
+}
+
+.phase-card:hover {
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: 0 4px 30px rgba(99, 102, 241, 0.12), 0 0 60px rgba(99, 102, 241, 0.05);
+  transform: translateY(-2px);
+}
+
+.phase-card:nth-child(1):hover { box-shadow: 0 4px 30px rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.5); }
+.phase-card:nth-child(3):hover { box-shadow: 0 4px 30px rgba(139, 92, 246, 0.15); border-color: rgba(139, 92, 246, 0.5); }
+.phase-card:nth-child(5):hover { box-shadow: 0 4px 30px rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.5); }
+
+.phase-number {
+  position: absolute;
+  top: 0.65rem;
+  left: 0.8rem;
+  font-size: 0.58rem;
+  font-weight: 800;
+  color: rgba(255,255,255,0.2);
+  font-family: var(--font-mono);
+  letter-spacing: 0.05em;
+}
+
+.phase-icon {
+  font-size: 1.8rem;
+  margin-bottom: 0.6rem;
+  filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.4));
+}
+
+.phase-card:nth-child(1) .phase-icon { color: #3b82f6; filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.5)); }
+.phase-card:nth-child(3) .phase-icon { color: #8b5cf6; filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.5)); }
+.phase-card:nth-child(5) .phase-icon { color: #6366f1; filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.5)); }
+
+.phase-name {
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.4rem;
+}
+
+.phase-detail {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.phase-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.3rem;
+  margin-top: 0.75rem;
+}
+
+.phase-tag {
+  font-size: 0.58rem;
+  padding: 0.18rem 0.45rem;
+  border-radius: 5px;
+  background: rgba(99, 102, 241, 0.1);
+  color: rgba(165, 168, 255, 0.9);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(99, 102, 241, 0.12);
+}
+
+.phase-connector {
+  display: flex;
+  align-items: center;
+  padding: 0 0.4rem;
+  color: rgba(99, 102, 241, 0.35);
+  animation: connectorPulse 2s ease-in-out infinite;
+}
+
+@keyframes connectorPulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.sample-mode-tag.unified {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.15));
+  color: #a5b4fc;
+  border-color: rgba(99, 102, 241, 0.35);
+  font-weight: 700;
+  letter-spacing: 0.06em;
 }
 
 .runtime-notice {
@@ -607,6 +694,36 @@ function getPipelineStageLabel(stage: string) {
   gap: 0.5rem;
 }
 
+/* === Unified Input Section === */
+.input-section {
+  background: linear-gradient(170deg, rgba(99, 102, 241, 0.04) 0%, var(--bg-card) 40%);
+  border: 1px solid rgba(99, 102, 241, 0.12);
+  border-radius: 14px;
+  padding: 1.75rem 1.5rem;
+  position: relative;
+}
+
+.input-section::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.5), rgba(139, 92, 246, 0.5), transparent);
+  border-radius: 14px 14px 0 0;
+}
+
+.input-section-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin-bottom: 0.3rem;
+}
+
+.input-section-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 1.25rem;
+}
+
 .question-templates {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
@@ -627,15 +744,133 @@ function getPipelineStageLabel(stage: string) {
 }
 
 .question-card:hover { border-color: rgba(255,255,255,0.12); }
-.question-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.question-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: rgba(99, 102, 241, 0.06); }
 
-.question-icon { font-size: 1.4rem; flex-shrink: 0; margin-top: 0.1rem; }
+.question-icon { font-size: 1.1rem; flex-shrink: 0; }
 
-.question-card-body { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+.question-title { font-size: 0.82rem; font-weight: 600; color: var(--text-primary); }
 
-.question-title { font-size: 0.88rem; font-weight: 600; color: var(--text-primary); }
-.question-desc { font-size: 0.76rem; color: var(--text-muted); line-height: 1.45; }
+/* Wizard Inline */
+.wizard-inline {
+  margin-top: 1rem;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: var(--radius);
+  padding: 1rem;
+  background: rgba(99, 102, 241, 0.03);
+}
 
+.wizard-inline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.wizard-inline-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent, #6366f1);
+}
+
+.wizard-clear-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  line-height: 1;
+}
+
+.wizard-clear-btn:hover { color: var(--text-primary); }
+
+.wizard-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.wizard-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+/* Free Prompt */
+.free-prompt {
+  margin-top: 0.75rem;
+}
+
+.prompt-textarea {
+  width: 100%;
+  background: var(--bg-input, rgba(255,255,255,0.04));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text-primary);
+  padding: 0.75rem;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.prompt-textarea:focus {
+  outline: none;
+  border-color: var(--accent, #6366f1);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+
+.prompt-textarea::placeholder { color: var(--text-muted); }
+
+/* File Drop */
+.file-drop-details {
+  margin-top: 0.5rem;
+}
+
+.file-drop-summary {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.3rem 0;
+}
+
+.file-drop-summary:hover { color: var(--text-secondary); }
+
+/* Launch */
+.launch-button {
+  width: 100%;
+  margin-top: 1.25rem;
+  padding: 0.9rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  cursor: pointer;
+  transition: box-shadow 0.3s, transform 0.15s;
+  letter-spacing: 0.02em;
+}
+
+.launch-button:hover:not(:disabled) {
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4), 0 0 40px rgba(139, 92, 246, 0.15);
+  transform: translateY(-1px);
+}
+
+.launch-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.launch-note {
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 0.6rem;
+  letter-spacing: 0.01em;
+}
+
+/* Legacy wizard-form (kept for compat) */
 .wizard-form {
   margin-top: 1rem;
   padding: var(--panel-padding);
@@ -815,14 +1050,7 @@ function getPipelineStageLabel(stage: string) {
 .profile-desc { font-size: 0.8rem; color: var(--text-secondary); }
 .profile-detail { display: inline-block; margin-top: 0.5rem; font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); background: rgba(255,255,255,0.04); padding: 0.15rem 0.5rem; border-radius: 999px; }
 
-.launch-section { text-align: center; padding: 1rem 0; }
-.launch-button {
-  width: min(100%, 28rem);
-  font-size: 1rem;
-  padding: 0.85rem 1.5rem;
-  border-radius: var(--radius);
-  gap: 0.6rem;
-}
+/* legacy launch-section removed — now inline in input-section */
 
 .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.2); border-top-color: white; border-radius: 50%; animation: spin 0.6s linear infinite; }
 

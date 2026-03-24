@@ -25,13 +25,14 @@ import {
   type MetaInterventionPlan,
   type UnifiedReportResponse,
   type DecisionBrief,
+  getTranscript,
+  type TranscriptEntry,
 } from '../api/client'
 import { useForceGraph } from '../composables/useForceGraph'
 import DecisionBriefComponent from '../components/DecisionBrief.vue'
 import TemporalSlider from '../components/TemporalSlider.vue'
 import ProbabilityChart from '../components/ProbabilityChart.vue'
 import ScenarioCompare from '../components/ScenarioCompare.vue'
-import SocietyTimeline from '../components/SocietyTimeline.vue'
 import AgreementHeatmap from '../components/AgreementHeatmap.vue'
 import AgentMindView from '../components/AgentMindView.vue'
 import MemoryStreamViewer from '../components/MemoryStreamViewer.vue'
@@ -39,12 +40,14 @@ import EvaluationDashboard from '../components/EvaluationDashboard.vue'
 import ToMMapVisualization from '../components/ToMMapVisualization.vue'
 import SocialNetworkDynamics from '../components/SocialNetworkDynamics.vue'
 import KnowledgeGraphExplorer from '../components/KnowledgeGraphExplorer.vue'
-import PeopleGraph from '../components/PeopleGraph.vue'
-import SimulationJourney from '../components/SimulationJourney.vue'
-import ConversationPanel from '../components/ConversationPanel.vue'
-import FindingsExplorer from '../components/FindingsExplorer.vue'
 import { useCognitiveStore } from '../stores/cognitiveStore'
-import { useSocietyStore } from '../stores/societyStore'
+import {
+  getDefaultResultsSecondaryTab,
+  getResultsPrimaryView,
+  getResultsSecondaryTabs,
+  type ResultsPrimaryView,
+  type ResultsSecondaryTab,
+} from './layoutRules'
 
 const route = useRoute()
 const router = useRouter()
@@ -63,10 +66,11 @@ const transitionTargetRound = ref<number | null>(null)
 const transitionProgress = ref(0)
 const isPlaying = ref(false)
 const colonies = ref<ColonyResponse[]>([])
+const transcriptEntries = ref<TranscriptEntry[]>([])
+const transcriptLoading = ref(false)
+const transcriptPhaseFilter = ref<string>('')
 const cognitiveStore = useCognitiveStore()
-const societyStore = useSocietyStore()
-const activeTab = ref<'report' | 'scenarios' | 'pm_evaluation' | 'graph' | 'society' | 'decision_brief'>('report')
-const societySubTab = ref<'overview' | 'people' | 'journey' | 'conversations' | 'findings' | 'raw'>('overview')
+const activeSecondaryTab = ref<ResultsSecondaryTab>('raw')
 const isCognitiveMode = computed(() => cognitiveStore.cognitiveMode === 'advanced')
 const cognitiveSubTab = ref<'mind' | 'memory' | 'evaluation' | 'tom' | 'social' | 'kg'>('mind')
 let playbackFrame: number | null = null
@@ -89,8 +93,6 @@ let copyStateTimer: number | null = null
 
 const isPipelineMode = computed(() => sim.value?.mode === 'pipeline')
 const isMetaMode = computed(() => sim.value?.mode === 'meta_simulation')
-const isUnifiedMode = computed(() => sim.value?.mode === 'unified')
-const isSocietyMode = computed(() => sim.value?.mode === 'society' || sim.value?.mode === 'society_first' || isMetaMode.value || isUnifiedMode.value)
 const societyFirstData = computed<SocietyFirstReportResponse | null>(() => (
   report.value?.type === 'society_first' ? report.value as SocietyFirstReportResponse : null
 ))
@@ -124,11 +126,6 @@ const societyIssueCandidates = computed(() => (
 const selectedSocietyIssues = computed(() => (
   metaBestCycle.value?.selected_issues
   || societyFirstData.value?.selected_issues
-  || []
-))
-const societyIssueColonies = computed(() => (
-  metaBestCycle.value?.issue_colonies
-  || societyFirstData.value?.issue_colonies
   || []
 ))
 interface SocietyInterventionViewModel {
@@ -198,7 +195,7 @@ const hasScenarios = computed(() => (report.value?.scenarios?.length ?? 0) > 0)
 const hasPmBoard = computed(() => {
   if (isPipelineMode.value) return !!report.value?.pm_board
   if (isMetaMode.value) return !!metaReport.value?.pm_board
-  return sim.value?.mode === 'pm_board' && report.value?.sections
+  return !!(sim.value?.mode === 'pm_board' && report.value?.sections)
 })
 const reportFailureMessage = computed(() => {
   const progress = sim.value?.metadata?.report_progress
@@ -277,6 +274,9 @@ const reportText = computed(() => {
   if (typeof report.value?.content === 'string') return report.value.content
   return ''
 })
+const reportJson = computed(() => (
+  report.value ? JSON.stringify(report.value, null, 2) : ''
+))
 const agreementMatrix = computed(() => {
   if (!report.value?.agreement_matrix) return null
   return report.value.agreement_matrix as { colony_ids: string[]; matrix: number[][] }
@@ -326,11 +326,6 @@ const sliderDisplayValue = computed(() => {
   return currentRound.value + transitionProgress.value
 })
 
-function formatPointDelta(value?: number | null) {
-  if (typeof value !== 'number' || Number.isNaN(value)) return 'n/a'
-  return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}pt`
-}
-
 function backtestVerdictLabel(verdict?: string | null) {
   if (verdict === 'hit') return 'Hit'
   if (verdict === 'partial_hit') return 'Partial'
@@ -350,6 +345,47 @@ const totalRounds = computed(() => {
   return graphSnapshots.value[graphSnapshots.value.length - 1].round
 })
 const showGraphViews = computed(() => !isMetaMode.value)
+const layoutContext = computed(() => ({
+  mode: sim.value?.mode,
+  hasScenarios: hasScenarios.value,
+  hasDecisionBrief: hasDecisionBrief.value,
+  hasPmBoard: hasPmBoard.value,
+  hasSociety: !!societyResult.value,
+  hasGraph: showGraphViews.value,
+  hasEvidence: reportEvidenceRefs.value.length > 0,
+  hasRaw: !!report.value,
+  hasTranscript: sim.value?.mode === 'unified' || sim.value?.mode === 'society' || sim.value?.mode === 'society_first',
+}))
+const primaryViewKind = computed<ResultsPrimaryView>(() => getResultsPrimaryView(layoutContext.value))
+const secondaryTabs = computed<ResultsSecondaryTab[]>(() => getResultsSecondaryTabs(layoutContext.value))
+const primaryEyebrow = computed(() => {
+  if (primaryViewKind.value === 'scenarios') return 'Scenario Workspace'
+  if (primaryViewKind.value === 'decision_brief') return 'Decision Workspace'
+  return 'Report Workspace'
+})
+const primaryTitle = computed(() => {
+  if (primaryViewKind.value === 'scenarios') return 'シナリオ比較を起点に結果を読む'
+  if (primaryViewKind.value === 'decision_brief') return '意思決定の結論と次アクションを読む'
+  return '本文レポートを主軸に分析結果を読む'
+})
+const primaryDescription = computed(() => {
+  if (primaryViewKind.value === 'scenarios') {
+    return '最も起こりやすいシナリオ、支持率、信頼区間をまとめて確認できます。'
+  }
+  if (primaryViewKind.value === 'decision_brief') {
+    return 'Recommendation、判断根拠、直近アクションを先に確認できる構成です。'
+  }
+  return '要約と本文を中心に、補助分析は右ペインから切り替えて参照できます。'
+})
+const primaryScenarioSummary = computed(() => normalizedScenarios.value[0] || null)
+const secondaryTabLabels: Record<ResultsSecondaryTab, string> = {
+  graph: 'Graph',
+  pm: 'PM',
+  society: 'Society',
+  transcript: 'Transcript',
+  evidence: 'Evidence',
+  raw: 'Raw',
+}
 
 function stopPlaybackLoop() {
   if (playbackFrame !== null) {
@@ -468,31 +504,16 @@ onMounted(async () => {
       }, 3000)
     }
 
-    // Society データの非同期ロード
-    if (isSocietyMode.value) {
-      societyStore.loadSocialGraph(simId).catch(() => {})
-      societyStore.loadConversations(simId).catch(() => {})
-      societyStore.loadNarrative(simId).catch(() => {})
-    }
-
-    // デフォルトタブ設定
-    if (hasDecisionBrief.value) {
-      activeTab.value = 'decision_brief'
-    } else if (isMetaMode.value) {
-      activeTab.value = 'report'
-    } else if (isSocietyMode.value) {
-      activeTab.value = 'society'
-    } else if (sim.value.mode === 'pm_board') {
-      activeTab.value = 'pm_evaluation'
-    } else if (sim.value.mode === 'swarm' || sim.value.mode === 'hybrid') {
-      activeTab.value = 'scenarios'
-    } else {
-      activeTab.value = 'report'
-    }
+    activeSecondaryTab.value = getDefaultResultsSecondaryTab(layoutContext.value)
 
     // Colony データ取得
     if (hasScenarios.value || sim.value.swarm_id) {
       colonies.value = await getSimulationColonies(simId).catch(() => [])
+    }
+
+    // Transcript 取得 (unified/society modes)
+    if (layoutContext.value.hasTranscript) {
+      loadTranscript()
     }
 
     // 最新グラフ表示
@@ -619,6 +640,23 @@ async function copyReportText() {
   }
 }
 
+async function loadTranscript(phase?: string) {
+  transcriptLoading.value = true
+  try {
+    const data = await getTranscript(simId, phase || undefined)
+    transcriptEntries.value = data.entries
+  } catch {
+    transcriptEntries.value = []
+  } finally {
+    transcriptLoading.value = false
+  }
+}
+
+const filteredTranscript = computed(() => {
+  if (!transcriptPhaseFilter.value) return transcriptEntries.value
+  return transcriptEntries.value.filter(e => e.phase === transcriptPhaseFilter.value)
+})
+
 function renderMarkdown(content: string): string {
   return content
     .replace(/^### (.+)$/gm, '<h4>$1</h4>')
@@ -716,377 +754,133 @@ function renderMarkdown(content: string): string {
         </div>
       </div>
 
-      <!-- Tabs: 4タブ構成 -->
-      <div class="tab-bar">
-        <button
-          class="tab-btn"
-          :class="{ active: activeTab === 'report' }"
-          @click="activeTab = 'report'"
-        >
-          統合レポート
-        </button>
-        <button
-          v-if="hasScenarios"
-          class="tab-btn"
-          :class="{ active: activeTab === 'scenarios' }"
-          @click="activeTab = 'scenarios'"
-        >
-          シナリオ分析
-        </button>
-        <button
-          v-if="hasPmBoard"
-          class="tab-btn"
-          :class="{ active: activeTab === 'pm_evaluation' }"
-          @click="activeTab = 'pm_evaluation'"
-        >
-          PM評価
-        </button>
-        <button
-          v-if="hasDecisionBrief"
-          class="tab-btn"
-          :class="{ active: activeTab === 'decision_brief' }"
-          @click="activeTab = 'decision_brief'"
-        >
-          Decision Brief
-        </button>
-        <button
-          v-if="isSocietyMode"
-          class="tab-btn"
-          :class="{ active: activeTab === 'society' }"
-          @click="activeTab = 'society'"
-        >
-          Society 分析
-        </button>
-        <button
-          v-if="showGraphViews"
-          class="tab-btn"
-          :class="{ active: activeTab === 'graph' }"
-          @click="activeTab = 'graph'"
-        >
-          ナレッジグラフ
-        </button>
-      </div>
-
-      <div class="results-layout">
-        <!-- Left: Main Content -->
+      <div class="results-layout results-workspace">
         <div class="results-main">
-          <!-- Society tab -->
-          <div v-if="activeTab === 'society' && societyResult" class="tab-panel">
-            <!-- Society Sub-tabs -->
-            <div class="society-sub-tabs">
-              <button
-                v-for="tab in [
-                  { id: 'overview', label: 'Overview' },
-                  { id: 'people', label: 'People & Network' },
-                  { id: 'journey', label: 'Journey' },
-                  { id: 'conversations', label: 'Conversations' },
-                  { id: 'findings', label: 'Findings' },
-                  { id: 'raw', label: 'Raw Data' },
-                ]"
-                :key="tab.id"
-                class="society-sub-tab"
-                :class="{ active: societySubTab === tab.id }"
-                @click="societySubTab = tab.id as any"
-              >
-                {{ tab.label }}
-              </button>
+          <div class="workspace-hero" data-testid="results-primary-view">
+            <div class="workspace-copy">
+              <span class="workspace-eyebrow">{{ primaryEyebrow }}</span>
+              <h3 class="workspace-title">{{ primaryTitle }}</h3>
+              <p class="workspace-description">{{ primaryDescription }}</p>
             </div>
-
-            <!-- Overview Sub-tab -->
-            <div v-if="societySubTab === 'overview'" class="society-results">
-              <div class="society-section">
-                <h4 class="society-section-title">意見分布</h4>
-                <div class="society-stats-row">
-                  <span class="society-stat">
-                    <span class="society-stat-label">人口</span>
-                    <span class="society-stat-value">{{ societyResult.population_count?.toLocaleString() }}</span>
-                  </span>
-                  <span class="society-stat">
-                    <span class="society-stat-label">選抜</span>
-                    <span class="society-stat-value">{{ societyResult.selected_count }}</span>
-                  </span>
-                  <span class="society-stat">
-                    <span class="society-stat-label">平均信頼度</span>
-                    <span class="society-stat-value">{{ ((societyResult.aggregation?.average_confidence || 0) * 100).toFixed(1) }}%</span>
-                  </span>
-                </div>
-                <div v-if="societyResult.aggregation?.stance_distribution" class="society-distribution">
-                  <div
-                    v-for="(ratio, stance) in societyResult.aggregation.stance_distribution"
-                    :key="stance"
-                    class="society-bar-row"
-                  >
-                    <span class="society-bar-label">{{ stance }}</span>
-                    <div class="society-bar-track">
-                      <div class="society-bar-fill" :style="{ width: (Number(ratio) * 100) + '%' }" />
-                    </div>
-                    <span class="society-bar-value">{{ (Number(ratio) * 100).toFixed(1) }}%</span>
-                  </div>
-                </div>
+            <div class="workspace-highlights">
+              <div v-if="primaryViewKind === 'scenarios' && primaryScenarioSummary" class="workspace-highlight-card">
+                <span class="workspace-highlight-label">Top Scenario</span>
+                <strong class="workspace-highlight-value">{{ (primaryScenarioSummary.scenarioScore * 100).toFixed(1) }}%</strong>
+                <p>{{ primaryScenarioSummary.description }}</p>
               </div>
-              <div v-if="societyResult.aggregation?.top_concerns?.length" class="society-section">
-                <h4 class="society-section-title">主要な懸念事項</h4>
-                <ul class="society-list">
-                  <li v-for="concern in societyResult.aggregation.top_concerns" :key="concern">{{ concern }}</li>
-                </ul>
+              <div v-else-if="primaryViewKind === 'decision_brief' && decisionBriefData" class="workspace-highlight-card">
+                <span class="workspace-highlight-label">Recommendation</span>
+                <strong class="workspace-highlight-value">{{ decisionBriefData.recommendation }}</strong>
+                <p>{{ decisionBriefData.decision_summary }}</p>
               </div>
-              <div v-if="societyResult.aggregation?.top_priorities?.length" class="society-section">
-                <h4 class="society-section-title">主要な優先事項</h4>
-                <ul class="society-list">
-                  <li v-for="priority in societyResult.aggregation.top_priorities" :key="priority">{{ priority }}</li>
-                </ul>
-              </div>
-              <div v-if="societyIssueCandidates.length" class="society-section">
-                <h4 class="society-section-title">重要論点ランキング</h4>
-                <div class="society-issue-grid">
-                  <div v-for="issue in societyIssueCandidates" :key="issue.issue_id" class="society-issue-card">
-                    <div class="society-issue-top">
-                      <span class="society-issue-label">{{ issue.label }}</span>
-                      <span class="society-issue-score">{{ (issue.selection_score * 100).toFixed(0) }}</span>
-                    </div>
-                    <p class="society-issue-desc">{{ issue.description }}</p>
-                    <div class="society-issue-metrics">
-                      <span>人数 {{ (issue.population_share * 100).toFixed(0) }}%</span>
-                      <span>対立 {{ (issue.controversy_score * 100).toFixed(0) }}%</span>
-                      <span>市場影響 {{ (issue.market_impact_score * 100).toFixed(0) }}%</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div v-if="selectedSocietyIssues.length" class="society-section">
-                <h4 class="society-section-title">選抜した Issue Colony</h4>
-                <div class="society-chip-row">
-                  <span v-for="issue in selectedSocietyIssues" :key="issue.issue_id" class="society-chip">
-                    {{ issue.label }}
-                  </span>
-                </div>
-              </div>
-              <div v-if="societyIssueColonies.length" class="society-section">
-                <h4 class="society-section-title">Issue Colony 深掘り</h4>
-                <div v-for="colony in societyIssueColonies" :key="colony.issue_id" class="society-colony-card">
-                  <div class="society-colony-head">
-                    <span class="society-colony-title">{{ colony.label }}</span>
-                    <span class="society-colony-meta">diversity {{ Number(colony.diversity_score || 0).toFixed(2) }}</span>
-                  </div>
-                  <p class="society-colony-report">{{ colony.integrated_report || '統合レポートなし' }}</p>
-                  <div v-if="colony.top_scenarios?.length" class="society-colony-scenarios">
-                    <div v-for="(scenario, index) in colony.top_scenarios" :key="index" class="society-scenario-card">
-                      <div class="scenario-name">{{ scenario.description }}</div>
-                      <div class="scenario-prob">スコア: {{ ((scenario.scenario_score || scenario.probability || 0) * 100).toFixed(0) }}%</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div v-if="societyInterventions.length" class="society-section">
-                <h4 class="society-section-title">介入比較</h4>
-                <div class="society-intervention-grid">
-                  <div v-for="intervention in societyInterventions" :key="intervention.interventionId" class="society-intervention-card">
-                    <div class="society-intervention-top">
-                      <span class="society-intervention-label">{{ intervention.label }}</span>
-                      <span class="society-intervention-effect" :class="intervention.modeClass">
-                        {{ intervention.modeLabel }}
-                      </span>
-                    </div>
-                    <p class="society-intervention-desc">{{ intervention.description }}</p>
-                    <p class="society-intervention-issues">対象: {{ intervention.issues.join(', ') }}</p>
-                    <template v-if="intervention.isObserved">
-                      <div class="society-intervention-metrics">
-                        <span>uplift {{ formatPointDelta(intervention.observedUplift) }}</span>
-                        <span>downside {{ formatPointDelta(intervention.observedDownside ? -intervention.observedDownside : 0) }}</span>
-                        <span>uncertainty {{ ((intervention.uncertainty || 0) * 100).toFixed(0) }}%</span>
-                      </div>
-                      <div v-if="intervention.supportingEvidence.length" class="society-evidence-list">
-                        <div
-                          v-for="evidence in intervention.supportingEvidence.slice(0, 3)"
-                          :key="`${intervention.interventionId}-${evidence.case_id}-${evidence.metric}`"
-                          class="society-evidence-card"
-                        >
-                          <div class="society-evidence-top">
-                            <span>{{ evidence.title }}</span>
-                            <span>{{ formatPointDelta(evidence.signed_delta) }}</span>
-                          </div>
-                          <p>{{ evidence.metric_label }}: {{ evidence.summary }}</p>
-                        </div>
-                      </div>
-                    </template>
-                    <template v-else>
-                      <p class="society-intervention-hint">{{ intervention.expectedEffect }}</p>
-                    </template>
-                  </div>
-                </div>
-              </div>
-              <div v-if="societyBacktest" class="society-section">
-                <h4 class="society-section-title">Backtest</h4>
-                <div v-if="societyBacktest.summary.case_count" class="society-backtest-summary">
-                  <div class="society-metric-card">
-                    <span class="society-metric-label">historical cases</span>
-                    <span class="society-metric-score">{{ societyBacktest.summary.case_count }}</span>
-                  </div>
-                  <div class="society-metric-card">
-                    <span class="society-metric-label">hit rate</span>
-                    <span class="society-metric-score">{{ (societyBacktest.summary.hit_rate * 100).toFixed(0) }}%</span>
-                  </div>
-                  <div class="society-metric-card">
-                    <span class="society-metric-label">issue hit rate</span>
-                    <span class="society-metric-score">{{ (societyBacktest.summary.issue_hit_rate * 100).toFixed(0) }}%</span>
-                  </div>
-                </div>
-                <div v-if="societyBacktest.summary.case_count" class="society-backtest-grid">
-                  <div v-for="historicalCase in societyBacktest.cases" :key="historicalCase.case_id" class="society-backtest-card">
-                    <div class="society-backtest-top">
-                      <div>
-                        <div class="society-backtest-title">{{ historicalCase.title }}</div>
-                        <div class="society-backtest-meta">
-                          {{ historicalCase.observed_at || 'date unknown' }}
-                          <span v-if="historicalCase.outcome.issue_label"> · {{ historicalCase.outcome.issue_label }}</span>
-                        </div>
-                      </div>
-                      <span
-                        v-if="historicalCase.best_match"
-                        class="society-verdict-badge"
-                        :class="backtestVerdictClass(historicalCase.best_match.verdict)"
-                      >
-                        {{ backtestVerdictLabel(historicalCase.best_match.verdict) }}
-                      </span>
-                    </div>
-                    <p class="society-backtest-outcome">{{ historicalCase.outcome.summary || historicalCase.outcome.actual_scenario }}</p>
-                    <div v-if="historicalCase.best_match" class="society-backtest-match">
-                      <span class="society-backtest-label">予測:</span>
-                      <span>{{ historicalCase.best_match.issue_label }} / {{ historicalCase.best_match.scenario_description }}</span>
-                    </div>
-                    <div v-if="historicalCase.best_match" class="society-backtest-match">
-                      <span class="society-backtest-label">一致度:</span>
-                      <span>{{ (historicalCase.best_match.match_score * 100).toFixed(0) }}%</span>
-                    </div>
-                  </div>
-                </div>
-                <p v-else class="society-empty-copy">
-                  historical case を追加すると、予測シナリオと実績の hit / miss / partial hit をここで比較できます。
-                </p>
-              </div>
-              <div v-if="societyResult.evaluation" class="society-section">
-                <h4 class="society-section-title">評価メトリクス</h4>
-                <div class="society-metrics">
-                  <div v-for="(score, metric) in societyResult.evaluation" :key="metric" class="society-metric-card">
-                    <span class="society-metric-label">{{ metric }}</span>
-                    <span class="society-metric-score">{{ (Number(score) * 100).toFixed(1) }}%</span>
-                  </div>
-                </div>
-              </div>
-              <template v-if="meetingReport">
-                <div class="society-section">
-                  <h4 class="society-section-title">Meeting Layer: 構造化議論</h4>
-                  <p class="society-meeting-summary">{{ meetingReport.summary }}</p>
-                </div>
-                <div v-if="meetingReport.participants?.length" class="society-section">
-                  <h4 class="society-section-title">参加者</h4>
-                  <div class="society-participants-grid">
-                    <div v-for="(p, i) in meetingReport.participants" :key="i" class="society-participant-chip" :class="p.role">
-                      {{ p.display_name || p.expertise || '参加者' }}
-                      <span v-if="p.stance" class="participant-stance-tag">{{ p.stance }}</span>
-                    </div>
-                  </div>
-                </div>
-                <div v-if="meetingReport.consensus_points?.length" class="society-section">
-                  <h4 class="society-section-title">合意点</h4>
-                  <ul class="society-list">
-                    <li v-for="point in meetingReport.consensus_points" :key="point">{{ point }}</li>
-                  </ul>
-                </div>
-                <div v-if="meetingReport.disagreement_points?.length" class="society-section">
-                  <h4 class="society-section-title">対立点</h4>
-                  <div v-for="(dp, i) in meetingReport.disagreement_points" :key="i" class="society-disagreement">
-                    <span class="disagreement-topic">{{ dp.topic }}</span>
-                    <div v-if="dp.positions" class="disagreement-positions">
-                      <span v-for="pos in dp.positions" :key="pos.participant" class="disagreement-pos">
-                        {{ pos.participant }}: {{ pos.position }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <div v-if="meetingReport.scenarios?.length" class="society-section">
-                  <h4 class="society-section-title">シナリオ</h4>
-                  <div v-for="(sc, i) in meetingReport.scenarios" :key="i" class="society-scenario-card">
-                    <div class="scenario-name">{{ sc.name }}</div>
-                    <div class="scenario-desc">{{ sc.description }}</div>
-                    <div v-if="sc.probability" class="scenario-prob">確率: {{ (sc.probability * 100).toFixed(0) }}%</div>
-                  </div>
-                </div>
-                <div v-if="meetingReport.stance_shifts?.length" class="society-section">
-                  <h4 class="society-section-title">スタンス変化</h4>
-                  <div v-for="(shift, i) in meetingReport.stance_shifts" :key="i" class="society-shift">
-                    <span class="shift-name">{{ shift.participant }}</span>
-                    <span class="shift-flow">{{ shift.initial_position || shift.from }} &rarr; {{ shift.final_position || shift.to }}</span>
-                  </div>
-                </div>
-                <div v-if="meetingReport.recommendations?.length" class="society-section">
-                  <h4 class="society-section-title">提言</h4>
-                  <ul class="society-list">
-                    <li v-for="rec in meetingReport.recommendations" :key="rec">{{ rec }}</li>
-                  </ul>
-                </div>
-                <div v-if="meetingReport.overall_assessment" class="society-section">
-                  <h4 class="society-section-title">総合評価</h4>
-                  <p class="society-assessment">{{ meetingReport.overall_assessment }}</p>
-                </div>
-              </template>
-              <div class="society-section">
-                <h4 class="society-section-title">Society シミュレーション履歴</h4>
-                <SocietyTimeline
-                  :current-sim-id="simId"
-                  :population-id="societyResult?.population_id"
-                />
-              </div>
-            </div>
-
-            <!-- People & Network Sub-tab -->
-            <div v-if="societySubTab === 'people'" class="society-people-panel">
-              <PeopleGraph :simulation-id="simId" />
-            </div>
-
-            <!-- Journey Sub-tab -->
-            <div v-if="societySubTab === 'journey'" class="society-results">
-              <SimulationJourney
-                :simulation-id="simId"
-                :society-result="societyResult"
-                @select-agent="(agentId: string) => societyStore.loadAgentDetail(simId, agentId)"
-              />
-            </div>
-
-            <!-- Conversations Sub-tab -->
-            <div v-if="societySubTab === 'conversations'" class="society-results">
-              <ConversationPanel
-                :rounds="societyStore.meetingRounds"
-                :participants="societyStore.meetingParticipants"
-                :synthesis="societyStore.meetingSynthesis"
-                @select-agent="(agentId: string) => societyStore.loadAgentDetail(simId, agentId)"
-              />
-            </div>
-
-            <!-- Findings Sub-tab -->
-            <div v-if="societySubTab === 'findings'" class="society-results">
-              <FindingsExplorer
-                :narrative="societyStore.narrative"
-                @select-agent="(agentId: string) => societyStore.loadAgentDetail(simId, agentId)"
-              />
-            </div>
-
-            <!-- Raw Data Sub-tab -->
-            <div v-if="societySubTab === 'raw'" class="society-results">
-              <div class="society-section">
-                <h4 class="society-section-title">Raw Meeting Report</h4>
-                <pre v-if="meetingReport" class="society-raw-text">{{ JSON.stringify(meetingReport, null, 2) }}</pre>
-                <p v-else class="society-empty-copy">Meeting report not available</p>
-              </div>
-              <div class="society-section">
-                <h4 class="society-section-title">Raw Society Result</h4>
-                <pre class="society-raw-text">{{ JSON.stringify(societyResult, null, 2) }}</pre>
+              <div v-else class="workspace-highlight-card">
+                <span class="workspace-highlight-label">Report</span>
+                <strong class="workspace-highlight-value">{{ reportText ? 'Ready' : 'Pending' }}</strong>
+                <p>{{ reportText ? '本文レポートを基準に読み進めます。' : '本文がない場合は補助分析を主に参照します。' }}</p>
               </div>
             </div>
           </div>
 
-          <!-- Report tab -->
-          <div v-if="activeTab === 'report'" class="tab-panel">
+          <div v-if="primaryViewKind === 'scenarios'" class="tab-panel primary-panel">
+            <ScenarioCompare v-if="report?.scenarios" :scenarios="normalizedScenarios" />
+
+            <div v-if="agreementMatrix?.matrix?.length" class="mt-section">
+              <h3 class="content-title">合意ヒートマップ</h3>
+              <AgreementHeatmap
+                :matrix="agreementMatrix"
+                :colonies="colonies.map((c: any) => ({
+                  id: c.id,
+                  colonyIndex: c.colony_index,
+                  perspectiveId: c.perspective_id,
+                  perspectiveLabel: c.perspective_label,
+                  temperature: c.temperature,
+                  adversarial: c.adversarial,
+                  status: c.status,
+                  currentRound: c.current_round,
+                  totalRounds: c.total_rounds,
+                  eventCount: 0,
+                }))"
+              />
+            </div>
+
+            <div class="mt-section">
+              <h3 class="content-title">スコア分布チャート</h3>
+              <ProbabilityChart :scenarios="normalizedScenarios" />
+            </div>
+
+            <div v-if="decisionBriefData" class="workspace-inline-card">
+              <div class="section-header">
+                <h3 class="section-title">Decision Snapshot</h3>
+                <span class="section-badge">{{ decisionBriefData.recommendation }}</span>
+              </div>
+              <p class="workspace-inline-copy">{{ decisionBriefData.decision_summary }}</p>
+              <ul v-if="decisionBriefData.recommended_actions?.length" class="workspace-inline-list">
+                <li v-for="(action, index) in decisionBriefData.recommended_actions.slice(0, 3)" :key="`${action.action}-${index}`">
+                  {{ action.action }}
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="reportText" class="report-panel">
+              <div class="report-toolbar">
+                <p class="report-toolbar-note">本文も併せて確認できます。</p>
+                <button
+                  class="btn btn-ghost report-copy-btn"
+                  :disabled="!canCopyReport"
+                  @click="copyReportText"
+                >
+                  {{
+                    copyState === 'success'
+                      ? 'コピー済み'
+                      : copyState === 'error'
+                        ? 'コピー失敗'
+                        : 'テキストをコピー'
+                  }}
+                </button>
+              </div>
+              <div class="report-content" v-html="renderMarkdown(reportText)"></div>
+            </div>
+          </div>
+
+          <div v-else-if="primaryViewKind === 'decision_brief' && decisionBriefData" class="tab-panel primary-panel">
+            <DecisionBriefComponent :brief="decisionBriefData" />
+
+            <div v-if="unifiedCouncil?.participants?.length" class="brief-council-section">
+              <h4 class="brief-council-title">評議会メンバー</h4>
+              <div class="brief-council-grid">
+                <div
+                  v-for="(p, i) in unifiedCouncil.participants"
+                  :key="i"
+                  class="brief-council-chip"
+                  :class="p.role"
+                >
+                  {{ p.display_name }}
+                  <span v-if="p.stance" class="brief-council-stance">{{ p.stance }}</span>
+                </div>
+              </div>
+              <div v-if="unifiedCouncil.devil_advocate_summary" class="brief-devil-advocate">
+                <h4 class="brief-council-title">反証役サマリー</h4>
+                <p>{{ unifiedCouncil.devil_advocate_summary }}</p>
+              </div>
+            </div>
+
+            <div v-if="reportText" class="report-panel">
+              <div class="report-toolbar">
+                <p class="report-toolbar-note">本文レポートも下に保持します。</p>
+              </div>
+              <div class="report-content" v-html="renderMarkdown(reportText)"></div>
+            </div>
+          </div>
+
+          <div v-else class="tab-panel primary-panel">
+            <div v-if="decisionBriefData" class="workspace-inline-card">
+              <div class="section-header">
+                <h3 class="section-title">Decision Snapshot</h3>
+                <span class="section-badge">{{ decisionBriefData.recommendation }}</span>
+              </div>
+              <p class="workspace-inline-copy">{{ decisionBriefData.decision_summary }}</p>
+            </div>
+
             <div v-if="metaReport" class="meta-report-panel">
               <div class="meta-summary-grid">
                 <div class="stat-card">
@@ -1106,42 +900,8 @@ function renderMarkdown(content: string): string {
                   <span class="stat-value">{{ metaReport.intervention_history?.length || 0 }}</span>
                 </div>
               </div>
-              <div v-if="metaReport.final_state?.selected_intervention" class="society-section">
-                <h4 class="society-section-title">最終採択介入</h4>
-                <div class="society-intervention-card">
-                  <div class="society-intervention-top">
-                    <span class="society-intervention-label">{{ metaReport.final_state.selected_intervention.label }}</span>
-                    <span class="society-intervention-effect">{{ metaReport.final_state.selected_intervention.change_type }}</span>
-                  </div>
-                  <p class="society-intervention-desc">{{ metaReport.final_state.selected_intervention.hypothesis }}</p>
-                  <p class="society-intervention-issues">対象: {{ (metaReport.final_state.selected_intervention.target_issues || []).join(', ') }}</p>
-                </div>
-              </div>
-              <div v-if="metaReport.cycles?.length" class="society-section">
-                <h4 class="society-section-title">Cycle Explorer</h4>
-                <div class="meta-cycle-grid">
-                  <div v-for="cycle in metaReport.cycles" :key="cycle.cycle_index" class="meta-cycle-card">
-                    <div class="meta-cycle-head">
-                      <span class="society-issue-label">Cycle {{ cycle.cycle_index }}</span>
-                      <span class="society-issue-score">{{ ((cycle.objective_score || 0) * 100).toFixed(0) }}</span>
-                    </div>
-                    <p class="meta-cycle-copy">
-                      society {{ ((cycle.score_breakdown?.society_score || 0) * 100).toFixed(0) }}%
-                      · swarm {{ ((cycle.score_breakdown?.swarm_score || 0) * 100).toFixed(0) }}%
-                      · pm {{ ((cycle.score_breakdown?.pm_score || 0) * 100).toFixed(0) }}%
-                    </p>
-                    <p v-if="cycle.selected_intervention" class="meta-cycle-copy">
-                      介入: {{ cycle.selected_intervention.label }}
-                    </p>
-                    <div v-if="cycle.selected_issues?.length" class="society-chip-row">
-                      <span v-for="issue in cycle.selected_issues" :key="issue.issue_id" class="society-chip">
-                        {{ issue.label }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
             </div>
+
             <div v-if="reportText" class="report-panel">
               <div class="report-toolbar">
                 <p class="report-toolbar-note">統合分析レポートをプレーンテキストでコピーできます。</p>
@@ -1167,278 +927,31 @@ function renderMarkdown(content: string): string {
             </div>
             <div v-else class="empty-state">レポートが見つかりません</div>
           </div>
-
-          <!-- Decision Brief tab -->
-          <div v-if="activeTab === 'decision_brief' && decisionBriefData" class="tab-panel">
-            <DecisionBriefComponent :brief="decisionBriefData" />
-
-            <div v-if="unifiedCouncil?.participants?.length" class="brief-council-section">
-              <h4 class="brief-council-title">評議会メンバー</h4>
-              <div class="brief-council-grid">
-                <div
-                  v-for="(p, i) in unifiedCouncil.participants"
-                  :key="i"
-                  class="brief-council-chip"
-                  :class="p.role"
-                >
-                  {{ p.display_name }}
-                  <span v-if="p.stance" class="brief-council-stance">{{ p.stance }}</span>
-                </div>
-              </div>
-              <div v-if="unifiedCouncil.devil_advocate_summary" class="brief-devil-advocate">
-                <h4 class="brief-council-title">反証役サマリー</h4>
-                <p>{{ unifiedCouncil.devil_advocate_summary }}</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- Scenarios tab -->
-          <div v-if="activeTab === 'scenarios' && report?.scenarios" class="tab-panel">
-            <ScenarioCompare :scenarios="normalizedScenarios" />
-
-            <div v-if="agreementMatrix?.matrix?.length" class="mt-section">
-              <h3 class="content-title">合意ヒートマップ</h3>
-              <AgreementHeatmap
-                :matrix="agreementMatrix"
-                :colonies="colonies.map((c: any) => ({
-                  id: c.id,
-                  colonyIndex: c.colony_index,
-                  perspectiveId: c.perspective_id,
-                  perspectiveLabel: c.perspective_label,
-                  temperature: c.temperature,
-                  adversarial: c.adversarial,
-                  status: c.status,
-                  currentRound: c.current_round,
-                  totalRounds: c.total_rounds,
-                  eventCount: 0,
-                }))"
-              />
-            </div>
-
-            <div class="mt-section">
-              <h3 class="content-title">スコア分布チャート</h3>
-              <ProbabilityChart :scenarios="normalizedScenarios" />
-            </div>
-          </div>
-
-          <!-- PM Evaluation tab -->
-          <div v-if="activeTab === 'pm_evaluation' && pmBoardData" class="tab-panel">
-            <div class="pm-board-result">
-              <template v-if="pmBoardData.sections">
-                <div v-if="pmBoardData.sections.core_question" class="pm-section">
-                  <h3 class="pm-section-title">1. 核心質問</h3>
-                  <p class="pm-section-content">{{ pmBoardData.sections.core_question }}</p>
-                </div>
-
-                <div v-if="pmBoardData.sections.assumptions?.length" class="pm-section">
-                  <h3 class="pm-section-title">2. 前提条件</h3>
-                  <div v-for="(a, i) in pmBoardData.sections.assumptions" :key="i" class="pm-card">
-                    <div class="pm-card-header">
-                      <span class="pm-card-label">{{ a.assumption }}</span>
-                      <span class="pm-confidence" :style="{ color: a.confidence > 0.7 ? 'var(--success)' : a.confidence > 0.4 ? 'var(--warning, #f59e0b)' : 'var(--danger)' }">
-                        {{ (a.confidence * 100).toFixed(0) }}%
-                      </span>
-                    </div>
-                    <p v-if="a.evidence" class="pm-card-detail">根拠: {{ a.evidence }}</p>
-                    <p v-if="a.impact_if_wrong" class="pm-card-detail pm-risk">誤りの影響: {{ a.impact_if_wrong }}</p>
-                  </div>
-                </div>
-
-                <div v-if="pmBoardData.sections.uncertainties?.length" class="pm-section">
-                  <h3 class="pm-section-title">3. 不確実性</h3>
-                  <div v-for="(u, i) in pmBoardData.sections.uncertainties" :key="i" class="pm-card">
-                    <div class="pm-card-header">
-                      <span class="pm-card-label">{{ u.uncertainty }}</span>
-                      <span class="pm-risk-badge" :class="'risk-' + u.risk_level">{{ u.risk_level }}</span>
-                    </div>
-                    <p v-if="u.validation_method" class="pm-card-detail">検証方法: {{ u.validation_method }}</p>
-                  </div>
-                </div>
-
-                <div v-if="pmBoardData.sections.risks?.length" class="pm-section">
-                  <h3 class="pm-section-title">4. リスク</h3>
-                  <div v-for="(r, i) in pmBoardData.sections.risks" :key="i" class="pm-card">
-                    <div class="pm-card-header">
-                      <span class="pm-card-label">{{ r.risk }}</span>
-                      <span class="pm-confidence">{{ (r.probability * 100).toFixed(0) }}%</span>
-                    </div>
-                    <p v-if="r.mitigation" class="pm-card-detail">緩和策: {{ r.mitigation }}</p>
-                  </div>
-                </div>
-
-                <div v-if="pmBoardData.sections.winning_hypothesis?.if_true" class="pm-section">
-                  <h3 class="pm-section-title">5. 勝利仮説</h3>
-                  <div class="pm-card pm-highlight">
-                    <p><strong>IF</strong> {{ pmBoardData.sections.winning_hypothesis.if_true }}</p>
-                    <p><strong>THEN</strong> {{ pmBoardData.sections.winning_hypothesis.then_do }}</p>
-                    <p><strong>TO ACHIEVE</strong> {{ pmBoardData.sections.winning_hypothesis.to_achieve }}</p>
-                    <span class="pm-confidence">
-                      確信度: {{ ((pmBoardData.sections.winning_hypothesis.confidence || 0) * 100).toFixed(0) }}%
-                    </span>
-                  </div>
-                </div>
-
-                <div v-if="pmBoardData.sections.customer_validation_plan?.key_questions?.length" class="pm-section">
-                  <h3 class="pm-section-title">6. 顧客検証計画</h3>
-                  <div class="pm-card">
-                    <p v-if="pmBoardData.sections.customer_validation_plan.target_segments?.length">
-                      <strong>ターゲット:</strong> {{ pmBoardData.sections.customer_validation_plan.target_segments.join(', ') }}
-                    </p>
-                    <ul>
-                      <li v-for="(q, i) in pmBoardData.sections.customer_validation_plan.key_questions" :key="i">{{ q }}</li>
-                    </ul>
-                    <p v-if="pmBoardData.sections.customer_validation_plan.success_criteria">
-                      <strong>成功基準:</strong> {{ pmBoardData.sections.customer_validation_plan.success_criteria }}
-                    </p>
-                  </div>
-                </div>
-
-                <div v-if="pmBoardData.sections.market_view?.market_size" class="pm-section">
-                  <h3 class="pm-section-title">7. 市場/競合ビュー</h3>
-                  <div class="pm-card">
-                    <p><strong>市場規模:</strong> {{ pmBoardData.sections.market_view.market_size }}</p>
-                    <p v-if="pmBoardData.sections.market_view.growth_rate"><strong>成長率:</strong> {{ pmBoardData.sections.market_view.growth_rate }}</p>
-                    <div v-if="pmBoardData.sections.market_view.key_players?.length">
-                      <strong>主要プレイヤー:</strong>
-                      <div v-for="(p, i) in pmBoardData.sections.market_view.key_players" :key="i" class="pm-player">
-                        {{ p.name }} — {{ p.position }}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div v-if="pmBoardData.sections.gtm_hypothesis?.value_proposition" class="pm-section">
-                  <h3 class="pm-section-title">8. GTM仮説</h3>
-                  <div class="pm-card">
-                    <p><strong>ターゲット:</strong> {{ pmBoardData.sections.gtm_hypothesis.target_customer }}</p>
-                    <p><strong>価値提案:</strong> {{ pmBoardData.sections.gtm_hypothesis.value_proposition }}</p>
-                    <p v-if="pmBoardData.sections.gtm_hypothesis.channel"><strong>チャネル:</strong> {{ pmBoardData.sections.gtm_hypothesis.channel }}</p>
-                    <p v-if="pmBoardData.sections.gtm_hypothesis.pricing_model"><strong>価格モデル:</strong> {{ pmBoardData.sections.gtm_hypothesis.pricing_model }}</p>
-                  </div>
-                </div>
-
-                <div v-if="pmBoardData.sections.mvp_scope?.in_scope?.length" class="pm-section">
-                  <h3 class="pm-section-title">9. MVPスコープ</h3>
-                  <div class="pm-card">
-                    <div class="pm-scope-columns">
-                      <div>
-                        <strong>In Scope:</strong>
-                        <ul><li v-for="(s, i) in pmBoardData.sections.mvp_scope.in_scope" :key="i">{{ s }}</li></ul>
-                      </div>
-                      <div>
-                        <strong>Out of Scope:</strong>
-                        <ul><li v-for="(s, i) in pmBoardData.sections.mvp_scope.out_of_scope" :key="i">{{ s }}</li></ul>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div v-if="pmBoardData.sections.plan_30_60_90?.day_30" class="pm-section">
-                  <h3 class="pm-section-title">10. 30/60/90日計画</h3>
-                  <div class="pm-timeline-grid">
-                    <div v-for="period in ['day_30', 'day_60', 'day_90']" :key="period" class="pm-card">
-                      <h4 class="pm-period-label">{{ period === 'day_30' ? '30日' : period === 'day_60' ? '60日' : '90日' }}</h4>
-                      <div v-if="pmBoardData.sections.plan_30_60_90[period]?.goals?.length">
-                        <strong>目標:</strong>
-                        <ul><li v-for="(g, i) in pmBoardData.sections.plan_30_60_90[period].goals" :key="i">{{ g }}</li></ul>
-                      </div>
-                      <div v-if="pmBoardData.sections.plan_30_60_90[period]?.actions?.length">
-                        <strong>アクション:</strong>
-                        <ul><li v-for="(a, i) in pmBoardData.sections.plan_30_60_90[period].actions" :key="i">{{ a }}</li></ul>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div v-if="pmBoardData.sections.top_5_actions?.length" class="pm-section">
-                  <h3 class="pm-section-title">11. 今すぐやるべき5アクション</h3>
-                  <div v-for="(action, idx) in pmBoardData.sections.top_5_actions" :key="idx" class="pm-card pm-action">
-                    <div class="pm-action-header">
-                      <span class="pm-action-number">{{ Number(idx) + 1 }}</span>
-                      <span class="pm-card-label">{{ action.action }}</span>
-                      <span v-if="action.confidence" class="pm-confidence">{{ (action.confidence * 100).toFixed(0) }}%</span>
-                    </div>
-                    <p v-if="action.owner" class="pm-card-detail">担当: {{ action.owner }}</p>
-                    <p v-if="action.deadline" class="pm-card-detail">期限: {{ action.deadline }}</p>
-                    <p v-if="action.evidence" class="pm-card-detail">根拠: {{ action.evidence }}</p>
-                  </div>
-                </div>
-              </template>
-
-              <div v-if="pmBoardData.contradictions?.length" class="pm-section">
-                <h3 class="pm-section-title">矛盾検出</h3>
-                <div v-for="(c, i) in pmBoardData.contradictions" :key="i" class="pm-card pm-contradiction">
-                  <p><strong>{{ c.between?.join(' vs ') }}:</strong> {{ c.issue }}</p>
-                  <p class="pm-card-detail">解決案: {{ c.resolution }}</p>
-                </div>
-              </div>
-
-              <div v-if="pmBoardData.overall_confidence" class="pm-overall">
-                <span>総合確信度:</span>
-                <span class="pm-overall-score">{{ (pmBoardData.overall_confidence * 100).toFixed(0) }}%</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Graph tab -->
-          <div v-if="activeTab === 'graph' && showGraphViews" class="tab-panel">
-            <div class="graph-tab-layout">
-              <div ref="graphContainer" class="graph-snapshot-large"></div>
-              <div v-if="graphError" class="graph-error-note">{{ graphError }}</div>
-              <TemporalSlider
-                v-if="graphSnapshots.length > 1"
-                :total-rounds="totalRounds"
-                :model-value="currentRound"
-                :display-value="sliderDisplayValue"
-                :playing="isPlaying"
-                @update:model-value="onRoundChange"
-                @update:playing="onPlayingChange"
-              />
-
-              <!-- Cognitive sub-tabs (quality profile) -->
-              <div v-if="isCognitiveMode" class="cognitive-subtabs">
-                <button
-                  v-for="sub in [
-                    { key: 'mind', label: '認知状態' },
-                    { key: 'memory', label: '記憶' },
-                    { key: 'evaluation', label: '評価' },
-                    { key: 'tom', label: 'ToM' },
-                    { key: 'social', label: '社会NW' },
-                    { key: 'kg', label: 'KG探索' },
-                  ]"
-                  :key="sub.key"
-                  class="subtab-btn"
-                  :class="{ active: cognitiveSubTab === sub.key }"
-                  @click="cognitiveSubTab = sub.key as any"
-                >
-                  {{ sub.label }}
-                </button>
-              </div>
-              <div v-if="isCognitiveMode" class="cognitive-content">
-                <AgentMindView v-if="cognitiveSubTab === 'mind'" />
-                <MemoryStreamViewer v-if="cognitiveSubTab === 'memory'" />
-                <EvaluationDashboard v-if="cognitiveSubTab === 'evaluation'" />
-                <ToMMapVisualization v-if="cognitiveSubTab === 'tom'" />
-                <SocialNetworkDynamics v-if="cognitiveSubTab === 'social'" />
-                <KnowledgeGraphExplorer
-                  v-if="cognitiveSubTab === 'kg'"
-                  :entities="kgEntities"
-                  :relations="kgRelations"
-                  :communities="kgCommunities"
-                />
-              </div>
-            </div>
-          </div>
         </div>
 
-        <!-- Right: Side Panel -->
         <div class="results-side">
-          <!-- 3D Graph (when not in graph tab) -->
-          <div v-if="activeTab !== 'graph' && showGraphViews" class="side-card">
+          <div class="side-card secondary-switcher">
+            <div class="side-header">
+              <h3>Details</h3>
+            </div>
+            <div class="secondary-switcher-buttons">
+              <button
+                v-for="tab in secondaryTabs"
+                :key="tab"
+                class="subtab-btn"
+                :class="{ active: activeSecondaryTab === tab }"
+                @click="activeSecondaryTab = tab"
+              >
+                {{ secondaryTabLabels[tab] }}
+              </button>
+            </div>
+          </div>
+
+          <div v-if="activeSecondaryTab === 'graph' && showGraphViews" class="side-card">
             <div class="side-header">
               <h3>3D Graph</h3>
             </div>
-            <div ref="graphContainer" class="graph-snapshot"></div>
+            <div ref="graphContainer" class="graph-snapshot-large"></div>
             <div v-if="graphError" class="graph-error-note">{{ graphError }}</div>
             <TemporalSlider
               v-if="graphSnapshots.length > 1"
@@ -1449,9 +962,258 @@ function renderMarkdown(content: string): string {
               @update:model-value="onRoundChange"
               @update:playing="onPlayingChange"
             />
+
+            <div v-if="isCognitiveMode" class="cognitive-subtabs">
+              <button
+                v-for="sub in [
+                  { key: 'mind', label: '認知状態' },
+                  { key: 'memory', label: '記憶' },
+                  { key: 'evaluation', label: '評価' },
+                  { key: 'tom', label: 'ToM' },
+                  { key: 'social', label: '社会NW' },
+                  { key: 'kg', label: 'KG探索' },
+                ]"
+                :key="sub.key"
+                class="subtab-btn"
+                :class="{ active: cognitiveSubTab === sub.key }"
+                @click="cognitiveSubTab = sub.key as any"
+              >
+                {{ sub.label }}
+              </button>
+            </div>
+            <div v-if="isCognitiveMode" class="cognitive-content">
+              <AgentMindView v-if="cognitiveSubTab === 'mind'" />
+              <MemoryStreamViewer v-if="cognitiveSubTab === 'memory'" />
+              <EvaluationDashboard v-if="cognitiveSubTab === 'evaluation'" />
+              <ToMMapVisualization v-if="cognitiveSubTab === 'tom'" />
+              <SocialNetworkDynamics v-if="cognitiveSubTab === 'social'" />
+              <KnowledgeGraphExplorer
+                v-if="cognitiveSubTab === 'kg'"
+                :entities="kgEntities"
+                :relations="kgRelations"
+                :communities="kgCommunities"
+              />
+            </div>
           </div>
 
-          <!-- Followup Chat -->
+          <div v-if="activeSecondaryTab === 'society' && societyResult" class="side-card">
+            <div class="side-header">
+              <h3>Society Summary</h3>
+            </div>
+            <div class="society-section">
+              <div class="society-stats-row">
+                <span class="society-stat">
+                  <span class="society-stat-label">人口</span>
+                  <span class="society-stat-value">{{ societyResult.population_count?.toLocaleString() || 'n/a' }}</span>
+                </span>
+                <span class="society-stat">
+                  <span class="society-stat-label">選抜</span>
+                  <span class="society-stat-value">{{ societyResult.selected_count || 'n/a' }}</span>
+                </span>
+                <span class="society-stat">
+                  <span class="society-stat-label">平均信頼度</span>
+                  <span class="society-stat-value">{{ ((societyResult.aggregation?.average_confidence || 0) * 100).toFixed(1) }}%</span>
+                </span>
+              </div>
+              <div v-if="societyResult.aggregation?.top_concerns?.length" class="society-section">
+                <h4 class="society-section-title">主要な懸念</h4>
+                <ul class="society-list">
+                  <li v-for="concern in societyResult.aggregation.top_concerns" :key="concern">{{ concern }}</li>
+                </ul>
+              </div>
+              <div v-if="societyIssueCandidates.length" class="society-section">
+                <h4 class="society-section-title">重要論点ランキング</h4>
+                <div class="society-issue-grid">
+                  <div v-for="issue in societyIssueCandidates.slice(0, 3)" :key="issue.issue_id" class="society-issue-card">
+                    <div class="society-issue-top">
+                      <span class="society-issue-label">{{ issue.label }}</span>
+                      <span class="society-issue-score">{{ (issue.selection_score * 100).toFixed(0) }}</span>
+                    </div>
+                    <p class="society-issue-desc">{{ issue.description }}</p>
+                  </div>
+                </div>
+              </div>
+              <div v-if="selectedSocietyIssues.length" class="society-section">
+                <h4 class="society-section-title">選抜した Issue Colony</h4>
+                <div class="society-chip-row">
+                  <span v-for="issue in selectedSocietyIssues" :key="issue.issue_id" class="society-chip">
+                    {{ issue.label }}
+                  </span>
+                </div>
+              </div>
+              <div v-if="societyInterventions.length" class="society-section">
+                <h4 class="society-section-title">介入比較</h4>
+                <div class="society-intervention-grid">
+                  <div v-for="intervention in societyInterventions" :key="intervention.interventionId" class="society-intervention-card">
+                    <div class="society-intervention-top">
+                      <span class="society-intervention-label">{{ intervention.label }}</span>
+                      <span class="society-intervention-effect" :class="intervention.modeClass">{{ intervention.modeLabel }}</span>
+                    </div>
+                    <p class="society-intervention-desc">{{ intervention.description }}</p>
+                    <p class="society-intervention-issues">対象: {{ intervention.issues.join(', ') }}</p>
+                    <p class="society-intervention-hint">{{ intervention.expectedEffect }}</p>
+                  </div>
+                </div>
+              </div>
+              <div v-if="societyBacktest" class="society-section">
+                <h4 class="society-section-title">Backtest</h4>
+                <div v-if="societyBacktest.summary.case_count" class="society-backtest-summary">
+                  <div class="society-metric-card">
+                    <span class="society-metric-label">historical cases</span>
+                    <span class="society-metric-score">{{ societyBacktest.summary.case_count }}</span>
+                  </div>
+                  <div class="society-metric-card">
+                    <span class="society-metric-label">hit rate</span>
+                    <span class="society-metric-score">{{ (societyBacktest.summary.hit_rate * 100).toFixed(0) }}%</span>
+                  </div>
+                  <div class="society-metric-card">
+                    <span class="society-metric-label">issue hit rate</span>
+                    <span class="society-metric-score">{{ (societyBacktest.summary.issue_hit_rate * 100).toFixed(0) }}%</span>
+                  </div>
+                </div>
+                <div v-if="societyBacktest.summary.case_count" class="society-backtest-grid">
+                  <div v-for="historicalCase in societyBacktest.cases" :key="historicalCase.case_id" class="society-backtest-card">
+                    <div class="society-backtest-top">
+                      <div class="society-backtest-title">{{ historicalCase.title }}</div>
+                      <span
+                        v-if="historicalCase.best_match"
+                        class="society-verdict-badge"
+                        :class="backtestVerdictClass(historicalCase.best_match.verdict)"
+                      >
+                        {{ backtestVerdictLabel(historicalCase.best_match.verdict) }}
+                      </span>
+                    </div>
+                    <p class="society-backtest-outcome">{{ historicalCase.outcome.summary || historicalCase.outcome.actual_scenario }}</p>
+                  </div>
+                </div>
+              </div>
+              <div v-if="meetingReport" class="society-section">
+                <h4 class="society-section-title">Meeting Layer</h4>
+                <p class="society-meeting-summary">{{ meetingReport.summary }}</p>
+                <div v-if="meetingReport.participants?.length" class="society-participants-grid">
+                  <div v-for="(p, i) in meetingReport.participants" :key="i" class="society-participant-chip" :class="p.role">
+                    {{ p.display_name || p.expertise || '参加者' }}
+                    <span v-if="p.stance" class="participant-stance-tag">{{ p.stance }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="activeSecondaryTab === 'transcript'" class="side-card">
+            <div class="side-header">
+              <h3>Transcript</h3>
+              <span class="section-badge">{{ filteredTranscript.length }}件</span>
+            </div>
+            <div class="transcript-filters">
+              <button
+                v-for="f in [
+                  { key: '', label: '全て' },
+                  { key: 'activation', label: '活性化' },
+                  { key: 'meeting', label: '議論' },
+                ]"
+                :key="f.key"
+                class="subtab-btn"
+                :class="{ active: transcriptPhaseFilter === f.key }"
+                @click="transcriptPhaseFilter = f.key"
+              >
+                {{ f.label }}
+              </button>
+            </div>
+            <div v-if="transcriptLoading" class="transcript-loading">読み込み中...</div>
+            <div v-else-if="filteredTranscript.length === 0" class="empty-state">
+              トランスクリプトがありません
+            </div>
+            <div v-else class="transcript-list">
+              <div
+                v-for="entry in filteredTranscript"
+                :key="entry.id"
+                class="transcript-entry"
+                :class="{ 'transcript-stance-changed': entry.stance_changed }"
+              >
+                <div class="transcript-meta">
+                  <span class="transcript-name">{{ entry.participant_name }}</span>
+                  <span class="transcript-phase-badge">{{ entry.phase === 'activation' ? '活性化' : `R${entry.round_number}` }}</span>
+                  <span v-if="entry.stance" class="transcript-stance">{{ entry.stance }}</span>
+                </div>
+                <p class="transcript-text">{{ entry.content_text }}</p>
+                <p v-if="entry.addressed_to" class="transcript-address">→ {{ entry.addressed_to }}</p>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="activeSecondaryTab === 'pm' && pmBoardData" class="side-card">
+            <div class="side-header">
+              <h3>PM Evaluation</h3>
+            </div>
+            <div class="pm-board-result">
+              <div v-if="pmBoardData.sections.core_question" class="pm-section">
+                <h3 class="pm-section-title">核心質問</h3>
+                <p class="pm-section-content">{{ pmBoardData.sections.core_question }}</p>
+              </div>
+              <div v-if="pmBoardData.sections.assumptions?.length" class="pm-section">
+                <h3 class="pm-section-title">主要前提</h3>
+                <div v-for="(a, i) in pmBoardData.sections.assumptions.slice(0, 3)" :key="i" class="pm-card">
+                  <div class="pm-card-header">
+                    <span class="pm-card-label">{{ a.assumption }}</span>
+                    <span class="pm-confidence">{{ (a.confidence * 100).toFixed(0) }}%</span>
+                  </div>
+                  <p v-if="a.evidence" class="pm-card-detail">根拠: {{ a.evidence }}</p>
+                </div>
+              </div>
+              <div v-if="pmBoardData.sections.uncertainties?.length" class="pm-section">
+                <h3 class="pm-section-title">不確実性</h3>
+                <div v-for="(u, i) in pmBoardData.sections.uncertainties.slice(0, 3)" :key="i" class="pm-card">
+                  <div class="pm-card-header">
+                    <span class="pm-card-label">{{ u.uncertainty }}</span>
+                    <span class="pm-risk-badge" :class="'risk-' + u.risk_level">{{ u.risk_level }}</span>
+                  </div>
+                  <p v-if="u.validation_method" class="pm-card-detail">検証方法: {{ u.validation_method }}</p>
+                </div>
+              </div>
+              <div v-if="pmBoardData.sections.top_5_actions?.length" class="pm-section">
+                <h3 class="pm-section-title">今すぐやるべきアクション</h3>
+                <div v-for="(action, idx) in pmBoardData.sections.top_5_actions" :key="idx" class="pm-card pm-action">
+                  <div class="pm-action-header">
+                    <span class="pm-action-number">{{ Number(idx) + 1 }}</span>
+                    <span class="pm-card-label">{{ action.action }}</span>
+                  </div>
+                  <p v-if="action.owner" class="pm-card-detail">担当: {{ action.owner }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="activeSecondaryTab === 'evidence'" class="side-card evidence-panel">
+            <div class="side-header">
+              <h3>根拠ソース</h3>
+            </div>
+            <div v-if="reportEvidenceRefs.length" class="evidence-list">
+              <div v-for="(ref, idx) in reportEvidenceRefs" :key="`${ref.source_id}-${idx}`" class="evidence-item">
+                <strong>{{ ref.label }}</strong>
+                <span class="evidence-meta">
+                  {{ ref.source_type }} · {{ ref.char_start }}-{{ ref.char_end }}
+                </span>
+                <p>{{ ref.excerpt }}</p>
+              </div>
+            </div>
+            <div v-else class="empty-state">根拠ソースはありません。</div>
+          </div>
+
+          <div v-if="activeSecondaryTab === 'raw'" class="side-card">
+            <div class="side-header">
+              <h3>Raw Data</h3>
+            </div>
+            <div class="society-section">
+              <h4 class="society-section-title">Report JSON</h4>
+              <pre class="society-raw-text">{{ reportJson }}</pre>
+            </div>
+            <div v-if="societyResult" class="society-section">
+              <h4 class="society-section-title">Society Result</h4>
+              <pre class="society-raw-text">{{ JSON.stringify(societyResult, null, 2) }}</pre>
+            </div>
+          </div>
+
           <div class="side-card chat-panel">
             <div class="side-header">
               <h3>Report Agent</h3>
@@ -1495,21 +1257,6 @@ function renderMarkdown(content: string): string {
               >
                 &#8593;
               </button>
-            </div>
-          </div>
-
-          <div v-if="reportEvidenceRefs.length" class="side-card evidence-panel">
-            <div class="side-header">
-              <h3>根拠ソース</h3>
-            </div>
-            <div class="evidence-list">
-              <div v-for="(ref, idx) in reportEvidenceRefs" :key="`${ref.source_id}-${idx}`" class="evidence-item">
-                <strong>{{ ref.label }}</strong>
-                <span class="evidence-meta">
-                  {{ ref.source_type }} · {{ ref.char_start }}-{{ ref.char_end }}
-                </span>
-                <p>{{ ref.excerpt }}</p>
-              </div>
             </div>
           </div>
         </div>
@@ -1614,10 +1361,6 @@ function renderMarkdown(content: string): string {
 .stat-label { font-size: 0.7rem; color: var(--text-muted); font-weight: 500; }
 .stat-value { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; color: var(--accent); }
 
-.tab-bar { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.tab-btn { padding: 0.6rem 1.2rem; background: transparent; border: 1px solid var(--border); border-bottom: none; border-radius: var(--radius-sm) var(--radius-sm) 0 0; color: var(--text-muted); font-family: var(--font-sans); font-size: 0.82rem; font-weight: 500; cursor: pointer; transition: all 0.2s; }
-.tab-btn.active { background: var(--bg-card); color: var(--accent); }
-
 .results-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(18rem, 22rem);
@@ -1625,17 +1368,107 @@ function renderMarkdown(content: string): string {
   align-items: start;
 }
 
+.results-workspace {
+  align-items: stretch;
+}
+
 .results-main {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 0 var(--radius) var(--radius) var(--radius);
+  border-radius: var(--radius);
   padding: clamp(1rem, 1vw + 0.8rem, 2rem) clamp(1rem, 2vw, 2.5rem);
   min-height: min(70vh, 32rem);
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .tab-panel { animation: fade-in 0.3s ease; }
+.primary-panel { display: flex; flex-direction: column; gap: 1rem; }
 .mt-section { margin-top: 2rem; }
+
+.workspace-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(16rem, 0.9fr);
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01)),
+    radial-gradient(circle at top left, rgba(79, 70, 229, 0.18), transparent 40%);
+}
+
+.workspace-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.workspace-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.workspace-title {
+  font-size: clamp(1.15rem, 1.5vw, 1.45rem);
+  line-height: 1.2;
+}
+
+.workspace-description {
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.workspace-highlights {
+  display: grid;
+}
+
+.workspace-highlight-card,
+.workspace-inline-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.03);
+  padding: 0.9rem 1rem;
+}
+
+.workspace-highlight-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.workspace-highlight-value {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 1.35rem;
+  color: var(--accent);
+}
+
+.workspace-highlight-card p,
+.workspace-inline-copy {
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.workspace-inline-list {
+  margin-top: 0.75rem;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
 
 .report-panel { display: flex; flex-direction: column; gap: 1rem; }
 .report-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
@@ -1670,6 +1503,7 @@ function renderMarkdown(content: string): string {
 .side-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--panel-padding); }
 .side-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; gap: 0.75rem; flex-wrap: wrap; }
 .side-header h3 { font-size: 0.82rem; font-weight: 600; }
+.secondary-switcher-buttons { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 
 .graph-snapshot {
   height: clamp(14rem, 26vw, 18rem);
@@ -1952,4 +1786,17 @@ function renderMarkdown(content: string): string {
 .brief-council-stance { font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-muted); }
 .brief-devil-advocate { padding: 0.85rem; border-left: 3px solid var(--danger); background: rgba(239,68,68,0.05); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
 .brief-devil-advocate p { font-size: 0.84rem; color: var(--text-secondary); line-height: 1.7; }
+
+/* Transcript Tab */
+.transcript-filters { display: flex; gap: 0.25rem; margin-bottom: 0.75rem; }
+.transcript-loading { font-size: 0.8rem; color: var(--text-muted); padding: 1rem; text-align: center; }
+.transcript-list { display: flex; flex-direction: column; gap: 0.5rem; max-height: 60vh; overflow-y: auto; }
+.transcript-entry { padding: 0.6rem 0.75rem; border-left: 3px solid var(--border); background: rgba(255,255,255,0.02); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; transition: border-color 0.2s; }
+.transcript-entry.transcript-stance-changed { border-left-color: var(--accent, #6366f1); }
+.transcript-meta { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; flex-wrap: wrap; }
+.transcript-name { font-size: 0.78rem; font-weight: 600; color: var(--text-primary); }
+.transcript-phase-badge { font-size: 0.65rem; padding: 0.1rem 0.35rem; border-radius: 4px; background: rgba(255,255,255,0.06); color: var(--text-muted); font-family: var(--font-mono); }
+.transcript-stance { font-size: 0.68rem; padding: 0.1rem 0.35rem; border-radius: 4px; border: 1px solid var(--border); color: var(--text-secondary); }
+.transcript-text { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6; white-space: pre-line; }
+.transcript-address { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem; }
 </style>
