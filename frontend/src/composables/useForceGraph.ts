@@ -18,6 +18,11 @@ const TYPE_COLORS: Record<string, string> = {
   market: '#E57373',
   technology: '#BA68C8',
   resource: '#4DB6AC',
+  concept: '#64B5F6',
+  risk: '#FF8A65',
+  opportunity: '#AED581',
+  metric: '#FFD54F',
+  event: '#F48FB1',
   agent: '#FFB74D',
   unknown: '#90A4AE',
 }
@@ -41,6 +46,8 @@ export const RELATION_TYPE_STYLES: Record<string, { color: string; width: number
   colleague:    { color: '#42A5F5', width: 1.4, particleColor: '#90CAF9' },
   neighbor:     { color: '#FFCA28', width: 1.0, particleColor: '#FFE082' },
   acquaintance: { color: '#78909C', width: 0.7, particleColor: '#B0BEC5' },
+  // Agent-Entity links
+  mentions:     { color: '#78909C', width: 0.4, particleColor: '#B0BEC5' },
   // Fallback
   default:      { color: '#90A4AE', width: 0.6, particleColor: '#B0BEC5' },
 }
@@ -210,7 +217,7 @@ function getRenderedPosition(node: PositionedNode | undefined): Position {
   }
 }
 
-function getNodeVisuals(type: string, importanceScore: number, stance?: string) {
+function getNodeVisuals(type: string, importanceScore: number, stance?: string, nodeId?: string) {
   if (type === 'agent' && stance) {
     // Council members (importance_score > 0.8) get larger nodes
     const isCouncil = importanceScore > 0.8
@@ -219,6 +226,13 @@ function getNodeVisuals(type: string, importanceScore: number, stance?: string) 
     return {
       color: STANCE_COLORS[stance] || TYPE_COLORS.agent,
       size: baseSize + importanceScore * scaleMultiplier,
+    }
+  }
+  // KG nodes: slightly smaller
+  if (nodeId?.startsWith('kg-')) {
+    return {
+      color: TYPE_COLORS[type] || TYPE_COLORS.unknown,
+      size: 2.0 + importanceScore * 3.0,
     }
   }
   return {
@@ -389,7 +403,7 @@ function updateInternalNode(node: InternalNode, next: GraphNode) {
   node.type = next.type
   node.importance_score = next.importance_score || 0.5
   node.activity_score = next.activity_score || 0
-  const visuals = getNodeVisuals(node.type, node.importance_score, next.stance)
+  const visuals = getNodeVisuals(node.type, node.importance_score, next.stance, node.id)
   node.color = visuals.color
   node.size = visuals.size
   node.opacity = DEFAULT_NODE_OPACITY
@@ -477,19 +491,28 @@ export function useForceGraph(
     motionRoot.name = 'motionRoot'
     group.add(motionRoot)
 
+    // KG nodes use OctahedronGeometry, agent nodes use SphereGeometry
+    const isKG = node.id.startsWith('kg-')
+    const coreGeometry = isKG
+      ? new THREE.OctahedronGeometry(1, 1)
+      : new THREE.SphereGeometry(1, 24, 24)
+    const glowGeometry = isKG
+      ? new THREE.OctahedronGeometry(1, 0)
+      : new THREE.SphereGeometry(1, 16, 16)
+
     const core = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 24, 24),
+      coreGeometry,
       new THREE.MeshStandardMaterial({
         transparent: true,
-        roughness: 0.3,
-        metalness: 0.1,
+        roughness: isKG ? 0.15 : 0.3,
+        metalness: isKG ? 0.3 : 0.1,
       }),
     )
     core.name = 'core'
     motionRoot.add(core)
 
     const innerGlow = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 16, 16),
+      glowGeometry,
       new THREE.MeshBasicMaterial({
         transparent: true,
         blending: THREE.AdditiveBlending,
@@ -500,7 +523,7 @@ export function useForceGraph(
     motionRoot.add(innerGlow)
 
     const halo = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 16, 16),
+      glowGeometry,
       new THREE.MeshBasicMaterial({
         transparent: true,
         blending: THREE.AdditiveBlending,
@@ -583,8 +606,12 @@ export function useForceGraph(
     existing?: Pick<InternalNode, 'swimState' | 'displayX' | 'displayY' | 'displayZ'>,
   ): InternalNode {
     const importanceScore = node.importance_score || 0.5
-    const visuals = getNodeVisuals(node.type, importanceScore, node.stance)
+    const visuals = getNodeVisuals(node.type, importanceScore, node.stance, node.id)
     const position = seedPosition ?? { x: 0, y: 0, z: 0 }
+
+    // KG nodes: Y-axis offset to create layered separation
+    const isKG = node.id.startsWith('kg-')
+    const yOffset = isKG ? -15 : 0
 
     return {
       id: node.id,
@@ -596,10 +623,10 @@ export function useForceGraph(
       size: visuals.size,
       opacity: DEFAULT_NODE_OPACITY,
       x: position.x,
-      y: position.y,
+      y: position.y + yOffset,
       z: position.z,
       displayX: existing?.displayX ?? position.x,
-      displayY: existing?.displayY ?? position.y,
+      displayY: existing?.displayY ?? (position.y + yOffset),
       displayZ: existing?.displayZ ?? position.z,
       swimState: existing?.swimState ?? createSwimMotionState(node.id, importanceScore, node.type),
     }

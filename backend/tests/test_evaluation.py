@@ -3,10 +3,12 @@
 import pytest
 
 from src.app.services.society.evaluation import (
-    diversity_index,
-    internal_consistency,
+    brier_score,
     calibration_score,
+    diversity_index,
     evaluate_society_simulation,
+    internal_consistency,
+    kl_divergence,
 )
 
 
@@ -83,6 +85,83 @@ class TestCalibrationScore:
         assert calibration_score([]) == 0.0
 
 
+class TestBrierScore:
+    def test_perfect_calibration(self):
+        """多数派が高信頼度、少数派が低信頼度 → 低い Brier Score"""
+        responses = [
+            {"stance": "賛成", "confidence": 0.9},
+            {"stance": "賛成", "confidence": 0.8},
+            {"stance": "賛成", "confidence": 0.85},
+            {"stance": "反対", "confidence": 0.1},
+        ]
+        score = brier_score(responses)
+        assert score is not None
+        assert score < 0.1
+
+    def test_poor_calibration(self):
+        """少数派が高信頼度 → 高い Brier Score"""
+        responses = [
+            {"stance": "賛成", "confidence": 0.3},
+            {"stance": "賛成", "confidence": 0.2},
+            {"stance": "賛成", "confidence": 0.1},
+            {"stance": "反対", "confidence": 0.95},
+        ]
+        score = brier_score(responses)
+        assert score is not None
+        assert score > 0.3
+
+    def test_too_few_responses(self):
+        assert brier_score([]) is None
+        assert brier_score([{"stance": "賛成", "confidence": 0.5}]) is None
+
+    def test_all_same_stance(self):
+        """全員同じスタンスで高信頼度 → 低い Brier Score"""
+        responses = [{"stance": "賛成", "confidence": 0.9}] * 5
+        score = brier_score(responses)
+        assert score is not None
+        assert score < 0.05
+
+
+class TestKLDivergence:
+    def test_uniform_distribution(self):
+        """均一分布 → KL divergence ≈ 0"""
+        responses = [
+            {"stance": "賛成"},
+            {"stance": "反対"},
+            {"stance": "中立"},
+        ]
+        score = kl_divergence(responses)
+        assert score is not None
+        assert score == 0.0  # 完全均一 → ゼロ
+
+    def test_skewed_distribution(self):
+        """偏った分布 → KL divergence > 0"""
+        responses = [{"stance": "賛成"}] * 8 + [{"stance": "反対"}] * 2
+        score = kl_divergence(responses)
+        assert score is not None
+        assert score > 0.2
+
+    def test_single_category(self):
+        """1カテゴリのみ → 0"""
+        responses = [{"stance": "賛成"}] * 5
+        assert kl_divergence(responses) == 0.0
+
+    def test_empty(self):
+        assert kl_divergence([]) is None
+
+    def test_custom_baseline(self):
+        """カスタムベースラインとの比較"""
+        responses = [
+            {"stance": "賛成"},
+            {"stance": "賛成"},
+            {"stance": "反対"},
+        ]
+        baseline = {"賛成": 0.5, "反対": 0.5}
+        score = kl_divergence(responses, baseline=baseline)
+        assert score is not None
+        assert score > 0.0
+
+
 class TestEvaluateSocietySimulation:
     @pytest.mark.asyncio
     async def test_returns_all_metrics(self):
@@ -99,6 +178,8 @@ class TestEvaluateSocietySimulation:
         assert "diversity" in metric_names
         assert "consistency" in metric_names
         assert "calibration" in metric_names
+        assert "brier_score" in metric_names
+        assert "kl_divergence" in metric_names
 
     @pytest.mark.asyncio
     async def test_scores_in_range(self):

@@ -590,6 +590,8 @@ async def run_synthesis(
     sections = {
         "decision_brief": decision_brief,
         "society_summary": {
+            "population_count": pulse.population_count,
+            "selected_count": len(pulse.agents),
             "aggregation": pulse.aggregation,
             "evaluation": pulse.evaluation,
         },

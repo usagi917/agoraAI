@@ -121,14 +121,69 @@ def calibration_score(responses: list[dict]) -> float:
     return round(max(0.0, 1.0 - penalty), 4)
 
 
-def brier_score_stub() -> float | None:
-    """Brier Score スタブ（実際の結果データが必要）。"""
-    return None
+def brier_score(responses: list[dict]) -> float | None:
+    """Brier Score: 多数派スタンスに対する信頼度キャリブレーション。
+
+    各エージェントの confidence を「自分のスタンスが正しい確率」と解釈し、
+    多数派スタンスとの一致を結果として Brier Score を算出する。
+
+    Returns:
+        0(完全予測) ~ 1(最悪予測)。低いほど良い。回答が2件未満なら None。
+    """
+    if not responses or len(responses) < 2:
+        return None
+
+    stances = [r.get("stance", "中立") for r in responses]
+    counter = Counter(stances)
+    majority_stance = counter.most_common(1)[0][0]
+
+    n = len(responses)
+    brier_sum = 0.0
+
+    for r in responses:
+        confidence = r.get("confidence", 0.5)
+        is_majority = 1.0 if r.get("stance", "中立") == majority_stance else 0.0
+        brier_sum += (confidence - is_majority) ** 2
+
+    return round(brier_sum / n, 4)
 
 
-def kl_divergence_stub() -> float | None:
-    """KL-divergence スタブ（ベースライン分布が必要）。"""
-    return None
+def kl_divergence(
+    responses: list[dict],
+    baseline: dict[str, float] | None = None,
+) -> float | None:
+    """KL-divergence: スタンス分布とベースライン分布の乖離度。
+
+    D_KL(P || Q) = Σ P(x) · log₂(P(x) / Q(x))
+
+    P = 観測されたスタンス分布
+    Q = ベースライン分布（デフォルト: 均一分布）
+
+    Returns:
+        0(完全一致) ~ ∞(大きな乖離)。回答が無ければ None。
+    """
+    if not responses:
+        return None
+
+    stances = [r.get("stance", "中立") for r in responses]
+    counter = Counter(stances)
+    total = len(stances)
+    categories = list(counter.keys())
+
+    if len(categories) <= 1:
+        return 0.0
+
+    if baseline is None:
+        baseline = {cat: 1.0 / len(categories) for cat in categories}
+
+    kl = 0.0
+    for cat in categories:
+        p = counter[cat] / total
+        q = baseline.get(cat, 1e-10)
+        if p > 0 and q > 0:
+            kl += p * math.log2(p / q)
+
+    return round(kl, 4)
 
 
 async def evaluate_society_simulation(
@@ -172,26 +227,26 @@ async def evaluate_society_simulation(
         "baseline_score": None,
     })
 
-    # Brier Score (stub)
-    brier = brier_score_stub()
+    # Brier Score
+    brier = brier_score(responses)
     if brier is not None:
         metrics.append({
             "metric_name": "brier_score",
             "score": brier,
-            "details": {"method": "stub"},
+            "details": {"method": "majority_calibration"},
             "baseline_type": None,
             "baseline_score": None,
         })
 
-    # KL Divergence (stub)
-    kl = kl_divergence_stub()
+    # KL Divergence
+    kl = kl_divergence(responses)
     if kl is not None:
         metrics.append({
             "metric_name": "kl_divergence",
             "score": kl,
-            "details": {"method": "stub"},
-            "baseline_type": None,
-            "baseline_score": None,
+            "details": {"method": "uniform_baseline"},
+            "baseline_type": "uniform",
+            "baseline_score": 0.0,
         })
 
     logger.info("Evaluation complete: %s", {m["metric_name"]: m["score"] for m in metrics})

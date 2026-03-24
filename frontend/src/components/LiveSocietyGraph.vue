@@ -2,10 +2,12 @@
 import { ref, computed, onUnmounted } from 'vue'
 import { useLiveSocietyGraph } from '../composables/useLiveSocietyGraph'
 import { useSocietyGraphStore, STANCE_COLORS } from '../stores/societyGraphStore'
+import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
 import { RELATION_TYPE_STYLES } from '../composables/useForceGraph'
 import { useSimulationStore } from '../stores/simulationStore'
 import type { ThinkingVisualMode } from '../composables/useThinkingParticles'
 import ConversationToast from './ConversationToast.vue'
+import NodeDetailPanel from './NodeDetailPanel.vue'
 
 defineProps<{
   simulationId: string
@@ -14,6 +16,7 @@ defineProps<{
 const graphContainer = ref<HTMLElement | null>(null)
 const store = useSimulationStore()
 const societyGraphStore = useSocietyGraphStore()
+const kgStore = useKGEvolutionStore()
 
 const thinkingMode = computed<ThinkingVisualMode>(() => {
   if (store.phase === 'report' || store.status === 'generating_report') return 'report'
@@ -21,11 +24,6 @@ const thinkingMode = computed<ThinkingVisualMode>(() => {
 })
 
 const { selectedAgentId, resetCamera, graphError, toggleBloom, bloomEnabled } = useLiveSocietyGraph(graphContainer, thinkingMode)
-
-const selectedAgent = computed(() => {
-  if (!selectedAgentId.value) return null
-  return societyGraphStore.liveAgents.get(selectedAgentId.value) ?? null
-})
 
 const phaseLabel = computed(() => {
   // Unified mode phase labels
@@ -93,8 +91,13 @@ function clearEdgeSelection() {
   societyGraphStore.setSelectedEdge(null)
 }
 
+function handleHighlightAgents(_agentIds: string[]) {
+  // Phase 3.2: Will implement dim/highlight logic in useLiveSocietyGraph
+}
+
 onUnmounted(() => {
   societyGraphStore.reset()
+  kgStore.reset()
 })
 </script>
 
@@ -214,6 +217,22 @@ onUnmounted(() => {
       >
         &#10022;
       </button>
+      <button
+        v-if="kgStore.entityCount > 0"
+        class="graph-ctrl-btn"
+        :class="{ active: kgStore.layerVisible }"
+        title="ナレッジグラフ表示"
+        @click="kgStore.toggleLayerVisible()"
+      >
+        KG
+      </button>
+    </div>
+
+    <!-- KG stats badge -->
+    <div v-if="kgStore.layerVisible && kgStore.entityCount > 0" class="kg-stats-badge">
+      <span class="kg-badge-label">KG</span>
+      <span class="kg-badge-count">{{ kgStore.entityCount }} entities</span>
+      <span class="kg-badge-count">{{ kgStore.relationCount }} relations</span>
     </div>
 
     <!-- Conversation toast -->
@@ -223,31 +242,13 @@ onUnmounted(() => {
       :round="societyGraphStore.currentRound"
     />
 
-    <!-- Agent detail panel (on click) -->
-    <div v-if="selectedAgent" class="agent-detail-overlay">
-      <div class="agent-detail-card">
-        <div class="agent-detail-header">
-          <h4>{{ selectedAgent.label }}</h4>
-          <button class="btn-close" @click="clearSelection">&times;</button>
-        </div>
-        <div class="agent-detail-meta">
-          <span v-if="selectedAgent.region" class="meta-chip">{{ selectedAgent.region }}</span>
-          <span v-if="selectedAgent.occupation" class="meta-chip">{{ selectedAgent.occupation }}</span>
-          <span v-if="selectedAgent.age" class="meta-chip">{{ selectedAgent.age }}歳</span>
-        </div>
-        <div v-if="selectedAgent.stance" class="agent-stance">
-          <span
-            class="stance-badge"
-            :style="{ background: STANCE_COLORS[selectedAgent.stance] || '#a3a3a3' }"
-          >
-            {{ selectedAgent.stance }}
-          </span>
-          <span class="confidence">信頼度 {{ Math.round(selectedAgent.confidence * 100) }}%</span>
-        </div>
-        <div v-if="selectedAgent.speakingText" class="agent-speech">
-          <p>{{ selectedAgent.speakingText }}</p>
-        </div>
-      </div>
+    <!-- Node detail panel (on click) -->
+    <div v-if="selectedAgentId" class="agent-detail-overlay">
+      <NodeDetailPanel
+        :node-id="selectedAgentId"
+        @close="clearSelection"
+        @highlight-agents="handleHighlightAgents"
+      />
     </div>
   </div>
 </template>
@@ -458,6 +459,32 @@ onUnmounted(() => {
 .graph-ctrl-btn.active {
   border-color: rgba(100, 187, 106, 0.4);
   color: rgba(100, 187, 106, 0.8);
+}
+
+.kg-stats-badge {
+  position: absolute;
+  bottom: 0.75rem;
+  right: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  background: rgba(10, 10, 30, 0.8);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(186, 104, 200, 0.25);
+  border-radius: 6px;
+  z-index: 5;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: rgba(200, 200, 255, 0.6);
+}
+.kg-badge-label {
+  color: rgba(186, 104, 200, 0.9);
+  font-weight: 700;
+  font-size: 0.7rem;
+}
+.kg-badge-count {
+  color: rgba(200, 200, 255, 0.5);
 }
 
 .agent-detail-overlay {

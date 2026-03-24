@@ -21,6 +21,10 @@ class OpenAIAdapter(LLMAdapter):
             self._http_client = httpx.AsyncClient(timeout=httpx.Timeout(300.0))
         return self._http_client
 
+    # 推論モデルでは max_completion_tokens に思考トークンも含まれるため、
+    # 呼び出し側が要求した出力トークン数では足りない。最低限のバッファを確保する。
+    _REASONING_MIN_TOKENS = 8192
+
     def _uses_reasoning_controls(self) -> bool:
         return self.model.startswith("gpt-5") or self.model.startswith(("o1", "o3", "o4"))
 
@@ -38,12 +42,19 @@ class OpenAIAdapter(LLMAdapter):
             {"role": "user", "content": user_prompt},
         ]
 
+        is_reasoning = self._uses_reasoning_controls()
+
+        # 推論モデルでは思考トークン分のバッファが必要
+        effective_max_tokens = max_tokens
+        if is_reasoning:
+            effective_max_tokens = max(max_tokens, self._REASONING_MIN_TOKENS)
+
         body: dict = {
             "model": self.model,
             "messages": messages,
-            "max_completion_tokens": max_tokens,
+            "max_completion_tokens": effective_max_tokens,
         }
-        if self._uses_reasoning_controls():
+        if is_reasoning:
             if temperature not in (1, 1.0):
                 logger.info(
                     "Skipping unsupported temperature override for reasoning model %s: %s",

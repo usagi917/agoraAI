@@ -9,7 +9,8 @@ from src.app.config import settings
 from src.app.llm.multi_client import multi_llm_client
 from src.app.models.simulation import Simulation
 from src.app.services.phases.society_pulse import SocietyPulseResult
-from src.app.services.society.kg_updater import extract_kg_updates_from_round, apply_kg_updates
+from src.app.services.society.kg_updater import apply_kg_updates
+from src.app.services.society.kg_evolution_service import KGEvolutionService
 from src.app.services.society.meeting_layer import run_meeting
 from src.app.sse.manager import sse_manager
 
@@ -216,16 +217,22 @@ async def run_council(
         else:
             devil_advocate_summary = "反証なし"
 
-    # === KG 進化: ラウンドごとに新エンティティ・関係を抽出 ===
+    # === KG 進化: ラウンドごとに新エンティティ・関係を抽出 + SSE配信 ===
     evolved_entities = list(kg_entities) if kg_entities else []
     evolved_relations = list(kg_relations) if kg_relations else []
 
+    kg_evo = KGEvolutionService()
     if evolved_entities:
+        kg_evo.seed_from_existing(evolved_entities, evolved_relations)
         existing_names = {e.get("name", "") for e in evolved_entities}
         for round_idx, round_args in enumerate(meeting_result.get("rounds", [])):
             try:
-                updates = await extract_kg_updates_from_round(
-                    round_args, theme, existing_names,
+                updates = await kg_evo.extract_and_publish_from_round(
+                    simulation_id,
+                    round_idx + 1,
+                    round_args,
+                    theme,
+                    existing_names,
                 )
                 if updates.get("new_entities") or updates.get("updated_entities"):
                     evolved_entities, evolved_relations = apply_kg_updates(

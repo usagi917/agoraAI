@@ -20,6 +20,7 @@ from src.app.services.society.persona_generator import generate_persona_narrativ
 from src.app.services.society.representative_selector import select_representatives
 from src.app.services.society.demographic_analyzer import analyze_demographics
 from src.app.services.society.kg_enricher import enrich_agents_from_kg
+from src.app.services.society.kg_evolution_service import KGEvolutionService
 from src.app.models.conversation_log import ConversationLog
 from src.app.services.conversation_log_store import persist_conversation_logs
 from src.app.sse.manager import sse_manager
@@ -35,6 +36,7 @@ class SocietyPulseResult:
     evaluation: dict
     representatives: list[dict]
     usage: dict
+    population_count: int = 0
 
 
 async def run_society_pulse(
@@ -208,6 +210,19 @@ async def run_society_pulse(
         "usage": activation_result["usage"],
     })
 
+    # === KG Evolution: activation回答からKGを抽出しSSE配信 ===
+    try:
+        kg_evo = KGEvolutionService()
+        if kg_entities:
+            kg_evo.seed_from_existing(kg_entities, kg_relations or [])
+        await kg_evo.extract_and_publish_from_activation(
+            simulation_id,
+            individual_responses,
+            theme,
+        )
+    except Exception as e:
+        logger.warning("KG evolution from activation failed: %s", e)
+
     # === Evaluation ===
     eval_metrics = await evaluate_society_simulation(
         selected_agents, activation_result["responses"],
@@ -268,4 +283,5 @@ async def run_society_pulse(
         evaluation=eval_data,
         representatives=representatives,
         usage=total_usage,
+        population_count=len(agents),
     )

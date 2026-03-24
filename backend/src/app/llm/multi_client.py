@@ -126,27 +126,41 @@ class MultiLLMClient:
         user_prompt: str,
         temperature: float = 0.5,
         max_tokens: int = 1024,
+        max_retries: int = 2,
     ) -> tuple[dict | str, dict]:
-        """指定プロバイダで LLM を呼び出す。"""
+        """指定プロバイダで LLM を呼び出す。一時的なエラーにはリトライする。"""
         adapter, limiter = self._resolve_provider(provider_name)
 
-        await limiter.acquire(estimated_tokens=max_tokens)
-        try:
-            content, usage = await adapter.call(
-                system_prompt, user_prompt, temperature, max_tokens,
-            )
-        except Exception as e:
-            logger.error("MultiLLM call failed for %s: %s", provider_name, e)
-            raise
-        finally:
-            limiter.release()
+        last_exc: Exception | None = None
+        for attempt in range(max_retries + 1):
+            await limiter.acquire(estimated_tokens=max_tokens)
+            try:
+                content, usage = await adapter.call(
+                    system_prompt, user_prompt, temperature, max_tokens,
+                )
+            except Exception as e:
+                last_exc = e
+                if attempt < max_retries:
+                    wait = 1.0 * (2 ** attempt)
+                    logger.warning(
+                        "MultiLLM call attempt %d/%d failed for %s: %s. Retrying in %.1fs",
+                        attempt + 1, max_retries + 1, provider_name, e, wait,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                logger.error("MultiLLM call failed for %s after %d attempts: %s", provider_name, max_retries + 1, e)
+                raise
+            finally:
+                limiter.release()
 
-        limiter.record_usage(usage.get("total_tokens", 0))
+            limiter.record_usage(usage.get("total_tokens", 0))
 
-        parsed = _extract_json(content)
-        if parsed is not None:
-            return parsed, usage
-        return content, usage
+            parsed = _extract_json(content)
+            if parsed is not None:
+                return parsed, usage
+            return content, usage
+
+        raise last_exc  # type: ignore[misc]
 
     async def call_batch_by_provider(
         self,

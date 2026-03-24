@@ -1004,11 +1004,11 @@ function renderMarkdown(content: string): string {
               <div class="society-stats-row">
                 <span class="society-stat">
                   <span class="society-stat-label">人口</span>
-                  <span class="society-stat-value">{{ societyResult.population_count?.toLocaleString() || 'n/a' }}</span>
+                  <span class="society-stat-value">{{ (societyResult.population_count ?? societyResult.aggregation?.total_submitted)?.toLocaleString() || 'n/a' }}</span>
                 </span>
                 <span class="society-stat">
                   <span class="society-stat-label">選抜</span>
-                  <span class="society-stat-value">{{ societyResult.selected_count || 'n/a' }}</span>
+                  <span class="society-stat-value">{{ societyResult.selected_count ?? societyResult.aggregation?.total_respondents ?? 'n/a' }}</span>
                 </span>
                 <span class="society-stat">
                   <span class="society-stat-label">平均信頼度</span>

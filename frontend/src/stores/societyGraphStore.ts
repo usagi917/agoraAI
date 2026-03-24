@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { GraphNode, GraphEdge } from './graphStore'
 import type { SocialGraphNode, SocialGraphEdge } from '../api/client'
+import { useKGEvolutionStore } from './kgEvolutionStore'
 
 export type LiveAgentStatus = 'selected' | 'activating' | 'activated' | 'speaking' | 'idle'
 
@@ -79,8 +80,8 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
 
   const agentList = computed(() => Array.from(liveAgents.value.values()))
 
-  const graphNodes = computed<GraphNode[]>(() =>
-    agentList.value.map((a) => ({
+  const graphNodes = computed<GraphNode[]>(() => {
+    const agentNodes = agentList.value.map((a) => ({
       id: a.id,
       label: a.displayName || a.label,
       type: 'agent',
@@ -90,11 +91,16 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
       sentiment_score: 0,
       status: a.status,
       group: a.stance || '不明',
-    })),
-  )
+    }))
 
-  const graphEdges = computed<GraphEdge[]>(() =>
-    liveEdges.value
+    const kgStore = useKGEvolutionStore()
+    if (!kgStore.layerVisible) return agentNodes
+
+    return [...agentNodes, ...kgStore.graphNodes]
+  })
+
+  const graphEdges = computed<GraphEdge[]>(() => {
+    const socialEdges = liveEdges.value
       .filter((e) => e.strength > 0.3)
       .map((e) => ({
         id: e.id,
@@ -104,8 +110,13 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
         weight: e.strength,
         direction: 'undirected',
         status: 'active',
-      })),
-  )
+      }))
+
+    const kgStore = useKGEvolutionStore()
+    if (!kgStore.layerVisible) return socialEdges
+
+    return [...socialEdges, ...kgStore.graphEdges, ...kgStore.agentEntityEdges]
+  })
 
   const nodeCount = computed(() => liveAgents.value.size)
   const edgeCount = computed(() => graphEdges.value.length)

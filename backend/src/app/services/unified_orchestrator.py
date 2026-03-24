@@ -159,6 +159,8 @@ async def run_unified(simulation_id: str) -> None:
                     "content": synthesis.content,
                     "sections": synthesis.sections,
                     "society_summary": {
+                        "population_count": pulse.population_count,
+                        "selected_count": len(pulse.agents),
                         "aggregation": pulse.aggregation,
                         "evaluation": pulse.evaluation,
                     },

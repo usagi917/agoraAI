@@ -4,6 +4,7 @@ import { useGraphStore } from '../stores/graphStore'
 import { useActivityStore } from '../stores/activityStore'
 import { useSocietyStore } from '../stores/societyStore'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
+import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
 import { useCognitiveSSE } from './useCognitiveSSE'
 
 function getSimulationStreamUrl(simulationId: string) {
@@ -105,6 +106,8 @@ export function useSimulationSSE(simulationId: string) {
       'meeting_started',
       'meeting_round_completed',
       'meeting_completed',
+      // KG Evolution イベント
+      'kg_evolution',
       // 認知シミュレーション イベント
       'graphrag_started',
       'graphrag_completed',
@@ -663,6 +666,25 @@ export function useSimulationSSE(simulationId: string) {
           status: 'completed',
         })
         break
+
+      case 'kg_evolution': {
+        const kgStore = useKGEvolutionStore()
+        if (payload.diff) {
+          kgStore.applyDiff(payload.diff, payload.round_number)
+        }
+        if (payload.agent_entity_links?.length) {
+          kgStore.addAgentEntityLinks(payload.agent_entity_links)
+        }
+        const newCount = payload.stats?.new_in_this_round || 0
+        if (newCount > 0) {
+          activity.addEntry('event', '◈', payload.event_summary || `KG: +${newCount}概念`, {
+            detail: `合計 ${payload.stats?.total_entities || 0} エンティティ`,
+            track: 'graph',
+            status: 'completed',
+          })
+        }
+        break
+      }
 
       case 'meeting_completed':
         societyGraphStore.clearSpeaking()
