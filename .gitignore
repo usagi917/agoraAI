@@ -12,6 +12,7 @@ dist/
 .pnpm-store/
 playwright-report/
 frontend/test-results/
+/test-results/
 
 # Environment
 .env
@@ -35,4 +36,3 @@ Thumbs.db
 # Docker
 docker-compose.override.yml
 plan.md
-plans/

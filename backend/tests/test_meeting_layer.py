@@ -3,9 +3,13 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 
+from src.app.sse.manager import sse_manager
+from src.app.services.society import meeting_layer
 from src.app.services.society.meeting_layer import (
     _build_participant_context,
     _build_meeting_system_prompt,
+    _serialize_argument_for_stream,
+    run_meeting,
 )
 from src.app.services.society.meeting_report import (
     generate_meeting_report,
@@ -132,3 +136,116 @@ class TestGenerateMeetingReport:
         assert len(report["scenarios"]) == 1
         assert len(report["key_arguments"]) == 2
         assert report["overall_assessment"] == "議論は建設的に進んだ"
+
+
+class TestMeetingStreamPayloads:
+    def test_serialize_argument_for_stream_includes_targeting_fields(self):
+        payload = _serialize_argument_for_stream({
+            "round": 2,
+            "participant_name": "田中",
+            "participant_index": 42,
+            "role": "citizen_representative",
+            "expertise": "",
+            "position": "賛成",
+            "argument": "コストと利便性を比較すべきです。",
+            "evidence": "家計調査",
+            "addressed_to": "佐藤",
+            "addressed_to_participant_index": 7,
+            "belief_update": "慎重に前進へ変更",
+            "concerns": ["負担増"],
+            "questions_to_others": ["佐藤さんは財源をどう見ますか"],
+            "is_devil_advocate": True,
+            "sub_round": "direct_exchange",
+            "tension_topic": "財源",
+        }, "相互質疑・反論")
+
+        assert payload["participant_index"] == 42
+        assert payload["addressed_to_participant_index"] == 7
+        assert payload["is_devil_advocate"] is True
+        assert payload["sub_round"] == "direct_exchange"
+
+    @pytest.mark.asyncio
+    async def test_run_meeting_round_uses_agent_index_and_devil_flag(self):
+        participants = [{
+            "role": "citizen_representative",
+            "is_devil_advocate": True,
+            "display_name": "田中太郎",
+            "agent_profile": {
+                "agent_index": 42,
+                "llm_backend": "openai",
+                "demographics": {"occupation": "会社員", "age": 35, "region": "東京"},
+                "speech_style": "自然",
+            },
+            "response": {"stance": "賛成", "confidence": 0.8, "reason": "生活が便利になる"},
+        }]
+
+        fake_results = [({
+            "position": "賛成",
+            "argument": "生活面の便益が大きいと思います。",
+            "evidence": "実体験",
+            "addressed_to": "",
+            "belief_update": "",
+            "concerns": ["費用"],
+            "questions_to_others": [],
+        }, {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30})]
+
+        with patch.object(meeting_layer.multi_llm_client, "initialize"), \
+             patch.object(meeting_layer.multi_llm_client, "call_batch_by_provider", new=AsyncMock(return_value=fake_results)):
+            arguments = await meeting_layer._run_meeting_round(
+                participants,
+                "テスト政策",
+                1,
+                "初期主張",
+                [],
+            )
+
+        assert arguments[0]["participant_index"] == 42
+        assert arguments[0]["is_devil_advocate"] is True
+
+    @pytest.mark.asyncio
+    async def test_run_meeting_publishes_round_snapshot_arguments(self):
+        participants = [{
+            "role": "citizen_representative",
+            "display_name": "田中太郎",
+            "agent_profile": {"agent_index": 42, "demographics": {}, "speech_style": "自然"},
+            "response": {"stance": "賛成", "confidence": 0.8, "reason": "利便性"},
+        }]
+        round_args = [{
+            "participant_index": 42,
+            "participant_name": "田中太郎",
+            "role": "citizen_representative",
+            "expertise": "",
+            "round": 1,
+            "position": "賛成",
+            "argument": "私は段階的導入が妥当だと思います。",
+            "evidence": "家計データ",
+            "addressed_to": "",
+            "addressed_to_participant_index": None,
+            "belief_update": "",
+            "concerns": ["費用"],
+            "questions_to_others": [],
+            "is_devil_advocate": False,
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }]
+
+        with patch("src.app.services.society.meeting_layer._run_meeting_round", new=AsyncMock(return_value=round_args)), \
+             patch("src.app.services.society.meeting_layer._run_synthesis", new=AsyncMock(return_value=({}, {}))), \
+             patch.object(sse_manager, "publish", new=AsyncMock()) as publish_mock:
+            await run_meeting(
+                participants,
+                "テスト政策",
+                simulation_id="sim-1",
+                num_rounds=1,
+            )
+
+        round_completed_calls = [
+            call for call in publish_mock.await_args_list
+            if call.args[1] == "meeting_round_completed"
+        ]
+        assert len(round_completed_calls) == 1
+
+        payload = round_completed_calls[0].args[2]
+        assert payload["round"] == 1
+        assert payload["argument_count"] == 1
+        assert payload["arguments"][0]["participant_index"] == 42
+        assert payload["arguments"][0]["argument"] == round_args[0]["argument"]

@@ -702,6 +702,13 @@ export interface MeetingArgument {
   evidence: string
   concerns: string[]
   questions_to_others: string[]
+  addressed_to?: string
+  addressed_to_participant_index?: number | null
+  belief_update?: string
+  round_name?: string
+  sub_round?: string
+  tension_topic?: string
+  is_devil_advocate?: boolean
 }
 
 export interface MeetingParticipant {

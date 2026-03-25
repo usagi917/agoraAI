@@ -70,7 +70,7 @@ const transcriptEntries = ref<TranscriptEntry[]>([])
 const transcriptLoading = ref(false)
 const transcriptPhaseFilter = ref<string>('')
 const cognitiveStore = useCognitiveStore()
-const activeSecondaryTab = ref<ResultsSecondaryTab>('raw')
+const activeSecondaryTab = ref<ResultsSecondaryTab>('society')
 const isCognitiveMode = computed(() => cognitiveStore.cognitiveMode === 'advanced')
 const cognitiveSubTab = ref<'mind' | 'memory' | 'evaluation' | 'tom' | 'social' | 'kg'>('mind')
 let playbackFrame: number | null = null
@@ -379,12 +379,10 @@ const primaryDescription = computed(() => {
 })
 const primaryScenarioSummary = computed(() => normalizedScenarios.value[0] || null)
 const secondaryTabLabels: Record<ResultsSecondaryTab, string> = {
-  graph: 'Graph',
   pm: 'PM',
   society: 'Society',
   transcript: 'Transcript',
   evidence: 'Evidence',
-  raw: 'Raw',
 }
 
 function stopPlaybackLoop() {

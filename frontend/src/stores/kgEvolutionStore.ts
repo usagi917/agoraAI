@@ -19,25 +19,24 @@ export interface KGRelationEdge {
   round: number
 }
 
-interface AgentEntityLink {
-  agentId: string
-  entityId: string
-}
-
 export const useKGEvolutionStore = defineStore('kgEvolution', () => {
   const entities = ref<Map<string, KGEntityNode>>(new Map())
   const relations = ref<Map<string, KGRelationEdge>>(new Map())
   const agentEntityLinks = ref<Map<string, string[]>>(new Map()) // agentId -> entityIds[]
   const layerVisible = ref(false)
   const currentRound = ref(-1)
+  const replayRound = ref<number | null>(null)
+  const maxRound = ref(-1)
+  const roundSnapshots = ref<Map<number, { entityIds: string[]; relationIds: string[] }>>(new Map())
 
   // === Computed ===
 
   const entityCount = computed(() => entities.value.size)
   const relationCount = computed(() => relations.value.size)
+  const effectiveRound = computed(() => replayRound.value ?? currentRound.value)
 
-  const graphNodes = computed<GraphNode[]>(() =>
-    Array.from(entities.value.values()).map((e) => ({
+  function toGraphNode(e: KGEntityNode): GraphNode {
+    return {
       id: e.id,
       label: e.label,
       type: e.type,
@@ -47,11 +46,11 @@ export const useKGEvolutionStore = defineStore('kgEvolution', () => {
       sentiment_score: 0,
       status: 'active',
       group: 'knowledge',
-    })),
-  )
+    }
+  }
 
-  const graphEdges = computed<GraphEdge[]>(() =>
-    Array.from(relations.value.values()).map((r) => ({
+  function toGraphEdge(r: KGRelationEdge): GraphEdge {
+    return {
       id: r.id,
       source: r.source,
       target: r.target,
@@ -59,13 +58,23 @@ export const useKGEvolutionStore = defineStore('kgEvolution', () => {
       weight: r.weight,
       direction: 'directed',
       status: 'active',
-    })),
+    }
+  }
+
+  const graphNodes = computed<GraphNode[]>(() =>
+    getNodesAtRound(effectiveRound.value),
+  )
+
+  const graphEdges = computed<GraphEdge[]>(() =>
+    getEdgesAtRound(effectiveRound.value),
   )
 
   const agentEntityEdges = computed<GraphEdge[]>(() => {
+    const visibleEntityIds = new Set(graphNodes.value.map((node) => node.id))
     const edges: GraphEdge[] = []
     for (const [agentId, entityIds] of agentEntityLinks.value) {
       for (const entityId of entityIds) {
+        if (!visibleEntityIds.has(entityId)) continue
         edges.push({
           id: `link-${agentId}-${entityId}`,
           source: agentId,
@@ -165,6 +174,16 @@ export const useKGEvolutionStore = defineStore('kgEvolution', () => {
     // Trigger reactivity
     entities.value = new Map(entities.value)
     relations.value = new Map(relations.value)
+
+    // Save round snapshot
+    if (roundNumber !== undefined && roundNumber >= 0) {
+      if (roundNumber > maxRound.value) maxRound.value = roundNumber
+      roundSnapshots.value.set(roundNumber, {
+        entityIds: Array.from(entities.value.keys()),
+        relationIds: Array.from(relations.value.keys()),
+      })
+      roundSnapshots.value = new Map(roundSnapshots.value)
+    }
   }
 
   function addAgentEntityLinks(links: Array<{ agent_id: string; entity_id: string }>) {
@@ -201,12 +220,36 @@ export const useKGEvolutionStore = defineStore('kgEvolution', () => {
     layerVisible.value = !layerVisible.value
   }
 
+  function getNodesAtRound(round: number): GraphNode[] {
+    return Array.from(entities.value.values())
+      .filter((e) => e.round <= round)
+      .map((e) => toGraphNode(e))
+  }
+
+  function getEdgesAtRound(round: number): GraphEdge[] {
+    return Array.from(relations.value.values())
+      .filter((r) => r.round <= round)
+      .map((r) => toGraphEdge(r))
+  }
+
+  function setReplayRound(round: number) {
+    const upperBound = maxRound.value >= 0 ? maxRound.value : currentRound.value
+    replayRound.value = Math.max(-1, Math.min(round, upperBound))
+  }
+
+  function clearReplayRound() {
+    replayRound.value = null
+  }
+
   function reset() {
     entities.value = new Map()
     relations.value = new Map()
     agentEntityLinks.value = new Map()
     layerVisible.value = false
     currentRound.value = -1
+    replayRound.value = null
+    maxRound.value = -1
+    roundSnapshots.value = new Map()
   }
 
   return {
@@ -216,12 +259,16 @@ export const useKGEvolutionStore = defineStore('kgEvolution', () => {
     agentEntityLinks,
     layerVisible,
     currentRound,
+    replayRound,
+    maxRound,
+    roundSnapshots,
     // Computed
     entityCount,
     relationCount,
     graphNodes,
     graphEdges,
     agentEntityEdges,
+    effectiveRound,
     // Actions
     applyDiff,
     addAgentEntityLinks,
@@ -229,6 +276,10 @@ export const useKGEvolutionStore = defineStore('kgEvolution', () => {
     getAgentsForEntity,
     setLayerVisible,
     toggleLayerVisible,
+    getNodesAtRound,
+    getEdgesAtRound,
+    setReplayRound,
+    clearReplayRound,
     reset,
   }
 })

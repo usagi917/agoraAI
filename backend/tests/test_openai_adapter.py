@@ -66,7 +66,7 @@ async def test_openai_adapter_skips_temperature_for_reasoning_models():
     )
 
     assert fake_http_client.last_url.endswith("/chat/completions")
-    assert fake_http_client.last_json["max_completion_tokens"] == 128
+    assert fake_http_client.last_json["max_completion_tokens"] == 8192
     assert "temperature" not in fake_http_client.last_json
     assert content == '{"ok": true}'
     assert usage == {
@@ -76,6 +76,30 @@ async def test_openai_adapter_skips_temperature_for_reasoning_models():
         "completion_tokens": 7,
         "total_tokens": 18,
     }
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_keeps_larger_reasoning_token_budget():
+    adapter = OpenAIAdapter(
+        "openai",
+        {
+            "model": "gpt-5-nano-2025-08-07",
+            "api_base": "https://api.openai.com/v1",
+        },
+    )
+    adapter.api_key = "test-key"
+    fake_http_client = _FakeAsyncClient()
+    adapter._http_client = fake_http_client
+
+    await adapter.call(
+        system_prompt="sys",
+        user_prompt="user",
+        temperature=0.7,
+        max_tokens=12000,
+    )
+
+    assert fake_http_client.last_json["max_completion_tokens"] == 12000
+    assert "temperature" not in fake_http_client.last_json
 
 
 @pytest.mark.asyncio

@@ -33,9 +33,20 @@ export interface MeetingArgument {
   participant_name: string
   participant_index: number
   role: string
+  expertise?: string
+  round?: number
   argument: string
   position?: string
+  evidence?: string
+  concerns?: string[]
   questions_to_others?: string[]
+  addressed_to?: string
+  addressed_to_participant_index?: number | null
+  belief_update?: string
+  round_name?: string
+  sub_round?: string
+  tension_topic?: string
+  is_devil_advocate?: boolean
 }
 
 export interface ConversationEdge {
@@ -75,6 +86,8 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
   const pendingStanceShifts = ref<StanceShiftEvent[]>([])
   const hoveredEdge = ref<{ id: string; relationType: string; weight: number; sourceId: string; targetId: string } | null>(null)
   const selectedEdge = ref<{ id: string; relationType: string; weight: number; sourceId: string; targetId: string } | null>(null)
+  const socialEdgesVisible = ref(true)
+  const agentEntityLinksVisible = ref(true)
 
   // === Computed: useForceGraph 用の GraphNode/GraphEdge 変換 ===
 
@@ -100,22 +113,33 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
   })
 
   const graphEdges = computed<GraphEdge[]>(() => {
-    const socialEdges = liveEdges.value
-      .filter((e) => e.strength > 0.3)
-      .map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        relation_type: e.relationType,
-        weight: e.strength,
-        direction: 'undirected',
-        status: 'active',
-      }))
+    const edges: GraphEdge[] = []
+
+    if (socialEdgesVisible.value) {
+      for (const e of liveEdges.value) {
+        if (e.strength > 0.3) {
+          edges.push({
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            relation_type: e.relationType,
+            weight: e.strength,
+            direction: 'undirected',
+            status: 'active',
+          })
+        }
+      }
+    }
 
     const kgStore = useKGEvolutionStore()
-    if (!kgStore.layerVisible) return socialEdges
+    if (kgStore.layerVisible) {
+      edges.push(...kgStore.graphEdges)
+      if (agentEntityLinksVisible.value) {
+        edges.push(...kgStore.agentEntityEdges)
+      }
+    }
 
-    return [...socialEdges, ...kgStore.graphEdges, ...kgStore.agentEntityEdges]
+    return edges
   })
 
   const nodeCount = computed(() => liveAgents.value.size)
@@ -126,6 +150,65 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
   )
 
   // === Actions ===
+
+  function getMeetingArgumentKey(round: number, arg: MeetingArgument) {
+    return [
+      round,
+      arg.participant_index,
+      arg.participant_name,
+      arg.sub_round || '',
+      arg.addressed_to || '',
+      arg.argument,
+    ].join('::')
+  }
+
+  function getRestingStatus(agent: LiveAgentNode): LiveAgentStatus {
+    if (agent.stance || agent.status === 'activated' || agent.status === 'idle') {
+      return 'activated'
+    }
+    return 'selected'
+  }
+
+  function clearActiveSpeakers() {
+    let changed = false
+    for (const agent of liveAgents.value.values()) {
+      if (agent.status === 'speaking') {
+        agent.status = getRestingStatus(agent)
+        agent.speakingText = null
+        agent.speakingRound = null
+        changed = true
+      }
+    }
+    if (changed) {
+      liveAgents.value = new Map(liveAgents.value)
+    }
+  }
+
+  function setActiveSpeaker(arg: MeetingArgument, round: number) {
+    clearActiveSpeakers()
+
+    for (const agent of liveAgents.value.values()) {
+      if (agent.agentIndex === arg.participant_index) {
+        agent.status = 'speaking'
+        agent.speakingText = arg.argument
+        agent.speakingRound = round
+        liveAgents.value = new Map(liveAgents.value)
+        break
+      }
+    }
+  }
+
+  function mergeMeetingArguments(round: number, args: MeetingArgument[]) {
+    const seen = new Set(currentArguments.value.map((arg) => getMeetingArgumentKey(round, arg)))
+
+    for (const arg of args) {
+      const key = getMeetingArgumentKey(round, arg)
+      if (!seen.has(key)) {
+        currentArguments.value.push(arg)
+        seen.add(key)
+      }
+    }
+  }
 
   function setSelectedAgents(agents: Array<{
     agent_index: number
@@ -222,33 +305,40 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
 
   function setMeetingRound(round: number, args: MeetingArgument[]) {
     currentRound.value = round
-    currentArguments.value = args
-
-    // 前回のspeaking状態をクリア
-    for (const agent of liveAgents.value.values()) {
-      if (agent.status === 'speaking') {
-        agent.status = 'idle'
-        agent.speakingText = null
-        agent.speakingRound = null
-      }
-    }
-
-    // 発言者をspeaking状態にする
-    for (const arg of args) {
-      for (const agent of liveAgents.value.values()) {
-        if (agent.agentIndex === arg.participant_index) {
-          agent.status = 'speaking'
-          agent.speakingText = arg.argument
-          agent.speakingRound = round
-          break
-        }
-      }
-    }
-    // trigger reactivity
-    liveAgents.value = new Map(liveAgents.value)
+    currentArguments.value = []
+    conversationEdges.value = []
+    mergeMeetingArguments(round, args)
+    clearActiveSpeakers()
 
     // 会話エッジを生成
-    _buildConversationEdges(round, args)
+    _buildConversationEdges(round, currentArguments.value)
+  }
+
+  function appendMeetingDialogue(round: number, arg: MeetingArgument) {
+    if (currentRound.value !== round) {
+      currentRound.value = round
+      currentArguments.value = []
+      conversationEdges.value = []
+    }
+
+    mergeMeetingArguments(round, [arg])
+    setActiveSpeaker(arg, round)
+    _buildConversationEdges(round, currentArguments.value)
+  }
+
+  function completeMeetingRound(round: number, args: MeetingArgument[] = []) {
+    if (currentRound.value !== round) {
+      currentRound.value = round
+      currentArguments.value = []
+      conversationEdges.value = []
+    }
+
+    if (args.length > 0) {
+      mergeMeetingArguments(round, args)
+    }
+
+    clearActiveSpeakers()
+    _buildConversationEdges(round, currentArguments.value)
   }
 
   function _buildConversationEdges(round: number, args: MeetingArgument[]) {
@@ -268,6 +358,24 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     for (const arg of args) {
       const sourceId = agentsByIndex.get(arg.participant_index)
       if (!sourceId) continue
+
+      // 明示的な応答先がある場合はそれを優先
+      const explicitTargetId = arg.addressed_to_participant_index != null
+        ? agentsByIndex.get(arg.addressed_to_participant_index)
+        : undefined
+      if (explicitTargetId && explicitTargetId !== sourceId) {
+        const edgeId = `conv-${round}-${sourceId}-${explicitTargetId}-${arg.sub_round || 'reply'}`
+        if (!newEdges.find((e) => e.id === edgeId)) {
+          newEdges.push({
+            id: edgeId,
+            source: sourceId,
+            target: explicitTargetId,
+            type: 'response',
+            round,
+            intensity: arg.sub_round === 'direct_exchange' ? 1 : 0.9,
+          })
+        }
+      }
 
       // questions_to_others → question エッジ
       if (arg.questions_to_others?.length) {
@@ -289,7 +397,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
       }
 
       // Round 2以降: 他のスピーカー全員への暗黙的 response エッジ
-      if (round > 1) {
+      if (round > 1 && !explicitTargetId) {
         for (const targetId of speakerIds) {
           if (targetId !== sourceId) {
             const edgeId = `conv-${round}-${sourceId}-${targetId}-r`
@@ -332,14 +440,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
   }
 
   function clearSpeaking() {
-    for (const agent of liveAgents.value.values()) {
-      if (agent.status === 'speaking') {
-        agent.status = 'idle'
-        agent.speakingText = null
-        agent.speakingRound = null
-      }
-    }
-    liveAgents.value = new Map(liveAgents.value)
+    clearActiveSpeakers()
     currentArguments.value = []
     conversationEdges.value = []
   }
@@ -394,6 +495,8 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     pendingStanceShifts.value = []
     hoveredEdge.value = null
     selectedEdge.value = null
+    socialEdgesVisible.value = true
+    agentEntityLinksVisible.value = true
   }
 
   return {
@@ -408,6 +511,8 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     pendingStanceShifts,
     hoveredEdge,
     selectedEdge,
+    socialEdgesVisible,
+    agentEntityLinksVisible,
     // Computed
     agentList,
     graphNodes,
@@ -420,6 +525,8 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     updateActivationProgress,
     hydrateWithSocialGraph,
     setMeetingRound,
+    appendMeetingDialogue,
+    completeMeetingRound,
     clearSpeaking,
     addStanceShifts,
     clearStanceShifts,

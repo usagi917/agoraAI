@@ -19,6 +19,55 @@ logger = logging.getLogger(__name__)
 MEETING_ROUNDS = 3  # Claims → Counters → Synthesis
 
 
+def _resolve_participant_index(participant: dict, fallback: int = -1) -> int:
+    """参加者の実エージェント index を返す。"""
+    agent_profile = participant.get("agent_profile", {}) or {}
+    participant_index = agent_profile.get("agent_index")
+    return participant_index if isinstance(participant_index, int) else fallback
+
+
+def _normalize_participant_name(name: str) -> str:
+    return " ".join(str(name).split()).strip()
+
+
+def _match_participant_index_by_name(name: str, participants: list[dict]) -> int | None:
+    """参加者名から agent_index を逆引きする。"""
+    normalized = _normalize_participant_name(name)
+    if not normalized:
+        return None
+
+    for participant in participants:
+        display_name = _normalize_participant_name(participant.get("display_name", ""))
+        if not display_name:
+            continue
+        if normalized == display_name or normalized in display_name or display_name in normalized:
+            return _resolve_participant_index(participant, -1)
+    return None
+
+
+def _serialize_argument_for_stream(arg: dict, round_name: str) -> dict[str, Any]:
+    """SSE 用に発言データを整形する。"""
+    return {
+        "round": arg.get("round", 0),
+        "round_name": round_name,
+        "participant_name": arg.get("participant_name", ""),
+        "participant_index": arg.get("participant_index", -1),
+        "role": arg.get("role", ""),
+        "expertise": arg.get("expertise", ""),
+        "position": arg.get("position", ""),
+        "argument": arg.get("argument", ""),
+        "evidence": arg.get("evidence", ""),
+        "addressed_to": arg.get("addressed_to", ""),
+        "addressed_to_participant_index": arg.get("addressed_to_participant_index"),
+        "belief_update": arg.get("belief_update", ""),
+        "concerns": arg.get("concerns", []),
+        "questions_to_others": arg.get("questions_to_others", []),
+        "is_devil_advocate": bool(arg.get("is_devil_advocate", False)),
+        "sub_round": arg.get("sub_round", ""),
+        "tension_topic": arg.get("tension_topic", ""),
+    }
+
+
 def _build_participant_context(participant: dict) -> str:
     """参加者のコンテキスト文字列を構築する。"""
     if participant["role"] == "expert":
@@ -183,10 +232,14 @@ async def _run_meeting_round(
     for i, (result, usage) in enumerate(results):
         p = participants[i]
         name = p.get("display_name", "") or p["agent_profile"].get("demographics", {}).get("occupation", f"参加者{i+1}")
+        participant_index = _resolve_participant_index(p, i)
+        is_devil_advocate = bool(p.get("is_devil_advocate", False))
+        addressed_to = result.get("addressed_to", "") if isinstance(result, dict) else ""
+        addressed_to_participant_index = _match_participant_index_by_name(addressed_to, participants)
 
         if isinstance(result, dict):
             arg = {
-                "participant_index": i,
+                "participant_index": participant_index,
                 "participant_name": name,
                 "role": p["role"],
                 "expertise": p.get("expertise", ""),
@@ -194,15 +247,17 @@ async def _run_meeting_round(
                 "position": result.get("position", ""),
                 "argument": result.get("argument", ""),
                 "evidence": result.get("evidence", ""),
-                "addressed_to": result.get("addressed_to", ""),
+                "addressed_to": addressed_to,
+                "addressed_to_participant_index": addressed_to_participant_index,
                 "belief_update": result.get("belief_update", ""),
                 "concerns": result.get("concerns", []),
                 "questions_to_others": result.get("questions_to_others", []),
+                "is_devil_advocate": is_devil_advocate,
                 "usage": usage,
             }
         else:
             arg = {
-                "participant_index": i,
+                "participant_index": participant_index,
                 "participant_name": name,
                 "role": p["role"],
                 "expertise": p.get("expertise", ""),
@@ -210,10 +265,12 @@ async def _run_meeting_round(
                 "position": str(result)[:500] if result else "",
                 "argument": str(result) if result else "",
                 "evidence": "",
-                "addressed_to": "",
+                "addressed_to": addressed_to,
+                "addressed_to_participant_index": addressed_to_participant_index,
                 "belief_update": "",
                 "concerns": [],
                 "questions_to_others": [],
+                "is_devil_advocate": is_devil_advocate,
                 "usage": usage,
             }
         arguments.append(arg)
@@ -266,27 +323,11 @@ async def _run_meeting_round(
     if simulation_id:
         # 個別発言をリアルタイムストリーム
         for arg in arguments:
-            await sse_manager.publish(simulation_id, "meeting_dialogue", {
-                "round": round_number,
-                "round_name": round_name,
-                "participant_name": arg.get("participant_name", ""),
-                "participant_index": arg.get("participant_index", 0),
-                "role": arg.get("role", ""),
-                "position": arg.get("position", ""),
-                "argument": arg.get("argument", ""),
-                "evidence": arg.get("evidence", ""),
-                "addressed_to": arg.get("addressed_to", ""),
-                "belief_update": arg.get("belief_update", ""),
-                "concerns": arg.get("concerns", []),
-                "questions_to_others": arg.get("questions_to_others", []),
-            })
-
-        # ラウンド完了サマリー
-        await sse_manager.publish(simulation_id, "meeting_round_completed", {
-            "round": round_number,
-            "round_name": round_name,
-            "argument_count": len(arguments),
-        })
+            await sse_manager.publish(
+                simulation_id,
+                "meeting_dialogue",
+                _serialize_argument_for_stream(arg, round_name),
+            )
 
     return arguments
 
@@ -403,6 +444,8 @@ async def _run_direct_exchanges(
             responder = name_a if idx == 0 else name_b
             addressed = name_b if idx == 0 else name_a
             resp_participant = part_a if idx == 0 else part_b
+            participant_index = _resolve_participant_index(resp_participant, -1)
+            addressed_to_participant_index = _resolve_participant_index(part_b if idx == 0 else part_a, -1)
 
             if isinstance(result, dict):
                 argument_text = result.get("argument", "")
@@ -414,7 +457,7 @@ async def _run_direct_exchanges(
                 belief_update = ""
 
             exchange_arg = {
-                "participant_index": resp_participant.get("agent_profile", {}).get("agent_index", -1),
+                "participant_index": participant_index,
                 "participant_name": responder,
                 "role": resp_participant.get("role", ""),
                 "expertise": resp_participant.get("expertise", ""),
@@ -424,27 +467,23 @@ async def _run_direct_exchanges(
                 "argument": argument_text,
                 "evidence": result.get("evidence", "") if isinstance(result, dict) else "",
                 "addressed_to": addressed,
+                "addressed_to_participant_index": addressed_to_participant_index,
                 "belief_update": belief_update,
                 "tension_topic": tension,
                 "concerns": result.get("concerns", []) if isinstance(result, dict) else [],
                 "questions_to_others": result.get("questions_to_others", []) if isinstance(result, dict) else [],
+                "is_devil_advocate": bool(resp_participant.get("is_devil_advocate", False)),
                 "usage": usage,
             }
             exchanges.append(exchange_arg)
 
             # SSE で直接対話をストリーム
             if simulation_id:
-                await sse_manager.publish(simulation_id, "meeting_dialogue", {
-                    "round": round_number,
-                    "round_name": f"直接対話: {tension}",
-                    "participant_name": responder,
-                    "role": resp_participant.get("role", ""),
-                    "position": position,
-                    "argument": argument_text,
-                    "addressed_to": addressed,
-                    "belief_update": belief_update,
-                    "tension_topic": tension,
-                })
+                await sse_manager.publish(
+                    simulation_id,
+                    "meeting_dialogue",
+                    _serialize_argument_for_stream(exchange_arg, f"直接対話: {tension}"),
+                )
 
             # ConversationLog に保存
             if session and simulation_id:
@@ -624,6 +663,17 @@ async def run_meeting(
                         total_usage["total_tokens"] += u.get("total_tokens", 0)
             except Exception as e:
                 logger.warning("Direct exchanges failed, continuing: %s", e)
+
+        if simulation_id:
+            await sse_manager.publish(simulation_id, "meeting_round_completed", {
+                "round": round_idx + 1,
+                "round_name": round_name,
+                "argument_count": len(arguments),
+                "arguments": [
+                    _serialize_argument_for_stream(arg, round_name)
+                    for arg in arguments
+                ],
+            })
 
         all_arguments.append(arguments)
 

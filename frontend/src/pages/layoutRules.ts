@@ -1,5 +1,5 @@
 export type ResultsPrimaryView = 'report' | 'scenarios' | 'decision_brief'
-export type ResultsSecondaryTab = 'graph' | 'pm' | 'society' | 'evidence' | 'raw' | 'transcript'
+export type ResultsSecondaryTab = 'pm' | 'society' | 'evidence' | 'transcript'
 export type LivePrimaryView = 'graph' | 'society'
 export type LiveSecondaryTab = 'progress' | 'activity' | 'society' | 'colonies'
 
@@ -9,9 +9,7 @@ export interface ResultsLayoutContext {
   hasDecisionBrief: boolean
   hasPmBoard: boolean
   hasSociety: boolean
-  hasGraph: boolean
   hasEvidence: boolean
-  hasRaw?: boolean
   hasTranscript?: boolean
 }
 
@@ -71,10 +69,6 @@ export function getResultsSecondaryTabs(context: ResultsLayoutContext): ResultsS
   const mode = context.mode || ''
   const tabs: ResultsSecondaryTab[] = []
 
-  if (context.hasGraph) {
-    tabs.push('graph')
-  }
-
   if (context.hasSociety && SOCIETY_MODES.has(mode)) {
     tabs.push('society')
   }
@@ -91,10 +85,6 @@ export function getResultsSecondaryTabs(context: ResultsLayoutContext): ResultsS
     tabs.push('evidence')
   }
 
-  if (context.hasRaw ?? true) {
-    tabs.push('raw')
-  }
-
   return tabs
 }
 
@@ -103,7 +93,7 @@ export function getDefaultResultsSecondaryTab(context: ResultsLayoutContext): Re
   if (tabs.includes('society') && SOCIETY_MODES.has(context.mode || '')) {
     return 'society'
   }
-  return tabs[0] || 'raw'
+  return tabs[0] || 'society'
 }
 
 export function getLivePrimaryView(context: LiveLayoutContext): LivePrimaryView {

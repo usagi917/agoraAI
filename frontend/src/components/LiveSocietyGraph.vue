@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted, watch } from 'vue'
 import { useLiveSocietyGraph } from '../composables/useLiveSocietyGraph'
 import { useSocietyGraphStore, STANCE_COLORS } from '../stores/societyGraphStore'
 import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
@@ -8,6 +8,7 @@ import { useSimulationStore } from '../stores/simulationStore'
 import type { ThinkingVisualMode } from '../composables/useThinkingParticles'
 import ConversationToast from './ConversationToast.vue'
 import NodeDetailPanel from './NodeDetailPanel.vue'
+import TemporalSlider from './TemporalSlider.vue'
 
 defineProps<{
   simulationId: string
@@ -23,7 +24,7 @@ const thinkingMode = computed<ThinkingVisualMode>(() => {
   return 'society'
 })
 
-const { selectedAgentId, resetCamera, graphError, toggleBloom, bloomEnabled } = useLiveSocietyGraph(graphContainer, thinkingMode)
+const { selectedAgentId, resetCamera, graphError, toggleBloom, bloomEnabled, highlightAgentsForEntity, clearHighlight } = useLiveSocietyGraph(graphContainer, thinkingMode)
 
 const phaseLabel = computed(() => {
   // Unified mode phase labels
@@ -85,6 +86,7 @@ const selectedEdgeInfo = computed(() => {
 
 function clearSelection() {
   selectedAgentId.value = null
+  clearHighlight()
 }
 
 function clearEdgeSelection() {
@@ -92,10 +94,78 @@ function clearEdgeSelection() {
 }
 
 function handleHighlightAgents(_agentIds: string[]) {
-  // Phase 3.2: Will implement dim/highlight logic in useLiveSocietyGraph
+  if (selectedAgentId.value?.startsWith('kg-')) {
+    highlightAgentsForEntity(selectedAgentId.value)
+  }
 }
 
+// Time scrubber for KG replay
+const scrubberPlaying = ref(false)
+const showScrubber = computed(() =>
+  kgStore.layerVisible && kgStore.maxRound > 0 && store.status === 'completed',
+)
+const scrubberRound = computed({
+  get: () => kgStore.replayRound ?? Math.max(0, kgStore.maxRound),
+  set: (round: number) => onScrubberChange(round),
+})
+
+const KG_REPLAY_INTERVAL_MS = 900
+let scrubberTimer: ReturnType<typeof window.setInterval> | null = null
+
+function stopScrubberPlayback() {
+  if (scrubberTimer !== null) {
+    window.clearInterval(scrubberTimer)
+    scrubberTimer = null
+  }
+}
+
+function onScrubberChange(round: number) {
+  kgStore.setReplayRound(round)
+}
+
+function advanceScrubberPlayback() {
+  if (scrubberRound.value >= kgStore.maxRound) {
+    scrubberPlaying.value = false
+    stopScrubberPlayback()
+    return
+  }
+
+  onScrubberChange(scrubberRound.value + 1)
+
+  if (scrubberRound.value >= kgStore.maxRound) {
+    scrubberPlaying.value = false
+    stopScrubberPlayback()
+  }
+}
+
+watch(scrubberPlaying, (playing) => {
+  if (!playing) {
+    stopScrubberPlayback()
+    return
+  }
+
+  if (!showScrubber.value) {
+    scrubberPlaying.value = false
+    return
+  }
+
+  if (scrubberRound.value >= kgStore.maxRound) {
+    onScrubberChange(0)
+  }
+
+  stopScrubberPlayback()
+  scrubberTimer = window.setInterval(advanceScrubberPlayback, KG_REPLAY_INTERVAL_MS)
+})
+
+watch(showScrubber, (visible) => {
+  if (!visible) {
+    scrubberPlaying.value = false
+    kgStore.clearReplayRound()
+  }
+})
+
 onUnmounted(() => {
+  stopScrubberPlayback()
   societyGraphStore.reset()
   kgStore.reset()
 })
@@ -217,15 +287,39 @@ onUnmounted(() => {
       >
         &#10022;
       </button>
+    </div>
+
+    <!-- Layer toggles -->
+    <div v-if="kgStore.entityCount > 0" class="layer-toggles">
       <button
-        v-if="kgStore.entityCount > 0"
-        class="graph-ctrl-btn"
+        class="layer-btn"
+        :class="{ active: societyGraphStore.socialEdgesVisible }"
+        title="ソーシャルエッジ"
+        @click="societyGraphStore.socialEdgesVisible = !societyGraphStore.socialEdgesVisible"
+      >S</button>
+      <button
+        class="layer-btn"
         :class="{ active: kgStore.layerVisible }"
-        title="ナレッジグラフ表示"
+        title="ナレッジグラフ"
         @click="kgStore.toggleLayerVisible()"
-      >
-        KG
-      </button>
+      >K</button>
+      <button
+        class="layer-btn"
+        :class="{ active: societyGraphStore.agentEntityLinksVisible }"
+        title="エージェント⇔エンティティリンク"
+        @click="societyGraphStore.agentEntityLinksVisible = !societyGraphStore.agentEntityLinksVisible"
+      >L</button>
+    </div>
+
+    <!-- KG Time scrubber -->
+    <div v-if="showScrubber" class="kg-scrubber">
+      <TemporalSlider
+        :total-rounds="kgStore.maxRound"
+        v-model="scrubberRound"
+        :playing="scrubberPlaying"
+        @update:model-value="onScrubberChange"
+        @update:playing="scrubberPlaying = $event"
+      />
     </div>
 
     <!-- KG stats badge -->
@@ -461,6 +555,50 @@ onUnmounted(() => {
   color: rgba(100, 187, 106, 0.8);
 }
 
+.layer-toggles {
+  position: absolute;
+  top: 0.75rem;
+  right: 3rem;
+  margin-top: 1.4rem;
+  display: flex;
+  gap: 0.2rem;
+  z-index: 5;
+}
+.layer-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  background: rgba(16, 16, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: rgba(200, 200, 220, 0.4);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.layer-btn:hover {
+  background: rgba(30, 30, 50, 0.9);
+  color: rgba(230, 230, 245, 0.7);
+}
+.layer-btn.active {
+  border-color: rgba(186, 104, 200, 0.4);
+  color: rgba(186, 104, 200, 0.9);
+  background: rgba(186, 104, 200, 0.1);
+}
+
+.kg-scrubber {
+  position: absolute;
+  bottom: 2.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(20rem, 60%);
+  z-index: 5;
+}
+
 .kg-stats-badge {
   position: absolute;
   bottom: 0.75rem;
@@ -493,90 +631,6 @@ onUnmounted(() => {
   left: 0.75rem;
   z-index: 10;
   pointer-events: auto;
-}
-
-.agent-detail-card {
-  max-width: 16rem;
-  padding: 0.75rem 1rem;
-  background: rgba(16, 16, 30, 0.92);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(100, 187, 106, 0.25);
-  border-radius: 10px;
-}
-
-.agent-detail-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.agent-detail-header h4 {
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: rgba(220, 220, 240, 0.9);
-  margin: 0;
-}
-
-.btn-close {
-  background: none;
-  border: none;
-  color: rgba(200, 200, 220, 0.5);
-  font-size: 1.1rem;
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-}
-.btn-close:hover { color: rgba(230, 230, 245, 0.9); }
-
-.agent-detail-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  margin-top: 0.4rem;
-}
-
-.meta-chip {
-  font-size: 0.65rem;
-  padding: 0.1rem 0.4rem;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
-  color: rgba(200, 200, 220, 0.7);
-}
-
-.agent-stance {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-}
-
-.stance-badge {
-  font-size: 0.68rem;
-  padding: 0.15rem 0.5rem;
-  border-radius: 4px;
-  color: #111;
-  font-weight: 600;
-}
-
-.confidence {
-  font-size: 0.68rem;
-  color: rgba(200, 200, 220, 0.6);
-  font-family: var(--font-mono, monospace);
-}
-
-.agent-speech {
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.agent-speech p {
-  font-size: 0.75rem;
-  line-height: 1.5;
-  color: rgba(220, 220, 240, 0.8);
-  margin: 0;
 }
 
 .legend-divider {

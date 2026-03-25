@@ -104,6 +104,7 @@ export function useSimulationSSE(simulationId: string) {
       'report_completed',
       // Meeting Layer イベント
       'meeting_started',
+      'meeting_dialogue',
       'meeting_round_completed',
       'meeting_completed',
       // KG Evolution イベント
@@ -656,10 +657,19 @@ export function useSimulationSSE(simulationId: string) {
         })
         break
 
+      case 'meeting_dialogue':
+        societyGraphStore.appendMeetingDialogue(payload.round || 0, payload as any)
+        activity.addEntry('agent', '◌', `${payload.participant_name || '参加者'} 発言`, {
+          detail: payload.round_name || payload.position || undefined,
+          round: payload.round,
+          agentName: payload.participant_name || undefined,
+          track: 'agent',
+          status: 'running',
+        })
+        break
+
       case 'meeting_round_completed':
-        if (payload.arguments) {
-          societyGraphStore.setMeetingRound(payload.round, payload.arguments)
-        }
+        societyGraphStore.completeMeetingRound(payload.round, payload.arguments || [])
         activity.addEntry('event', '◉', `Meeting Round ${payload.round}: ${payload.round_name}`, {
           detail: `${payload.argument_count}件の発言`,
           track: 'agent',

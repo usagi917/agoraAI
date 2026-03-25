@@ -16,13 +16,21 @@ const currentArg = computed(() =>
 
 const isDevilAdvocate = computed(() => {
   if (!currentArg.value) return false
-  return currentArg.value.role === 'devil_advocate'
+  return currentArg.value.is_devil_advocate || currentArg.value.role === 'devil_advocate'
 })
 
 const displayText = computed(() => {
   if (!currentArg.value) return ''
   const text = currentArg.value.argument
   return text.length > 150 ? text.slice(0, 147) + '...' : text
+})
+
+const roleLabel = computed(() => {
+  if (!currentArg.value) return 'Participant'
+  if (isDevilAdvocate.value) return "Devil's Advocate"
+  if (currentArg.value.role === 'expert') return 'Expert'
+  if (currentArg.value.role === 'citizen_representative') return 'Citizen'
+  return currentArg.value.role || 'Participant'
 })
 
 function startAutoAdvance() {
@@ -63,7 +71,7 @@ onUnmounted(() => {
           class="role-badge"
           :class="{ 'role-badge-devil': isDevilAdvocate }"
         >
-          {{ isDevilAdvocate ? 'Devil\'s Advocate' : (currentArg.role || 'Citizen') }}
+          {{ roleLabel }}
         </span>
         <span class="round-badge">Round {{ round }}</span>
         <span v-if="arguments.length > 1" class="toast-counter">

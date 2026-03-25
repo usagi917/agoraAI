@@ -1,7 +1,7 @@
 [
   {
     "name": "business_analysis_report_sections",
-    "file": "sample_results/business_analysis.json",
+    "file": "backend/tests/fixtures/golden_samples/business_analysis.json",
     "json_path": "report.content",
     "contains_all": [
       "エグゼクティブサマリー",
@@ -18,19 +18,19 @@
   },
   {
     "name": "business_analysis_graph_density",
-    "file": "sample_results/business_analysis.json",
+    "file": "backend/tests/fixtures/golden_samples/business_analysis.json",
     "json_path": "graph.nodes",
     "min_length": 10
   },
   {
     "name": "pm_board_top_actions",
-    "file": "sample_results/pm_board.json",
+    "file": "backend/tests/fixtures/golden_samples/pm_board.json",
     "json_path": "report.sections.top_5_actions",
     "min_length": 5
   },
   {
     "name": "pm_board_core_fields",
-    "file": "sample_results/pm_board.json",
+    "file": "backend/tests/fixtures/golden_samples/pm_board.json",
     "json_path": "report.sections",
     "required_keys": [
       "core_question",

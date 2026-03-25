@@ -2,6 +2,7 @@ import { ref, watch, onUnmounted, type Ref } from 'vue'
 import * as THREE from 'three'
 import { useForceGraph, type InternalNode } from './useForceGraph'
 import { useSocietyGraphStore, STANCE_COLORS, type LiveAgentStatus } from '../stores/societyGraphStore'
+import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
 import { useConversationLines } from './useConversationLines'
 import type { ThinkingVisualMode } from './useThinkingParticles'
 
@@ -355,9 +356,47 @@ export function useLiveSocietyGraph(
     { deep: true },
   )
 
-  // Handle node click
+  // Handle node click with KG entity highlighting
+  let highlightedNodeIds: Set<string> | null = null
+
+  function clearHighlight() {
+    if (!highlightedNodeIds) return
+    const allNodes = forceGraph.getInternalNodes()
+    for (const n of allNodes) {
+      n.opacity = 1.0
+    }
+    highlightedNodeIds = null
+  }
+
+  function highlightAgentsForEntity(entityId: string) {
+    const kgStore = useKGEvolutionStore()
+    const highlighted = new Set([entityId, ...kgStore.getAgentsForEntity(entityId)])
+
+    clearHighlight()
+    highlightedNodeIds = highlighted
+
+    const allNodes = forceGraph.getInternalNodes()
+    for (const n of allNodes) {
+      n.opacity = highlighted.has(n.id) ? 1.0 : 0.15
+    }
+  }
+
   forceGraph.onNodeClick((nodeId: string) => {
+    // If clicking same node, deselect
+    if (selectedAgentId.value === nodeId) {
+      selectedAgentId.value = null
+      clearHighlight()
+      return
+    }
+
     selectedAgentId.value = nodeId
+
+    // If clicking a KG entity, highlight related agents
+    if (nodeId.startsWith('kg-')) {
+      highlightAgentsForEntity(nodeId)
+    } else {
+      clearHighlight()
+    }
   })
 
   // Handle link hover/click for edge info
@@ -401,5 +440,7 @@ export function useLiveSocietyGraph(
   return {
     ...forceGraph,
     selectedAgentId,
+    highlightAgentsForEntity,
+    clearHighlight,
   }
 }
