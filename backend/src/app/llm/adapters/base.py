@@ -19,6 +19,7 @@ class LLMAdapter(ABC):
         user_prompt: str,
         temperature: float = 0.5,
         max_tokens: int = 1024,
+        seed: int | None = None,
     ) -> tuple[str, dict]:
         """LLM を呼び出し、(content, usage) を返す。
 

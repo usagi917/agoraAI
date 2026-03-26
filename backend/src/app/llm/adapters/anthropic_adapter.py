@@ -27,6 +27,7 @@ class AnthropicAdapter(LLMAdapter):
         user_prompt: str,
         temperature: float = 0.5,
         max_tokens: int = 1024,
+        seed: int | None = None,
     ) -> tuple[str, dict]:
         url = f"{self.api_base}/v1/messages"
 
@@ -71,6 +72,8 @@ class AnthropicAdapter(LLMAdapter):
             "completion_tokens": api_usage.get("output_tokens", 0),
             "total_tokens": api_usage.get("input_tokens", 0) + api_usage.get("output_tokens", 0),
         }
+        if seed is not None:
+            usage["seed"] = seed
         return content, usage
 
     async def close(self) -> None:
