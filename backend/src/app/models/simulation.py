@@ -8,6 +8,38 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from src.app.database import Base, utcnow_naive
 
+# --- プリセット定義 ---
+
+PRESETS: dict[str, list[str]] = {
+    "quick": ["society_pulse", "synthesis"],
+    "standard": ["society_pulse", "council", "synthesis"],
+    "deep": ["society_pulse", "multi_perspective", "council", "pm_analysis", "synthesis"],
+    "research": ["society_pulse", "issue_mining", "multi_perspective", "intervention", "synthesis"],
+}
+
+VALID_PRESETS = set(PRESETS.keys()) | {"baseline"}
+
+MODE_ALIASES: dict[str, str] = {
+    "pipeline": "deep",
+    "swarm": "deep",
+    "hybrid": "deep",
+    "pm_board": "deep",
+    "single": "quick",
+    "society": "standard",
+    "society_first": "research",
+    "meta_simulation": "research",
+    "unified": "standard",
+}
+
+
+def normalize_mode(mode: str) -> str:
+    """モード名を正規化する。旧モードは新プリセットにマップ。"""
+    if mode in VALID_PRESETS:
+        return mode
+    if mode in MODE_ALIASES:
+        return MODE_ALIASES[mode]
+    raise ValueError(f"Unknown mode: {mode}. Valid: {VALID_PRESETS}")
+
 
 class Simulation(Base):
     __tablename__ = "simulations"
