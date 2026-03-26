@@ -91,13 +91,15 @@ const isFollowupLoading = ref(false)
 const copyState = ref<'idle' | 'success' | 'error'>('idle')
 let copyStateTimer: number | null = null
 
-const isPipelineMode = computed(() => sim.value?.mode === 'pipeline')
-const isMetaMode = computed(() => sim.value?.mode === 'meta_simulation')
+const PRESET_MODES = new Set(['quick', 'standard', 'deep', 'research', 'baseline'])
+const isPresetMode = computed(() => PRESET_MODES.has(sim.value?.mode ?? ''))
+const isPipelineMode = computed(() => sim.value?.mode === 'pipeline' || sim.value?.mode === 'deep')
+const isMetaMode = computed(() => sim.value?.mode === 'meta_simulation' || sim.value?.mode === 'research')
 const societyFirstData = computed<SocietyFirstReportResponse | null>(() => (
   report.value?.type === 'society_first' ? report.value as SocietyFirstReportResponse : null
 ))
 const unifiedReport = computed<UnifiedReportResponse | null>(() => (
-  report.value?.type === 'unified' ? report.value as UnifiedReportResponse : null
+  (report.value?.type === 'unified' || isPresetMode.value) ? report.value as UnifiedReportResponse : null
 ))
 const unifiedCouncil = computed(() => unifiedReport.value?.council || null)
 const metaReport = computed<MetaSimulationReportResponse | null>(() => (
@@ -351,9 +353,7 @@ const layoutContext = computed(() => ({
   hasDecisionBrief: hasDecisionBrief.value,
   hasPmBoard: hasPmBoard.value,
   hasSociety: !!societyResult.value,
-  hasGraph: showGraphViews.value,
   hasEvidence: reportEvidenceRefs.value.length > 0,
-  hasRaw: !!report.value,
   hasTranscript: sim.value?.mode === 'unified' || sim.value?.mode === 'society' || sim.value?.mode === 'society_first',
 }))
 const primaryViewKind = computed<ResultsPrimaryView>(() => getResultsPrimaryView(layoutContext.value))
@@ -945,55 +945,6 @@ function renderMarkdown(content: string): string {
             </div>
           </div>
 
-          <div v-if="activeSecondaryTab === 'graph' && showGraphViews" class="side-card">
-            <div class="side-header">
-              <h3>3D Graph</h3>
-            </div>
-            <div ref="graphContainer" class="graph-snapshot-large"></div>
-            <div v-if="graphError" class="graph-error-note">{{ graphError }}</div>
-            <TemporalSlider
-              v-if="graphSnapshots.length > 1"
-              :total-rounds="totalRounds"
-              :model-value="currentRound"
-              :display-value="sliderDisplayValue"
-              :playing="isPlaying"
-              @update:model-value="onRoundChange"
-              @update:playing="onPlayingChange"
-            />
-
-            <div v-if="isCognitiveMode" class="cognitive-subtabs">
-              <button
-                v-for="sub in [
-                  { key: 'mind', label: '認知状態' },
-                  { key: 'memory', label: '記憶' },
-                  { key: 'evaluation', label: '評価' },
-                  { key: 'tom', label: 'ToM' },
-                  { key: 'social', label: '社会NW' },
-                  { key: 'kg', label: 'KG探索' },
-                ]"
-                :key="sub.key"
-                class="subtab-btn"
-                :class="{ active: cognitiveSubTab === sub.key }"
-                @click="cognitiveSubTab = sub.key as any"
-              >
-                {{ sub.label }}
-              </button>
-            </div>
-            <div v-if="isCognitiveMode" class="cognitive-content">
-              <AgentMindView v-if="cognitiveSubTab === 'mind'" />
-              <MemoryStreamViewer v-if="cognitiveSubTab === 'memory'" />
-              <EvaluationDashboard v-if="cognitiveSubTab === 'evaluation'" />
-              <ToMMapVisualization v-if="cognitiveSubTab === 'tom'" />
-              <SocialNetworkDynamics v-if="cognitiveSubTab === 'social'" />
-              <KnowledgeGraphExplorer
-                v-if="cognitiveSubTab === 'kg'"
-                :entities="kgEntities"
-                :relations="kgRelations"
-                :communities="kgCommunities"
-              />
-            </div>
-          </div>
-
           <div v-if="activeSecondaryTab === 'society' && societyResult" class="side-card">
             <div class="side-header">
               <h3>Society Summary</h3>
@@ -1196,20 +1147,6 @@ function renderMarkdown(content: string): string {
               </div>
             </div>
             <div v-else class="empty-state">根拠ソースはありません。</div>
-          </div>
-
-          <div v-if="activeSecondaryTab === 'raw'" class="side-card">
-            <div class="side-header">
-              <h3>Raw Data</h3>
-            </div>
-            <div class="society-section">
-              <h4 class="society-section-title">Report JSON</h4>
-              <pre class="society-raw-text">{{ reportJson }}</pre>
-            </div>
-            <div v-if="societyResult" class="society-section">
-              <h4 class="society-section-title">Society Result</h4>
-              <pre class="society-raw-text">{{ JSON.stringify(societyResult, null, 2) }}</pre>
-            </div>
           </div>
 
           <div class="side-card chat-panel">
