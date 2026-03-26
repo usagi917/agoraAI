@@ -18,7 +18,6 @@ describe('layoutRules', () => {
         hasDecisionBrief: true,
         hasPmBoard: false,
         hasSociety: false,
-        hasGraph: true,
         hasEvidence: true,
       })).toBe('report')
     })
@@ -30,7 +29,6 @@ describe('layoutRules', () => {
         hasDecisionBrief: true,
         hasPmBoard: true,
         hasSociety: false,
-        hasGraph: true,
         hasEvidence: true,
       })).toBe('scenarios')
     })
@@ -42,7 +40,6 @@ describe('layoutRules', () => {
         hasDecisionBrief: true,
         hasPmBoard: true,
         hasSociety: false,
-        hasGraph: true,
         hasEvidence: true,
       })).toBe('decision_brief')
     })
@@ -54,16 +51,14 @@ describe('layoutRules', () => {
         hasDecisionBrief: true,
         hasPmBoard: true,
         hasSociety: true,
-        hasGraph: true,
         hasEvidence: true,
-      })).toEqual(['graph', 'society', 'pm', 'evidence', 'raw'])
+      })).toEqual(['society', 'pm', 'evidence'])
       expect(getDefaultResultsSecondaryTab({
         mode: 'unified',
         hasScenarios: true,
         hasDecisionBrief: true,
         hasPmBoard: true,
         hasSociety: true,
-        hasGraph: true,
         hasEvidence: true,
       })).toBe('society')
     })
@@ -75,9 +70,8 @@ describe('layoutRules', () => {
         hasDecisionBrief: true,
         hasPmBoard: true,
         hasSociety: false,
-        hasGraph: false,
         hasEvidence: true,
-      })).toEqual(['evidence', 'raw'])
+      })).toEqual(['evidence'])
     })
   })
 

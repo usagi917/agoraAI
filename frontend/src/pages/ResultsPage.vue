@@ -30,17 +30,9 @@ import {
 } from '../api/client'
 import { useForceGraph } from '../composables/useForceGraph'
 import DecisionBriefComponent from '../components/DecisionBrief.vue'
-import TemporalSlider from '../components/TemporalSlider.vue'
 import ProbabilityChart from '../components/ProbabilityChart.vue'
 import ScenarioCompare from '../components/ScenarioCompare.vue'
 import AgreementHeatmap from '../components/AgreementHeatmap.vue'
-import AgentMindView from '../components/AgentMindView.vue'
-import MemoryStreamViewer from '../components/MemoryStreamViewer.vue'
-import EvaluationDashboard from '../components/EvaluationDashboard.vue'
-import ToMMapVisualization from '../components/ToMMapVisualization.vue'
-import SocialNetworkDynamics from '../components/SocialNetworkDynamics.vue'
-import KnowledgeGraphExplorer from '../components/KnowledgeGraphExplorer.vue'
-import { useCognitiveStore } from '../stores/cognitiveStore'
 import {
   getDefaultResultsSecondaryTab,
   getResultsPrimaryView,
@@ -69,10 +61,7 @@ const colonies = ref<ColonyResponse[]>([])
 const transcriptEntries = ref<TranscriptEntry[]>([])
 const transcriptLoading = ref(false)
 const transcriptPhaseFilter = ref<string>('')
-const cognitiveStore = useCognitiveStore()
 const activeSecondaryTab = ref<ResultsSecondaryTab>('society')
-const isCognitiveMode = computed(() => cognitiveStore.cognitiveMode === 'advanced')
-const cognitiveSubTab = ref<'mind' | 'memory' | 'evaluation' | 'tom' | 'social' | 'kg'>('mind')
 let playbackFrame: number | null = null
 let playbackStartedAt: number | null = null
 
@@ -81,7 +70,6 @@ const {
   startGraphTransition,
   updateGraphTransition,
   finishGraphTransition,
-  graphError,
 } = useForceGraph(graphContainer)
 
 // Follow-up
@@ -276,58 +264,12 @@ const reportText = computed(() => {
   if (typeof report.value?.content === 'string') return report.value.content
   return ''
 })
-const reportJson = computed(() => (
-  report.value ? JSON.stringify(report.value, null, 2) : ''
-))
 const agreementMatrix = computed(() => {
   if (!report.value?.agreement_matrix) return null
   return report.value.agreement_matrix as { colony_ids: string[]; matrix: number[][] }
 })
 const canCopyReport = computed(() => reportText.value.trim().length > 0)
 const snapshotByRound = computed(() => new Map(graphSnapshots.value.map((snapshot) => [snapshot.round, snapshot])))
-const displayedGraphData = computed(() => {
-  const activeRound = transitionTargetRound.value !== null && transitionProgress.value >= 0.5
-    ? transitionTargetRound.value
-    : currentRound.value
-  return snapshotByRound.value.get(activeRound) ?? fallbackGraph.value
-})
-const kgEntities = computed(() => (
-  (displayedGraphData.value?.nodes || []).map((node: any) => ({
-    id: String(node.id),
-    label: node.label || String(node.id),
-    type: node.type || 'unknown',
-    description: node.group ? `Group: ${node.group}` : `${node.type || 'unknown'} entity`,
-    community: node.group || undefined,
-    aliases: [],
-  }))
-))
-const kgRelations = computed(() => (
-  (displayedGraphData.value?.edges || []).map((edge: any) => ({
-    source: String(edge.source),
-    target: String(edge.target),
-    type: edge.relation_type || 'related_to',
-    confidence: Math.max(0, Math.min(Number(edge.weight ?? 0.5), 1)),
-  }))
-))
-const kgCommunities = computed(() => {
-  const groups = new Map<string, string[]>()
-  for (const node of displayedGraphData.value?.nodes || []) {
-    if (!node.group) continue
-    const members = groups.get(node.group) || []
-    members.push(node.label || String(node.id))
-    groups.set(node.group, members)
-  }
-  return Array.from(groups.entries()).map(([community, members]) => ({
-    community,
-    summary: `${members.length} entities`,
-    members,
-  }))
-})
-const sliderDisplayValue = computed(() => {
-  if (transitionTargetRound.value === null) return currentRound.value
-  return currentRound.value + transitionProgress.value
-})
-
 function backtestVerdictLabel(verdict?: string | null) {
   if (verdict === 'hit') return 'Hit'
   if (verdict === 'partial_hit') return 'Partial'
@@ -471,16 +413,6 @@ function beginRoundTransition(fromRound: number) {
   playbackFrame = requestAnimationFrame(stepPlayback)
 }
 
-function startPlayback() {
-  if (graphSnapshots.value.length <= 1) return
-
-  const startRound = currentRound.value >= totalRounds.value ? 0 : currentRound.value
-  if (!showRound(startRound)) return
-
-  isPlaying.value = true
-  queueNextTransition(startRound)
-}
-
 onMounted(async () => {
   try {
     sim.value = await getSimulation(simId)
@@ -542,24 +474,6 @@ onUnmounted(() => {
     window.clearTimeout(copyStateTimer)
   }
 })
-
-function onRoundChange(round: number) {
-  stopPlaybackLoop()
-  isPlaying.value = false
-  showRound(round)
-}
-
-function onPlayingChange(playing: boolean) {
-  if (playing) {
-    startPlayback()
-    return
-  }
-
-  const snapRound = transitionTargetRound.value !== null && transitionProgress.value >= 0.5
-    ? transitionTargetRound.value
-    : currentRound.value
-  stopPlayback(snapRound)
-}
 
 async function handleFollowup() {
   if (!followupQuestion.value.trim() || isFollowupLoading.value) return
