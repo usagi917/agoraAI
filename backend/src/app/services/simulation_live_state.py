@@ -26,21 +26,16 @@ async def _find_simulation(
     *,
     simulation_id: str | None = None,
     run_id: str | None = None,
-    swarm_id: str | None = None,
 ) -> Simulation | None:
     if simulation_id:
         return await session.get(Simulation, simulation_id)
 
-    query = select(Simulation)
     if run_id:
-        query = query.where(Simulation.run_id == run_id)
-    elif swarm_id:
-        query = query.where(Simulation.swarm_id == swarm_id)
-    else:
-        return None
+        query = select(Simulation).where(Simulation.run_id == run_id)
+        result = await session.execute(query.limit(1))
+        return result.scalar_one_or_none()
 
-    result = await session.execute(query.limit(1))
-    return result.scalar_one_or_none()
+    return None
 
 
 async def update_simulation_metadata(
@@ -49,13 +44,11 @@ async def update_simulation_metadata(
     *,
     simulation_id: str | None = None,
     run_id: str | None = None,
-    swarm_id: str | None = None,
 ) -> None:
     sim = await _find_simulation(
         session,
         simulation_id=simulation_id,
         run_id=run_id,
-        swarm_id=swarm_id,
     )
     if not sim:
         return
@@ -75,13 +68,11 @@ async def update_report_progress(
     scope: str | None = None,
     simulation_id: str | None = None,
     run_id: str | None = None,
-    swarm_id: str | None = None,
 ) -> None:
     sim = await _find_simulation(
         session,
         simulation_id=simulation_id,
         run_id=run_id,
-        swarm_id=swarm_id,
     )
     if not sim:
         return

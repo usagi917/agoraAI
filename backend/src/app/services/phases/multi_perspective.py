@@ -71,7 +71,7 @@ async def run_multi_perspective(
 
     # 1. 視点設定の生成
     configs = generate_colony_configs(
-        swarm_id=simulation_id,
+        simulation_id=simulation_id,
         profile_name=sim.execution_profile,
         diversity_mode="balanced",
     )
@@ -140,7 +140,7 @@ async def run_multi_perspective(
     try:
         integrated_report = await generate_swarm_integrated_report(
             session=session,
-            swarm_id=simulation_id,
+            simulation_id=simulation_id,
             prompt_text=theme,
             colony_results=successful_results,
             colony_configs=configs,

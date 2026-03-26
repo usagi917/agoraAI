@@ -11,8 +11,8 @@ class OutcomeClaim(Base):
     __tablename__ = "outcome_claims"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    swarm_id: Mapped[str] = mapped_column(String(36), ForeignKey("swarms.id"))
-    colony_id: Mapped[str] = mapped_column(String(36), ForeignKey("colonies.id"))
+    simulation_id: Mapped[str] = mapped_column(String(36), ForeignKey("simulations.id"))
+    colony_id: Mapped[str] = mapped_column(String(36))
     claim_text: Mapped[str] = mapped_column(Text)
     claim_type: Mapped[str] = mapped_column(String(50), default="prediction")
     confidence: Mapped[float] = mapped_column(Float, default=0.5)

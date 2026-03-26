@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 async def extract_claims(
     session: AsyncSession,
-    swarm_id: str,
+    simulation_id: str,
     colony_results: list[dict],
 ) -> list[dict]:
     """全 Colony の結果から予測主張を抽出する。"""
@@ -69,14 +69,14 @@ async def extract_claims(
                 user_prompt=user_prompt,
                 response_format={"type": "json_object"},
             )
-            await record_usage(session, swarm_id, f"claim_extract_{colony_id[:8]}", usage)
+            await record_usage(session, simulation_id, f"claim_extract_{colony_id[:8]}", usage)
 
             if isinstance(result, dict):
                 claims = result.get("claims", [])
                 for claim_data in claims:
                     claim = OutcomeClaim(
                         id=str(uuid.uuid4()),
-                        swarm_id=swarm_id,
+                        simulation_id=simulation_id,
                         colony_id=colony_id,
                         claim_text=claim_data.get("claim_text", ""),
                         claim_type=claim_data.get("claim_type", "prediction"),
@@ -102,5 +102,5 @@ async def extract_claims(
             logger.error(f"Claim extraction failed for colony {colony_id[:8]}: {e}")
 
     await session.flush()
-    logger.info(f"Total claims extracted for swarm {swarm_id}: {len(all_claims)}")
+    logger.info(f"Total claims extracted for swarm {simulation_id}: {len(all_claims)}")
     return all_claims

@@ -12,12 +12,9 @@ from src.app.models.report import Report
 from src.app.models.followup import Followup
 from src.app.models.token_usage import TokenUsage
 from src.app.models.log import Log
-from src.app.models.swarm import Swarm
-from src.app.models.colony import Colony
 from src.app.models.outcome_claim import OutcomeClaim
 from src.app.models.claim_cluster import ClaimCluster
 from src.app.models.aggregation_result import AggregationResult
-from src.app.models.calibration_data import CalibrationData
 from src.app.models.simulation import Simulation
 from src.app.models.kg_node import KGNode
 from src.app.models.kg_edge import KGEdge
@@ -26,7 +23,6 @@ from src.app.models.memory_entry import MemoryEntry
 from src.app.models.agent_state import AgentState
 from src.app.models.message import Message
 from src.app.models.environment_rule import EnvironmentRule
-from src.app.models.evaluation_score import EvaluationScore
 from src.app.models.population import Population
 from src.app.models.agent_profile import AgentProfile
 from src.app.models.social_edge import SocialEdge
@@ -57,12 +53,9 @@ __all__ = [
     "Followup",
     "TokenUsage",
     "Log",
-    "Swarm",
-    "Colony",
     "OutcomeClaim",
     "ClaimCluster",
     "AggregationResult",
-    "CalibrationData",
     "Simulation",
     "KGNode",
     "KGEdge",
@@ -71,7 +64,6 @@ __all__ = [
     "AgentState",
     "Message",
     "EnvironmentRule",
-    "EvaluationScore",
     "Population",
     "AgentProfile",
     "SocialEdge",

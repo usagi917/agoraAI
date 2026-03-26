@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 async def aggregate_clusters(
     session: AsyncSession,
-    swarm_id: str,
+    simulation_id: str,
     clusters: list[dict],
     colony_results: list[dict],
 ) -> dict:
@@ -82,7 +82,7 @@ async def aggregate_clusters(
     # DB 保存
     result = AggregationResult(
         id=str(uuid.uuid4()),
-        swarm_id=swarm_id,
+        simulation_id=simulation_id,
         scenarios=scenarios,
         diversity_score=round(diversity_score, 3),
         entropy=round(entropy, 3),
@@ -97,7 +97,7 @@ async def aggregate_clusters(
     await session.flush()
 
     logger.info(
-        f"Aggregation for swarm {swarm_id}: "
+        f"Aggregation for swarm {simulation_id}: "
         f"{len(scenarios)} scenarios, diversity={diversity_score:.3f}, entropy={entropy:.3f}"
     )
 

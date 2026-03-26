@@ -11,7 +11,7 @@ class ClaimCluster(Base):
     __tablename__ = "claim_clusters"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    swarm_id: Mapped[str] = mapped_column(String(36), ForeignKey("swarms.id"))
+    simulation_id: Mapped[str] = mapped_column(String(36), ForeignKey("simulations.id"))
     cluster_index: Mapped[int] = mapped_column(Integer)
     representative_text: Mapped[str] = mapped_column(Text)
     claim_count: Mapped[int] = mapped_column(Integer, default=0)

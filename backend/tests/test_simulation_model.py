@@ -47,24 +47,11 @@ def test_simulation_model_default_pipeline_stage():
     assert col.default.arg == "pending"
 
 
-def test_simulation_model_default_colony_count():
-    from src.app.models.simulation import Simulation
-    col = Simulation.__table__.columns["colony_count"]
-    assert col.default.arg == 1
-
-
-def test_simulation_model_default_deep_colony_count():
-    from src.app.models.simulation import Simulation
-    col = Simulation.__table__.columns["deep_colony_count"]
-    assert col.default.arg == 0
-
-
 def test_simulation_model_nullable_columns():
     """nullable な外部キーカラムが正しく nullable になっている。"""
     from src.app.models.simulation import Simulation
     assert Simulation.__table__.columns["project_id"].nullable is True
     assert Simulation.__table__.columns["run_id"].nullable is True
-    assert Simulation.__table__.columns["swarm_id"].nullable is True
     assert Simulation.__table__.columns["started_at"].nullable is True
     assert Simulation.__table__.columns["completed_at"].nullable is True
 

@@ -50,13 +50,10 @@ class Simulation(Base):
     prompt_text: Mapped[str] = mapped_column(Text, default="")
     template_name: Mapped[str] = mapped_column(String(100), default="")
     execution_profile: Mapped[str] = mapped_column(String(20), default="standard")
-    colony_count: Mapped[int] = mapped_column(Integer, default=1)
-    deep_colony_count: Mapped[int] = mapped_column(Integer, default=0)  # hybrid 用
     status: Mapped[str] = mapped_column(String(20), default="queued")
     error_message: Mapped[str] = mapped_column(Text, default="")
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
     run_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("runs.id"), nullable=True)
-    swarm_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("swarms.id"), nullable=True)
     population_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("populations.id"), nullable=True)
     pipeline_stage: Mapped[str] = mapped_column(String(20), default="pending")
     stage_progress: Mapped[dict] = mapped_column(JSON, default=dict)
