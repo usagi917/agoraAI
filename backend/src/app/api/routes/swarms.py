@@ -15,7 +15,6 @@ from src.app.models.colony import Colony
 from src.app.models.swarm import Swarm
 from src.app.services.calibrator import record_feedback
 from src.app.services.colony_factory import generate_colony_configs
-from src.app.services.swarm_orchestrator import run_swarm
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +25,10 @@ _swarm_tasks: set[asyncio.Task] = set()
 
 
 def _spawn_swarm(swarm_id: str) -> None:
-    task = asyncio.create_task(run_swarm(swarm_id))
-    _swarm_tasks.add(task)
-    task.add_done_callback(_swarm_tasks.discard)
+    """レガシー: Phase 5 で削除予定。新規は POST /simulations を使用。"""
+    raise NotImplementedError(
+        "Swarm direct launch is deprecated. Use POST /simulations with preset='deep' instead."
+    )
 
 
 class SwarmCreate(BaseModel):

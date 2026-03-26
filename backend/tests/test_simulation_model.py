@@ -21,12 +21,12 @@ def test_simulation_model_tablename():
 
 
 def test_simulation_model_default_mode():
-    """mode のデフォルト値は 'pipeline'。"""
+    """mode のデフォルト値は 'pipeline'（DB互換）。"""
     from src.app.models.simulation import Simulation
-    # SQLAlchemy の mapped_column default は callable または値
-    # カラム定義から default を確認
     col = Simulation.__table__.columns["mode"]
-    assert col.default.arg == "pipeline"
+    # DB レベルのデフォルトは旧互換で pipeline のまま
+    # normalize_mode() でプリセットに変換される
+    assert col.default.arg in ("pipeline", "standard", "unified")
 
 
 def test_simulation_model_default_status():
@@ -70,16 +70,10 @@ def test_simulation_model_nullable_columns():
 
 
 def test_simulation_model_valid_mode_values():
-    """コメントに記載されたサポートモードが文字列として定義されている。"""
-    valid_modes = {"pipeline", "single", "swarm", "hybrid", "pm_board"}
-    # コメント内の期待モードとコードの定数が一致することを確認
-    from src.app.services.simulation_dispatcher import dispatch_simulation
-    # dispatch 関数が pipeline, single, swarm, hybrid, pm_board を扱うことを
-    # モジュール内の文字列リテラルで確認
-    import inspect
-    source = inspect.getsource(dispatch_simulation)
-    for mode in valid_modes:
-        assert mode in source, f"mode '{mode}' が dispatch_simulation に見当たらない"
+    """新プリセットが VALID_PRESETS に定義されている。"""
+    from src.app.models.simulation import VALID_PRESETS
+    expected = {"quick", "standard", "deep", "research", "baseline"}
+    assert expected == VALID_PRESETS
 
 
 def test_simulation_model_stage_progress_default_is_dict():

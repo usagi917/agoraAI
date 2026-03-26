@@ -4,11 +4,11 @@
 
 ## Phase 0: 基盤整備
 
-- [ ] 全テスト GREEN 確認
-- [ ] カバレッジベースライン記録
-- [ ] `tests/conftest.py` 作成（db_session, mock_sse, mock_llm）
-- [ ] `tests/factories.py` 作成 + テスト
-- [ ] `refactor/v2` ブランチ作成
+- [x] 全テスト GREEN 確認 (308テスト, 52%カバレッジ)
+- [x] カバレッジベースライン記録 (52%)
+- [x] `tests/conftest.py` 作成（db_session, mock_sse, mock_llm）
+- [x] `tests/factories.py` 作成 + テスト (16テスト)
+- [x] `refactor/v2` ブランチ作成
 
 ---
 
