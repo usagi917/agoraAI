@@ -33,6 +33,8 @@ from src.app.models.social_edge import SocialEdge
 from src.app.models.society_result import SocietyResult
 from src.app.models.evaluation_result import EvaluationResult
 from src.app.models.conversation_log import ConversationLog
+from src.app.models.llm_call_log import LLMCallLog
+from src.app.models.experiment_config import ExperimentConfig
 
 
 def _import_all_models():
@@ -76,4 +78,6 @@ __all__ = [
     "SocietyResult",
     "EvaluationResult",
     "ConversationLog",
+    "LLMCallLog",
+    "ExperimentConfig",
 ]

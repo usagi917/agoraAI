@@ -10,6 +10,9 @@ from sqlalchemy.ext.asyncio import (
 )
 from src.app.database import Base
 
+# 全モデルを import して Base.metadata に登録する
+import src.app.models  # noqa: F401
+
 
 @pytest_asyncio.fixture
 async def db_session():

@@ -60,6 +60,10 @@ class Simulation(Base):
     population_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("populations.id"), nullable=True)
     pipeline_stage: Mapped[str] = mapped_column(String(20), default="pending")
     stage_progress: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    # 学術再現性
+    seed: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
