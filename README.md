@@ -6,124 +6,110 @@
 [![Node.js 20+](https://img.shields.io/badge/node-20%2B-339933.svg)](frontend/package.json)
 [![Docker Compose](https://img.shields.io/badge/docker-compose-2496ED.svg)](docker-compose.yml)
 
-> `unified` モードを既定に、プロンプトや `.txt` / `.md` / `.pdf` から社会反応、評議会議論、Decision Brief を生成する FastAPI + Vue 3 アプリです。
+調査テーマを入力すると、BDI 認知アーキテクチャを持つ AI エージェント群が **社会反応シミュレーション → 評議会議論 → 意思決定レポート** を自動生成するマルチエージェントプラットフォームです。
 
-[クイックスタート](#クイックスタート) · [主要機能](#主要機能) · [実行モード](#実行モード) · [ローカル開発](#ローカル開発) · [API](#api) · [設定](#設定)
+```mermaid
+flowchart LR
+    Input["プロンプト\nドキュメント"] --> SP
 
-## これは何か
+    subgraph Pipeline
+        SP["Society Pulse\n50〜200人の社会反応"] --> CO["Council\n代表者10人 × 3ラウンド議論"]
+        CO --> SY["Synthesis\nDecision Brief 生成"]
+    end
 
-Agent AI は、調査テーマや仮説を入力すると、社会反応の観測、構造化された評議会議論、意思決定向けの要約までを一気通貫で実行するシミュレーションアプリです。
+    SY --> Output["意思決定レポート\nシナリオ比較・合意スコア"]
+```
 
-- LaunchPad のライブ実行は `unified` 固定で、`evidence_mode: strict` を使います
-- 入力はプロンプト単体、または `.txt` / `.md` / `.pdf` の複数ファイル添付に対応します
-- 実行中は SSE で進捗を配信し、結果画面では Decision Brief、シナリオ比較、合意ヒートマップ、認知ビュー、3D グラフを確認できます
-- API からは `unified` に加えて `pipeline` / `single` / `swarm` / `hybrid` / `pm_board` / `society` / `society_first` / `meta_simulation` を呼べます
-- 起動時に `templates/ja/*.yaml` を DB に seed するので、テンプレート選択式でそのまま試せます
+## 特徴
+
+- **社会反応シミュレーション** — 人口統計ベースで生成した 50〜200 人のエージェントが初期反応を生成し、代表者を選出
+- **評議会議論** — Devil's Advocate を含む 10 人の代表者が 3 ラウンドの構造化議論を実施
+- **Decision Brief** — シナリオ比較・合意スコア・推奨アクションを含むレポートを自動生成
+- **GraphRAG** — 入力ドキュメントからナレッジグラフを構築し、議論を通じて進化
+- **BDI 認知 + Theory of Mind** — Belief-Desire-Intention サイクルと心の理論による深い推論
+- **3 層メモリ** — エピソード・意味・手続き記憶によるエージェントの長期記憶
+- **マルチ LLM** — OpenAI / Gemini / Anthropic のフォールバック付きルーティング
+- **リアルタイム UI** — SSE 進捗配信、3D 社会グラフ、KG Explorer、会話トランスクリプト
 
 ## クイックスタート
 
-フルスタックを最短で立ち上げるなら Docker Compose が一番簡単です。
-
 ```bash
-cp .env.example .env
-# .env に OPENAI_API_KEY=... を設定するとライブ実行まで有効になります
+cp .env.example .env        # OPENAI_API_KEY=... を設定
 docker compose up --build
 ```
 
-- アプリ: `http://localhost:3000`
-- FastAPI Docs: `http://localhost:8000/docs`
-- 既定の provider は `config/models.yaml` の `openai` です
+- アプリ: http://localhost:3000
+- API ドキュメント: http://localhost:8000/docs
 
-補足:
+> `OPENAI_API_KEY` が未設定でも UI は起動しますが、ライブ実行は無効になります。
 
-- `OPENAI_API_KEY` が未設定で provider が `openai` の場合、UI は起動しますがライブ実行は無効になり、`POST /simulations` は 400 を返します
-- `/sample/:id` のオフラインデモは `sample_results/*.json` があるときだけ利用できます
+## アーキテクチャ
 
-## 主要機能
+```mermaid
+flowchart TB
+    subgraph Frontend["Frontend — Vue 3 + Three.js"]
+        LP[LaunchPad] --> SIM[Live Simulation\nSSE・3Dグラフ]
+        SIM --> RES[Results\nDecision Brief・KG Explorer]
+    end
 
-### 既定フロー: `unified`
+    subgraph Backend["Backend — FastAPI"]
+        API[REST API + SSE] --> DISP[Dispatcher]
+        DISP --> PHASE[Phase Runner\nquick / standard / deep / research]
+        PHASE --> SOC[Society\n人口生成・反応収集]
+        PHASE --> COU[Council\n議論・KG進化]
+        PHASE --> SYN[Synthesis\nレポート生成]
+        SOC & COU & SYN --> COG[Cognition\nBDI・ToM・Memory]
+        SOC & COU & SYN --> GRAG[GraphRAG\nKG構築・進化]
+        SOC & COU & SYN --> LLM[LLM Client\nOpenAI / Gemini / Anthropic]
+    end
 
-| Phase | 役割 | 主な出力 |
+    subgraph Infra["Infrastructure"]
+        PG[(PostgreSQL)]
+        RD[(Redis)]
+    end
+
+    Frontend <-->|REST + SSE| API
+    Backend --> PG & RD
+```
+
+## 実行プリセット
+
+| プリセット | フェーズ構成 | 用途 |
 | --- | --- | --- |
-| `society_pulse` | 1,000 人規模の社会反応を集めて論点を要約 | 反応集計、評価、社会サマリー |
-| `council` | 名前付きの代表者 10 人で 3 ラウンド議論 | 主張、反証、統合コメント |
-| `synthesis` | ReACT ベースで意思決定向けレポートを生成 | Decision Brief、セクション別レポート、合意スコア |
+| **quick** | Society Pulse → Synthesis | 高速な概要分析 |
+| **standard** | Society Pulse → Council → Synthesis | **既定**。社会反応＋評議会議論 |
+| **deep** | Society Pulse → Multi-Perspective → Council → PM Analysis → Synthesis | PM 分析を含む深掘り |
+| **research** | Society Pulse → Issue Mining → Multi-Perspective → Intervention → Synthesis | 論点抽出＋介入シミュレーション |
+| **baseline** | 単一 LLM 分析 | ベースライン比較用 |
 
-### UI
+旧モード名（`unified`, `pipeline`, `swarm` 等）は後方互換のため上記にマッピングされます。
 
-- `/` の LaunchPad では 4 種類の質問ウィザード、テンプレート選択、自由入力、ファイルアップロード、最近の実行履歴を使えます
-- `/sim/:id` では SSE 進捗、Colony 状態、Activity Feed、意見分布、ライブ社会グラフを見られます
-- `/sim/:id/results` では Decision Brief、シナリオ比較、確率分布、合意ヒートマップ、メモリ、ToM、社会ネットワーク、KG Explorer を扱えます
-- `/populations` では 1,000 人人口の生成、一覧、fork、詳細確認ができます
+## 画面
 
-## 実行モード
-
-| Mode | 用途 |
-| --- | --- |
-| `unified` | 既定導線。`society_pulse -> council -> synthesis` の 3 フェーズで統合分析 |
-| `pipeline` | `single -> swarm -> pm_board` を順番に実行 |
-| `single` | 単一ランで世界モデル構築からレポート生成まで実行 |
-| `swarm` | 複数 Colony を並列実行してシナリオ分布と合意を集約 |
-| `hybrid` | `swarm` 系の API で Deep / Shallow Colony を混在させるモード |
-| `pm_board` | PM ペルソナ群と Chief PM で事業案をレビュー |
-| `society` | 人口生成と社会反応ダイナミクスを重視するモード |
-| `society_first` | 社会反応を先に広く観測し、Issue Colony と backtest に進むモード |
-| `meta_simulation` | 複数サイクルを回すメタオーケストレーション |
-
-LaunchPad から直接起動するのは `unified` です。その他のモードは主に API から使う想定です。
-
-## 主要画面
-
-| Route | 画面 | 役割 |
+| Route | 画面 | 内容 |
 | --- | --- | --- |
-| `/` | LaunchPad | テンプレート選択、質問ウィザード、プロンプト入力、文書アップロード、最近の実行履歴 |
-| `/sim/:id` | Live Simulation | SSE 進捗、フェーズ表示、Colony 状態、ライブ社会グラフ |
-| `/sim/:id/results` | Results | Decision Brief、レポート、比較、認知ビュー、フォローアップ |
-| `/sample/:id` | Sample Result | `sample_results/*.json` を使った任意のサンプル表示 |
-| `/populations` | Population Explorer | Society 系の人口データ確認 |
-
-レガシーの `/run/:id` や `/swarm/:id` は新ルートへリダイレクトされます。
+| `/` | LaunchPad | テンプレート選択、質問ウィザード、プロンプト入力、ファイルアップロード |
+| `/sim/:id` | Live Simulation | SSE 進捗、Colony 状態、Activity Feed、3D 社会グラフ |
+| `/sim/:id/results` | Results | Decision Brief、Findings、シナリオ比較、トランスクリプト、KG Explorer |
+| `/populations` | Populations | 人口データの生成・閲覧・fork |
 
 ## API
 
-最小の prompt-only 実行例です。`project_id` がなくてもバックエンド側で自動作成されます。
-
-1. シミュレーションを作成する
-
 ```bash
+# 1. シミュレーション作成
 curl -X POST http://localhost:8000/simulations \
   -H "Content-Type: application/json" \
-  -d '{
-    "mode": "unified",
-    "template_name": "business_analysis",
-    "execution_profile": "standard",
-    "prompt_text": "EVバッテリー市場に参入すべきか分析する",
-    "evidence_mode": "strict"
-  }'
-```
+  -d '{"mode":"standard","prompt_text":"EVバッテリー市場に参入すべきか","evidence_mode":"strict"}'
 
-2. SSE で進捗を監視する
-
-```bash
+# 2. 進捗監視 (SSE)
 curl -N http://localhost:8000/simulations/SIM_ID/stream
-```
 
-3. レポートを取得する
-
-```bash
+# 3. レポート取得
 curl http://localhost:8000/simulations/SIM_ID/report
 ```
 
-文書を添付したい場合は、先にプロジェクトを作成してからファイルをアップロードします。
-
-```bash
-curl -X POST "http://localhost:8000/projects?name=market-entry"
-
-curl -X POST "http://localhost:8000/projects/PROJECT_ID/documents" \
-  -F "file=@/absolute/path/to/evidence.md"
-```
-
-### 主要エンドポイント
+<details>
+<summary>全エンドポイント一覧</summary>
 
 ```text
 GET  /health
@@ -136,133 +122,130 @@ GET  /projects/{project_id}/documents
 
 POST /simulations
 GET  /simulations
+GET  /simulations/samples
 GET  /simulations/{sim_id}
 GET  /simulations/{sim_id}/stream
 GET  /simulations/{sim_id}/graph
 GET  /simulations/{sim_id}/graph/history
 GET  /simulations/{sim_id}/report
-GET  /simulations/{sim_id}/colonies
+GET  /simulations/{sim_id}/backtest
+POST /simulations/{sim_id}/backtest
 GET  /simulations/{sim_id}/timeline
 POST /simulations/{sim_id}/followups
-POST /simulations/{sim_id}/feedback
 POST /simulations/{sim_id}/rerun
 
 GET  /society/populations
 POST /society/populations/generate
+GET  /society/populations/{pop_id}
+POST /society/populations/{pop_id}/fork
+GET  /society/simulations/{sim_id}/activation
+GET  /society/simulations/{sim_id}/meeting
+GET  /society/simulations/{sim_id}/evaluation
+GET  /society/simulations/{sim_id}/narrative
+GET  /society/simulations/{sim_id}/demographics
+GET  /society/simulations/{sim_id}/social-graph
+GET  /society/simulations/{sim_id}/agents
+GET  /society/simulations/{sim_id}/agents/{agent_id}
+GET  /society/simulations/{sim_id}/transcript
+GET  /society/simulations/{sim_id}/conversations
+
 GET  /admin/costs
 GET  /admin/quality-metrics
 ```
 
-後方互換のために `/runs` と `/swarms` も残っていますが、新規利用は `/simulations` を推奨します。
+</details>
 
 ## ローカル開発
 
-前提:
-
-- Python 3.11+
-- `uv`
-- Node.js 20+
-- `pnpm`
-- Docker Compose
-
-依存サービスだけ起動する場合:
+前提: Python 3.11+、`uv`、Node.js 20+、`pnpm`、Docker Compose
 
 ```bash
+# 依存サービスのみ起動
 docker compose up -d postgres redis
-```
 
-バックエンド:
-
-```bash
-cd backend
-uv sync --extra dev
+# バックエンド
+cd backend && uv sync --extra dev
 uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
+
+# フロントエンド (別ターミナル)
+cd frontend && pnpm install && pnpm dev
 ```
 
-フロントエンド:
+フロントエンド開発サーバーは http://localhost:5173 で起動し、`/api` を 8000 番にプロキシします。PostgreSQL が不要な場合は `.env` の `DATABASE_URL` を SQLite に変更できます。
+
+## テスト
 
 ```bash
-cd frontend
-pnpm install
-pnpm dev
-```
-
-- フロントエンド開発サーバー: `http://localhost:5173`
-- `VITE_API_BASE_URL` を未設定のままにすると、Vite が `/api` を `http://localhost:8000` にプロキシします
-- Docker 版フロントエンドは Nginx 経由で `/api` をバックエンドへ中継します
-
-PostgreSQL を使わずに試したい場合は、`.env` の `DATABASE_URL` を SQLite の `aiosqlite` URL に切り替えられます。
-
-## テストと確認
-
-バックエンド:
-
-```bash
-cd backend
-uv run pytest
-```
-
-フロントエンド:
-
-```bash
-cd frontend
-pnpm build
-pnpm test:unit
-pnpm exec playwright install chromium
-pnpm test:e2e
+cd backend && uv run pytest                    # バックエンド
+cd frontend && pnpm build && pnpm test:unit    # フロントエンド (unit)
+pnpm exec playwright install chromium && pnpm test:e2e  # E2E
 ```
 
 ## 設定
 
-### 主な環境変数
+### 環境変数
 
 | 変数 | 用途 |
 | --- | --- |
-| `OPENAI_API_KEY` | 既定の OpenAI 構成でライブ実行を有効化 |
-| `GOOGLE_API_KEY` | `config/llm_providers.yaml` の Gemini 系 provider を使う場合に必要 |
-| `ANTHROPIC_API_KEY` | Anthropic provider を使う場合に必要 |
-| `DATABASE_URL` | 既定は PostgreSQL。SQLite (`aiosqlite`) にも切り替え可能 |
-| `LLM_MODEL` | `config/models.yaml` に明示設定がない場合のフォールバック |
-| `COGNITIVE_MODE` | `legacy` / `advanced` の切り替え |
-| `MAX_CONCURRENT_COLONIES` | Swarm 系の Colony 並列数上限 |
-| `MAX_CONCURRENT_AGENTS` | 認知エージェントの同時実行上限 |
-| `MAX_ACTIVE_AGENTS` | 認知エージェント総数の上限 |
-| `VITE_API_BASE_URL` | フロントエンドの API ベース URL を上書きする場合に使用 |
+| `OPENAI_API_KEY` | ライブ実行を有効化（既定 provider） |
+| `GOOGLE_API_KEY` | Gemini provider 使用時 |
+| `ANTHROPIC_API_KEY` | Anthropic provider 使用時 |
+| `DATABASE_URL` | DB 接続先（既定: PostgreSQL、SQLite に変更可） |
+| `REDIS_URL` | LLM キャッシュ・セッション管理 |
+| `COGNITIVE_MODE` | `legacy` / `advanced` |
 
-### 主な設定ファイル
+### 設定ファイル
 
 | ファイル | 内容 |
 | --- | --- |
-| `.env.example` | 環境変数テンプレート |
-| `config/models.yaml` | タスク別のモデルルーティングと既定 provider |
-| `config/llm_providers.yaml` | マルチ provider 設定 |
-| `config/swarm_profiles.yaml` | 実行プロファイルごとの Colony 数とラウンド数 |
-| `config/cognitive.yaml` | 認知、Memory、ToM、Game Master 設定 |
-| `config/graphrag.yaml` | GraphRAG の抽出・重複解決・コミュニティ設定 |
-| `templates/ja/*.yaml` | LaunchPad や API から使う分析テンプレート |
-| `templates/ja/pm_board/*.yaml` | PM Board 用ペルソナテンプレート |
+| `config/models.yaml` | タスク別モデルルーティング（3 階層） |
+| `config/llm_providers.yaml` | マルチ provider + フォールバック順序 |
+| `config/cognitive.yaml` | BDI、メモリ、Theory of Mind、Game Master |
+| `config/graphrag.yaml` | ナレッジグラフ抽出・コミュニティ検出 |
+| `config/perspectives.yaml` | 12 種の分析視点（adversarial 含む） |
+| `config/population_mix.yaml` | 人口統計分布・レイヤー別 LLM 割当 |
+| `config/swarm_profiles.yaml` | Colony 数・ラウンド数 |
+
+### テンプレート
+
+| ディレクトリ | 内容 |
+| --- | --- |
+| `templates/ja/` | 分析テンプレート 5 種 |
+| `templates/ja/pm_board/` | PM Board ペルソナ 4 種 |
+| `templates/ja/experts/` | 専門家テンプレート 6 種 |
 
 ## プロジェクト構成
 
 ```text
 .
-├── backend/              # FastAPI, SQLAlchemy, orchestration, tests
-├── frontend/             # Vue 3, Vite, Pinia, 3D graph UI
-├── config/               # models / providers / cognition / GraphRAG / profiles
-├── templates/ja/         # 分析テンプレートと PM Board テンプレート
-├── sample_results/       # /sample/:id 用の任意 JSON フィクスチャ
-├── data/                 # SQLite 利用時のローカルデータ
-├── experiments/          # 実験用スクリプトと検証結果
-├── plans/                # 計画メモ
-├── docker-compose.yml
-├── README.md
-└── README.en.md
+├── backend/src/app/
+│   ├── api/routes/          # FastAPI ルーター
+│   ├── models/              # SQLAlchemy モデル (34)
+│   ├── services/
+│   │   ├── phases/          # 実行フェーズ (7)
+│   │   ├── society/         # 社会シミュレーション (23)
+│   │   ├── graphrag/        # KG 抽出パイプライン (8)
+│   │   ├── cognition/       # BDI + ToM (8)
+│   │   ├── memory/          # 3 層メモリ (6)
+│   │   ├── communication/   # 議論プロトコル (4)
+│   │   └── game_master/     # 環境管理 (4)
+│   ├── llm/                 # マルチ LLM クライアント
+│   └── sse/                 # SSE マネージャ
+├── frontend/src/
+│   ├── pages/               # 6 ページ
+│   ├── components/          # 28 コンポーネント
+│   ├── composables/         # 7 コンポジション (3D グラフ等)
+│   └── stores/              # 8 Pinia ストア
+├── config/                  # YAML 設定群
+├── templates/ja/            # テンプレート群
+├── experiments/             # 実験スクリプト
+└── docker-compose.yml       # PostgreSQL, Redis, Backend, Frontend
 ```
 
 ## Contributing
 
-開発フローとツール方針は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
+[CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
 
 ## License
 
-このプロジェクトは [AGPL-3.0](LICENSE) の下で提供されています。
+[AGPL-3.0](LICENSE)

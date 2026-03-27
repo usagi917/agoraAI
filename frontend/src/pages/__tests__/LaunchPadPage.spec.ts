@@ -45,7 +45,7 @@ describe('LaunchPadPage', () => {
     apiMocks.createSimulation.mockResolvedValue({ id: 'sim-1' })
   })
 
-  it('shows simplified input section and launches unified mode with strict evidence', async () => {
+  it('shows simplified input section and launches standard mode with strict evidence', async () => {
     const wrapper = mount(LaunchPadPage, {
       global: {
         stubs: {
@@ -68,7 +68,7 @@ describe('LaunchPadPage', () => {
     expect(apiMocks.createSimulation).toHaveBeenCalledWith(
       expect.objectContaining({
         evidenceMode: 'strict',
-        mode: 'unified',
+        mode: 'standard',
       }),
     )
     expect(push).toHaveBeenCalledWith('/sim/sim-1')
