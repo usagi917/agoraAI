@@ -91,6 +91,7 @@ flowchart TB
 | `/` | LaunchPad | テンプレート選択、質問ウィザード、プロンプト入力、ファイルアップロード |
 | `/sim/:id` | Live Simulation | SSE 進捗、Colony 状態、Activity Feed、3D 社会グラフ |
 | `/sim/:id/results` | Results | Decision Brief、Findings、シナリオ比較、トランスクリプト、KG Explorer |
+| `/sample/:id` | Sample Result | サンプル結果の閲覧 |
 | `/populations` | Populations | 人口データの生成・閲覧・fork |
 
 ## API
@@ -120,9 +121,21 @@ GET  /projects/{project_id}
 POST /projects/{project_id}/documents
 GET  /projects/{project_id}/documents
 
+POST /runs
+GET  /runs
+GET  /runs/{run_id}
+GET  /runs/{run_id}/stream
+GET  /runs/{run_id}/report
+GET  /runs/{run_id}/timeline
+GET  /runs/{run_id}/events
+GET  /runs/{run_id}/graph
+POST /runs/{run_id}/followups
+POST /runs/{run_id}/rerun
+
 POST /simulations
 GET  /simulations
 GET  /simulations/samples
+GET  /simulations/samples/{sample_id}
 GET  /simulations/{sim_id}
 GET  /simulations/{sim_id}/stream
 GET  /simulations/{sim_id}/graph
@@ -192,7 +205,12 @@ pnpm exec playwright install chromium && pnpm test:e2e  # E2E
 | `ANTHROPIC_API_KEY` | Anthropic provider 使用時 |
 | `DATABASE_URL` | DB 接続先（既定: PostgreSQL、SQLite に変更可） |
 | `REDIS_URL` | LLM キャッシュ・セッション管理 |
+| `LLM_MODEL` | 既定モデル（既定: `gpt-4o`） |
 | `COGNITIVE_MODE` | `legacy` / `advanced` |
+| `MAX_ACTIVE_AGENTS` | 最大エージェント数（既定: `100`） |
+| `MAX_CONCURRENT_AGENTS` | 同時実行エージェント数（既定: `30`） |
+| `MAX_CONCURRENT_COLONIES` | 同時実行 Colony 数（既定: `5`） |
+| `LLM_CACHE_TTL` | LLM キャッシュ TTL 秒（既定: `3600`） |
 
 ### 設定ファイル
 
@@ -219,21 +237,23 @@ pnpm exec playwright install chromium && pnpm test:e2e  # E2E
 ```text
 .
 ├── backend/src/app/
-│   ├── api/routes/          # FastAPI ルーター
+│   ├── api/routes/          # FastAPI ルーター (7)
 │   ├── models/              # SQLAlchemy モデル (34)
 │   ├── services/
 │   │   ├── phases/          # 実行フェーズ (7)
-│   │   ├── society/         # 社会シミュレーション (23)
+│   │   ├── society/         # 社会シミュレーション (21)
 │   │   ├── graphrag/        # KG 抽出パイプライン (8)
 │   │   ├── cognition/       # BDI + ToM (8)
 │   │   ├── memory/          # 3 層メモリ (6)
 │   │   ├── communication/   # 議論プロトコル (4)
-│   │   └── game_master/     # 環境管理 (4)
-│   ├── llm/                 # マルチ LLM クライアント
+│   │   ├── game_master/     # 環境管理 (4)
+│   │   ├── scheduling/      # エージェントスケジューリング (1)
+│   │   └── *.py             # オーケストレーター・ユーティリティ (28)
+│   ├── llm/                 # マルチ LLM クライアント + アダプタ
 │   └── sse/                 # SSE マネージャ
 ├── frontend/src/
 │   ├── pages/               # 6 ページ
-│   ├── components/          # 28 コンポーネント
+│   ├── components/          # 19 コンポーネント
 │   ├── composables/         # 7 コンポジション (3D グラフ等)
 │   └── stores/              # 8 Pinia ストア
 ├── config/                  # YAML 設定群

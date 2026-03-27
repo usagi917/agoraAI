@@ -91,6 +91,7 @@ Legacy mode names (`unified`, `pipeline`, `swarm`, etc.) map to the presets abov
 | `/` | LaunchPad | Template selection, question wizard, prompt input, file upload |
 | `/sim/:id` | Live Simulation | SSE progress, Colony status, activity feed, 3D social graph |
 | `/sim/:id/results` | Results | Decision Brief, findings, scenario comparison, transcript, KG explorer |
+| `/sample/:id` | Sample Result | Browse sample results |
 | `/populations` | Populations | Generate, browse, and fork population data |
 
 ## API
@@ -120,9 +121,21 @@ GET  /projects/{project_id}
 POST /projects/{project_id}/documents
 GET  /projects/{project_id}/documents
 
+POST /runs
+GET  /runs
+GET  /runs/{run_id}
+GET  /runs/{run_id}/stream
+GET  /runs/{run_id}/report
+GET  /runs/{run_id}/timeline
+GET  /runs/{run_id}/events
+GET  /runs/{run_id}/graph
+POST /runs/{run_id}/followups
+POST /runs/{run_id}/rerun
+
 POST /simulations
 GET  /simulations
 GET  /simulations/samples
+GET  /simulations/samples/{sample_id}
 GET  /simulations/{sim_id}
 GET  /simulations/{sim_id}/stream
 GET  /simulations/{sim_id}/graph
@@ -192,7 +205,12 @@ pnpm exec playwright install chromium && pnpm test:e2e  # E2E
 | `ANTHROPIC_API_KEY` | For Anthropic provider |
 | `DATABASE_URL` | DB connection (default: PostgreSQL, switchable to SQLite) |
 | `REDIS_URL` | LLM cache & session management |
+| `LLM_MODEL` | Default model (default: `gpt-4o`) |
 | `COGNITIVE_MODE` | `legacy` / `advanced` |
+| `MAX_ACTIVE_AGENTS` | Max agent count (default: `100`) |
+| `MAX_CONCURRENT_AGENTS` | Concurrent agent count (default: `30`) |
+| `MAX_CONCURRENT_COLONIES` | Concurrent colony count (default: `5`) |
+| `LLM_CACHE_TTL` | LLM cache TTL in seconds (default: `3600`) |
 
 ### Config Files
 
@@ -219,21 +237,23 @@ pnpm exec playwright install chromium && pnpm test:e2e  # E2E
 ```text
 .
 ├── backend/src/app/
-│   ├── api/routes/          # FastAPI routers
+│   ├── api/routes/          # FastAPI routers (7)
 │   ├── models/              # SQLAlchemy models (34)
 │   ├── services/
 │   │   ├── phases/          # Execution phases (7)
-│   │   ├── society/         # Social simulation (23)
+│   │   ├── society/         # Social simulation (21)
 │   │   ├── graphrag/        # KG extraction pipeline (8)
 │   │   ├── cognition/       # BDI + ToM (8)
 │   │   ├── memory/          # 3-layer memory (6)
 │   │   ├── communication/   # Debate protocol (4)
-│   │   └── game_master/     # Environment management (4)
-│   ├── llm/                 # Multi-LLM client
+│   │   ├── game_master/     # Environment management (4)
+│   │   ├── scheduling/      # Agent scheduling (1)
+│   │   └── *.py             # Orchestrators & utilities (28)
+│   ├── llm/                 # Multi-LLM client + adapters
 │   └── sse/                 # SSE manager
 ├── frontend/src/
 │   ├── pages/               # 6 pages
-│   ├── components/          # 28 components
+│   ├── components/          # 19 components
 │   ├── composables/         # 7 composables (3D graph, etc.)
 │   └── stores/              # 8 Pinia stores
 ├── config/                  # YAML configs
