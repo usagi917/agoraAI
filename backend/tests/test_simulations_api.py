@@ -727,12 +727,13 @@ async def test_create_simulation_accepts_meta_mode(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["mode"] == "meta_simulation"
+    # meta_simulation は normalize_mode() で research に正規化される
+    assert payload["mode"] == "research"
 
     async with session_factory() as session:
         simulation = await session.get(Simulation, payload["id"])
         assert simulation is not None
-        assert simulation.mode == "meta_simulation"
+        assert simulation.mode == "research"
 
 
 @pytest.mark.asyncio
@@ -757,12 +758,13 @@ async def test_create_simulation_accepts_unified_mode(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["mode"] == "unified"
+    # unified は normalize_mode() で standard に正規化される
+    assert payload["mode"] == "standard"
 
     async with session_factory() as session:
         simulation = await session.get(Simulation, payload["id"])
         assert simulation is not None
-        assert simulation.mode == "unified"
+        assert simulation.mode == "standard"
 
 
 async def _seed_unified_simulation(session_factory) -> dict[str, str]:

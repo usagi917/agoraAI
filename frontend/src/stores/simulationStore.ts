@@ -86,20 +86,30 @@ export const useSimulationStore = defineStore('simulation', () => {
     colonies.value.filter(c => c.status === 'completed').length,
   )
 
-  const isPipelineMode = computed(() => mode.value === 'pipeline')
-  const isMetaMode = computed(() => mode.value === 'meta_simulation')
-  const isUnifiedMode = computed(() => mode.value === 'unified')
-  const isSocietyMode = computed(() => mode.value === 'society' || mode.value === 'society_first' || mode.value === 'unified')
+  const PRESET_MODES = new Set(['quick', 'standard', 'deep', 'research', 'baseline'])
+  const isPresetMode = computed(() => PRESET_MODES.has(mode.value))
+  const isPipelineMode = computed(() => mode.value === 'pipeline' || mode.value === 'deep')
+  const isMetaMode = computed(() => mode.value === 'meta_simulation' || mode.value === 'research')
+  const isUnifiedMode = computed(() => mode.value === 'unified' || mode.value === 'standard' || mode.value === 'quick')
+  const isSocietyMode = computed(() =>
+    mode.value === 'society' || mode.value === 'society_first' || mode.value === 'unified'
+    || mode.value === 'standard' || mode.value === 'quick' || mode.value === 'deep' || mode.value === 'research',
+  )
 
   const progress = computed(() => {
     if (status.value === 'completed') return 1
 
-    if (isUnifiedMode.value) {
+    // 新プリセットモード: unifiedPhase で進捗を追跡
+    if (isPresetMode.value || isUnifiedMode.value) {
       const phaseWeights: Record<string, number> = {
         idle: 0,
-        society_pulse: 0,
+        society_pulse: 0.1,
         council: 0.4,
-        synthesis: 0.8,
+        multi_perspective: 0.5,
+        issue_mining: 0.3,
+        pm_analysis: 0.7,
+        intervention: 0.6,
+        synthesis: 0.85,
         completed: 1.0,
       }
       return phaseWeights[unifiedPhase.value] ?? 0
@@ -392,6 +402,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     totalRounds,
     colonies,
     completedColonies,
+    isPresetMode,
     isPipelineMode,
     isMetaMode,
     isUnifiedMode,

@@ -30,17 +30,9 @@ import {
 } from '../api/client'
 import { useForceGraph } from '../composables/useForceGraph'
 import DecisionBriefComponent from '../components/DecisionBrief.vue'
-import TemporalSlider from '../components/TemporalSlider.vue'
 import ProbabilityChart from '../components/ProbabilityChart.vue'
 import ScenarioCompare from '../components/ScenarioCompare.vue'
 import AgreementHeatmap from '../components/AgreementHeatmap.vue'
-import AgentMindView from '../components/AgentMindView.vue'
-import MemoryStreamViewer from '../components/MemoryStreamViewer.vue'
-import EvaluationDashboard from '../components/EvaluationDashboard.vue'
-import ToMMapVisualization from '../components/ToMMapVisualization.vue'
-import SocialNetworkDynamics from '../components/SocialNetworkDynamics.vue'
-import KnowledgeGraphExplorer from '../components/KnowledgeGraphExplorer.vue'
-import { useCognitiveStore } from '../stores/cognitiveStore'
 import {
   getDefaultResultsSecondaryTab,
   getResultsPrimaryView,
@@ -69,10 +61,7 @@ const colonies = ref<ColonyResponse[]>([])
 const transcriptEntries = ref<TranscriptEntry[]>([])
 const transcriptLoading = ref(false)
 const transcriptPhaseFilter = ref<string>('')
-const cognitiveStore = useCognitiveStore()
 const activeSecondaryTab = ref<ResultsSecondaryTab>('society')
-const isCognitiveMode = computed(() => cognitiveStore.cognitiveMode === 'advanced')
-const cognitiveSubTab = ref<'mind' | 'memory' | 'evaluation' | 'tom' | 'social' | 'kg'>('mind')
 let playbackFrame: number | null = null
 let playbackStartedAt: number | null = null
 
@@ -81,7 +70,6 @@ const {
   startGraphTransition,
   updateGraphTransition,
   finishGraphTransition,
-  graphError,
 } = useForceGraph(graphContainer)
 
 // Follow-up
@@ -91,13 +79,15 @@ const isFollowupLoading = ref(false)
 const copyState = ref<'idle' | 'success' | 'error'>('idle')
 let copyStateTimer: number | null = null
 
-const isPipelineMode = computed(() => sim.value?.mode === 'pipeline')
-const isMetaMode = computed(() => sim.value?.mode === 'meta_simulation')
+const PRESET_MODES = new Set(['quick', 'standard', 'deep', 'research', 'baseline'])
+const isPresetMode = computed(() => PRESET_MODES.has(sim.value?.mode ?? ''))
+const isPipelineMode = computed(() => sim.value?.mode === 'pipeline' || sim.value?.mode === 'deep')
+const isMetaMode = computed(() => sim.value?.mode === 'meta_simulation' || sim.value?.mode === 'research')
 const societyFirstData = computed<SocietyFirstReportResponse | null>(() => (
   report.value?.type === 'society_first' ? report.value as SocietyFirstReportResponse : null
 ))
 const unifiedReport = computed<UnifiedReportResponse | null>(() => (
-  report.value?.type === 'unified' ? report.value as UnifiedReportResponse : null
+  (report.value?.type === 'unified' || isPresetMode.value) ? report.value as UnifiedReportResponse : null
 ))
 const unifiedCouncil = computed(() => unifiedReport.value?.council || null)
 const metaReport = computed<MetaSimulationReportResponse | null>(() => (
@@ -274,58 +264,12 @@ const reportText = computed(() => {
   if (typeof report.value?.content === 'string') return report.value.content
   return ''
 })
-const reportJson = computed(() => (
-  report.value ? JSON.stringify(report.value, null, 2) : ''
-))
 const agreementMatrix = computed(() => {
   if (!report.value?.agreement_matrix) return null
   return report.value.agreement_matrix as { colony_ids: string[]; matrix: number[][] }
 })
 const canCopyReport = computed(() => reportText.value.trim().length > 0)
 const snapshotByRound = computed(() => new Map(graphSnapshots.value.map((snapshot) => [snapshot.round, snapshot])))
-const displayedGraphData = computed(() => {
-  const activeRound = transitionTargetRound.value !== null && transitionProgress.value >= 0.5
-    ? transitionTargetRound.value
-    : currentRound.value
-  return snapshotByRound.value.get(activeRound) ?? fallbackGraph.value
-})
-const kgEntities = computed(() => (
-  (displayedGraphData.value?.nodes || []).map((node: any) => ({
-    id: String(node.id),
-    label: node.label || String(node.id),
-    type: node.type || 'unknown',
-    description: node.group ? `Group: ${node.group}` : `${node.type || 'unknown'} entity`,
-    community: node.group || undefined,
-    aliases: [],
-  }))
-))
-const kgRelations = computed(() => (
-  (displayedGraphData.value?.edges || []).map((edge: any) => ({
-    source: String(edge.source),
-    target: String(edge.target),
-    type: edge.relation_type || 'related_to',
-    confidence: Math.max(0, Math.min(Number(edge.weight ?? 0.5), 1)),
-  }))
-))
-const kgCommunities = computed(() => {
-  const groups = new Map<string, string[]>()
-  for (const node of displayedGraphData.value?.nodes || []) {
-    if (!node.group) continue
-    const members = groups.get(node.group) || []
-    members.push(node.label || String(node.id))
-    groups.set(node.group, members)
-  }
-  return Array.from(groups.entries()).map(([community, members]) => ({
-    community,
-    summary: `${members.length} entities`,
-    members,
-  }))
-})
-const sliderDisplayValue = computed(() => {
-  if (transitionTargetRound.value === null) return currentRound.value
-  return currentRound.value + transitionProgress.value
-})
-
 function backtestVerdictLabel(verdict?: string | null) {
   if (verdict === 'hit') return 'Hit'
   if (verdict === 'partial_hit') return 'Partial'
@@ -351,9 +295,7 @@ const layoutContext = computed(() => ({
   hasDecisionBrief: hasDecisionBrief.value,
   hasPmBoard: hasPmBoard.value,
   hasSociety: !!societyResult.value,
-  hasGraph: showGraphViews.value,
   hasEvidence: reportEvidenceRefs.value.length > 0,
-  hasRaw: !!report.value,
   hasTranscript: sim.value?.mode === 'unified' || sim.value?.mode === 'society' || sim.value?.mode === 'society_first',
 }))
 const primaryViewKind = computed<ResultsPrimaryView>(() => getResultsPrimaryView(layoutContext.value))
@@ -471,16 +413,6 @@ function beginRoundTransition(fromRound: number) {
   playbackFrame = requestAnimationFrame(stepPlayback)
 }
 
-function startPlayback() {
-  if (graphSnapshots.value.length <= 1) return
-
-  const startRound = currentRound.value >= totalRounds.value ? 0 : currentRound.value
-  if (!showRound(startRound)) return
-
-  isPlaying.value = true
-  queueNextTransition(startRound)
-}
-
 onMounted(async () => {
   try {
     sim.value = await getSimulation(simId)
@@ -542,24 +474,6 @@ onUnmounted(() => {
     window.clearTimeout(copyStateTimer)
   }
 })
-
-function onRoundChange(round: number) {
-  stopPlaybackLoop()
-  isPlaying.value = false
-  showRound(round)
-}
-
-function onPlayingChange(playing: boolean) {
-  if (playing) {
-    startPlayback()
-    return
-  }
-
-  const snapRound = transitionTargetRound.value !== null && transitionProgress.value >= 0.5
-    ? transitionTargetRound.value
-    : currentRound.value
-  stopPlayback(snapRound)
-}
 
 async function handleFollowup() {
   if (!followupQuestion.value.trim() || isFollowupLoading.value) return
@@ -945,55 +859,6 @@ function renderMarkdown(content: string): string {
             </div>
           </div>
 
-          <div v-if="activeSecondaryTab === 'graph' && showGraphViews" class="side-card">
-            <div class="side-header">
-              <h3>3D Graph</h3>
-            </div>
-            <div ref="graphContainer" class="graph-snapshot-large"></div>
-            <div v-if="graphError" class="graph-error-note">{{ graphError }}</div>
-            <TemporalSlider
-              v-if="graphSnapshots.length > 1"
-              :total-rounds="totalRounds"
-              :model-value="currentRound"
-              :display-value="sliderDisplayValue"
-              :playing="isPlaying"
-              @update:model-value="onRoundChange"
-              @update:playing="onPlayingChange"
-            />
-
-            <div v-if="isCognitiveMode" class="cognitive-subtabs">
-              <button
-                v-for="sub in [
-                  { key: 'mind', label: '認知状態' },
-                  { key: 'memory', label: '記憶' },
-                  { key: 'evaluation', label: '評価' },
-                  { key: 'tom', label: 'ToM' },
-                  { key: 'social', label: '社会NW' },
-                  { key: 'kg', label: 'KG探索' },
-                ]"
-                :key="sub.key"
-                class="subtab-btn"
-                :class="{ active: cognitiveSubTab === sub.key }"
-                @click="cognitiveSubTab = sub.key as any"
-              >
-                {{ sub.label }}
-              </button>
-            </div>
-            <div v-if="isCognitiveMode" class="cognitive-content">
-              <AgentMindView v-if="cognitiveSubTab === 'mind'" />
-              <MemoryStreamViewer v-if="cognitiveSubTab === 'memory'" />
-              <EvaluationDashboard v-if="cognitiveSubTab === 'evaluation'" />
-              <ToMMapVisualization v-if="cognitiveSubTab === 'tom'" />
-              <SocialNetworkDynamics v-if="cognitiveSubTab === 'social'" />
-              <KnowledgeGraphExplorer
-                v-if="cognitiveSubTab === 'kg'"
-                :entities="kgEntities"
-                :relations="kgRelations"
-                :communities="kgCommunities"
-              />
-            </div>
-          </div>
-
           <div v-if="activeSecondaryTab === 'society' && societyResult" class="side-card">
             <div class="side-header">
               <h3>Society Summary</h3>
@@ -1196,20 +1061,6 @@ function renderMarkdown(content: string): string {
               </div>
             </div>
             <div v-else class="empty-state">根拠ソースはありません。</div>
-          </div>
-
-          <div v-if="activeSecondaryTab === 'raw'" class="side-card">
-            <div class="side-header">
-              <h3>Raw Data</h3>
-            </div>
-            <div class="society-section">
-              <h4 class="society-section-title">Report JSON</h4>
-              <pre class="society-raw-text">{{ reportJson }}</pre>
-            </div>
-            <div v-if="societyResult" class="society-section">
-              <h4 class="society-section-title">Society Result</h4>
-              <pre class="society-raw-text">{{ JSON.stringify(societyResult, null, 2) }}</pre>
-            </div>
           </div>
 
           <div class="side-card chat-panel">

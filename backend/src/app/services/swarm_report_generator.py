@@ -64,7 +64,7 @@ def _summarize_colony(colony_result: dict, config) -> str:
 
 async def generate_swarm_integrated_report(
     session: AsyncSession,
-    swarm_id: str,
+    simulation_id: str,
     prompt_text: str,
     colony_results: list[dict],
     colony_configs: list,
@@ -131,7 +131,7 @@ async def generate_swarm_integrated_report(
     )
 
     section_name = "統合レポート"
-    await sse_manager.publish(swarm_id, "report_started", {
+    await sse_manager.publish(simulation_id, "report_started", {
         "message": "統合レポート生成を開始します",
         "colony_count": len(colony_results),
         "scenario_count": len(scenarios),
@@ -139,7 +139,7 @@ async def generate_swarm_integrated_report(
     })
     await update_report_progress(
         session,
-        swarm_id=swarm_id,
+        simulation_id=simulation_id,
         status="running",
         scope="swarm",
         sections=[section_name],
@@ -156,11 +156,11 @@ async def generate_swarm_integrated_report(
             system_prompt=SWARM_REPORT_SYSTEM,
             user_prompt=user_prompt,
         )
-        await record_usage(session, swarm_id, "swarm_integrated_report", usage)
+        await record_usage(session, simulation_id, "swarm_integrated_report", usage)
 
         report_text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
 
-        await sse_manager.publish(swarm_id, "report_section_done", {
+        await sse_manager.publish(simulation_id, "report_section_done", {
             "section": section_name,
             "display_name": section_name,
             "key": "integrated_report",
@@ -168,7 +168,7 @@ async def generate_swarm_integrated_report(
         })
         await update_report_progress(
             session,
-            swarm_id=swarm_id,
+            simulation_id=simulation_id,
             status="running",
             completed_sections=[section_name],
         )
@@ -177,7 +177,7 @@ async def generate_swarm_integrated_report(
     except Exception as exc:
         await update_report_progress(
             session,
-            swarm_id=swarm_id,
+            simulation_id=simulation_id,
             status="failed",
             last_error=str(exc)[:200],
         )

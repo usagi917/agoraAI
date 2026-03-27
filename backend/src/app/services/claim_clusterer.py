@@ -116,7 +116,7 @@ async def _llm_merge_clusters(clusters: list[dict]) -> list[list[int]]:
 
 async def cluster_claims(
     session: AsyncSession,
-    swarm_id: str,
+    simulation_id: str,
     claims: list[dict],
     distance_threshold: float = EMBEDDING_DISTANCE_THRESHOLD,
 ) -> list[dict]:
@@ -130,10 +130,10 @@ async def cluster_claims(
         embeddings = await _get_embeddings(texts)
     except Exception as e:
         logger.warning(f"Embedding API failed, falling back to simple clustering: {e}")
-        return await _fallback_clustering(session, swarm_id, claims)
+        return await _fallback_clustering(session, simulation_id, claims)
 
     if not embeddings:
-        return await _fallback_clustering(session, swarm_id, claims)
+        return await _fallback_clustering(session, simulation_id, claims)
 
     X = np.array(embeddings)
     sim_matrix = cosine_similarity(X)
@@ -223,7 +223,7 @@ async def cluster_claims(
 
         cluster_record = ClaimCluster(
             id=str(uuid.uuid4()),
-            swarm_id=swarm_id,
+            simulation_id=simulation_id,
             cluster_index=group_idx,
             representative_text=rep_text,
             claim_count=total_count,
@@ -247,14 +247,14 @@ async def cluster_claims(
     await session.flush()
     logger.info(
         f"Phase 2+3: {len(phase1_clusters)} clusters → {len(final_clusters)} final scenarios "
-        f"for swarm {swarm_id}"
+        f"for swarm {simulation_id}"
     )
     return final_clusters
 
 
 async def _fallback_clustering(
     session: AsyncSession,
-    swarm_id: str,
+    simulation_id: str,
     claims: list[dict],
 ) -> list[dict]:
     """Embedding API が使えない場合のフォールバック: LLM のみでクラスタリング。"""
@@ -298,7 +298,7 @@ async def _fallback_clustering(
 
                     cluster_record = ClaimCluster(
                         id=str(uuid.uuid4()),
-                        swarm_id=swarm_id,
+                        simulation_id=simulation_id,
                         cluster_index=gi,
                         representative_text=group.get("description", group_claims[0]["claim_text"]),
                         claim_count=len(group_claims),
@@ -327,7 +327,7 @@ async def _fallback_clustering(
         cluster_id = str(uuid.uuid4())
         cluster_record = ClaimCluster(
             id=cluster_id,
-            swarm_id=swarm_id,
+            simulation_id=simulation_id,
             cluster_index=i,
             representative_text=claim["claim_text"],
             claim_count=1,

@@ -34,6 +34,7 @@ class OpenAIAdapter(LLMAdapter):
         user_prompt: str,
         temperature: float = 0.5,
         max_tokens: int = 1024,
+        seed: int | None = None,
     ) -> tuple[str, dict]:
         url = f"{self.api_base}/chat/completions"
 
@@ -63,6 +64,9 @@ class OpenAIAdapter(LLMAdapter):
                 )
         else:
             body["temperature"] = temperature
+
+        if seed is not None:
+            body["seed"] = seed
 
         headers = {
             "Content-Type": "application/json",

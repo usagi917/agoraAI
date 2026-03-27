@@ -85,6 +85,21 @@ async def _apply_sqlite_compatibility_migrations(conn: AsyncConnection) -> None:
             await conn.execute(
                 text("ALTER TABLE simulations ADD COLUMN population_id VARCHAR(36)")
             )
+        if "seed" not in sim_columns:
+            await conn.execute(
+                text("ALTER TABLE simulations ADD COLUMN seed INTEGER")
+            )
+
+
+async def _get_postgres_columns(conn: AsyncConnection, table_name: str) -> set[str]:
+    result = await conn.execute(
+        text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = :table"
+        ),
+        {"table": table_name},
+    )
+    return {row[0] for row in result.fetchall()}
 
 
 async def _apply_postgres_compatibility_migrations(conn: AsyncConnection) -> None:
@@ -94,6 +109,21 @@ async def _apply_postgres_compatibility_migrations(conn: AsyncConnection) -> Non
     )
 
     existing_tables = await _get_existing_tables(conn)
+
+    # --- simulations: スキーマ整合性 ---
+    if "simulations" in existing_tables:
+        sim_columns = await _get_postgres_columns(conn, "simulations")
+        if "seed" not in sim_columns:
+            await conn.execute(
+                text("ALTER TABLE simulations ADD COLUMN seed INTEGER")
+            )
+        # 旧カラム（モデルから削除済み）の NOT NULL 制約を解除
+        for legacy_col in ("colony_count", "deep_colony_count", "swarm_id"):
+            if legacy_col in sim_columns:
+                await conn.execute(
+                    text(f"ALTER TABLE simulations ALTER COLUMN {legacy_col} DROP NOT NULL")
+                )
+
     if "conversation_logs" not in existing_tables:
         return
 

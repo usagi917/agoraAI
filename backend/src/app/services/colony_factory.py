@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ColonyConfig:
     colony_id: str
-    swarm_id: str
+    simulation_id: str
     colony_index: int
     perspective_id: str
     perspective_label: str
@@ -47,7 +47,7 @@ def _load_swarm_profiles() -> dict:
 
 
 def generate_colony_configs(
-    swarm_id: str,
+    simulation_id: str,
     profile_name: str,
     diversity_mode: str = "balanced",
 ) -> list[ColonyConfig]:
@@ -75,7 +75,7 @@ def generate_colony_configs(
     for i, (perspective, temp) in enumerate(zip(selected, temperatures)):
         config = ColonyConfig(
             colony_id=str(uuid.uuid4()),
-            swarm_id=swarm_id,
+            simulation_id=simulation_id,
             colony_index=i,
             perspective_id=perspective["id"],
             perspective_label=perspective["label"],
@@ -89,7 +89,7 @@ def generate_colony_configs(
         configs.append(config)
 
     logger.info(
-        f"Generated {len(configs)} colony configs for swarm {swarm_id} "
+        f"Generated {len(configs)} colony configs for swarm {simulation_id} "
         f"(profile={profile_name}, diversity={diversity_mode})"
     )
     return configs

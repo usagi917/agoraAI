@@ -232,14 +232,16 @@ async def run_simulation(
                 graphrag_config = settings.load_graphrag_config()
 
                 if graphrag_config.get("enabled", False) and document_text.strip():
-                    from src.app.services.graphrag.pipeline import GraphRAGPipeline
+                    from src.app.services.graphrag.adapter import create_adapter
 
                     await sse_manager.publish(run_id, "graphrag_started", {
                         "message": "GraphRAGパイプラインを開始します",
                     })
 
-                    pipeline = GraphRAGPipeline()
-                    knowledge_graph = await pipeline.run(session, run_id, document_text)
+                    adapter = create_adapter()
+                    knowledge_graph = await adapter.build_knowledge_graph(
+                        session, run_id, document_text,
+                    )
                     await session.commit()
 
                     await sse_manager.publish(run_id, "graphrag_completed", {

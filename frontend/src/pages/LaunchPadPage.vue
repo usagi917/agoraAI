@@ -19,7 +19,15 @@ const router = useRouter()
 const templates = ref<TemplateResponse[]>([])
 const selectedTemplate = ref('')
 const selectedProfile = ref('standard')
-// mode is always 'unified' — no selector needed
+const selectedPreset = ref('standard')
+
+const presets = [
+  { id: 'quick', label: 'Quick', desc: '社会反応 → レポート', time: '約1分', phases: 2 },
+  { id: 'standard', label: 'Standard', desc: '社会反応 → 評議会 → レポート', time: '約3分', phases: 3 },
+  { id: 'deep', label: 'Deep', desc: '全フェーズ投入・最高品質', time: '約8分', phases: 5 },
+  { id: 'research', label: 'Research', desc: 'イシュー深掘り＋介入テスト', time: '約10分', phases: 5 },
+  { id: 'baseline', label: 'Baseline', desc: '単一LLM・学術比較用', time: '約30秒', phases: 1 },
+]
 const promptText = ref('')
 const files = ref<File[]>([])
 const isLoading = ref(false)
@@ -128,9 +136,9 @@ function buildPromptFromWizard(): string {
   return parts.join('\n')
 }
 
-// Advanced mode/profile options kept for programmatic use only
-const _modes = ['unified', 'pipeline', 'meta_simulation', 'society_first', 'society', 'single', 'swarm'] as const
-void _modes
+// Legacy mode list (backward compat — no longer exposed in UI)
+const _legacyModes = ['unified', 'pipeline', 'meta_simulation', 'society_first', 'society', 'single', 'swarm'] as const
+void _legacyModes
 
 const canLaunchLive = computed(() => {
   if (bootstrapError.value) return false
@@ -181,14 +189,11 @@ async function handleLaunch() {
       }
     }
 
-    // Always use unified mode
-    const launchMode = 'unified'
-
     const sim = await createSimulation({
       projectId,
       templateName: selectedTemplate.value,
       executionProfile: selectedProfile.value,
-      mode: launchMode,
+      mode: selectedPreset.value,
       promptText: finalPrompt,
       evidenceMode: 'strict',
     })
@@ -374,6 +379,25 @@ function getPipelineStageLabel(stage: string) {
         />
       </details>
 
+      <!-- Preset Selection -->
+      <div class="preset-section">
+        <h4 class="preset-title">分析モード</h4>
+        <div class="preset-cards">
+          <button
+            v-for="p in presets"
+            :key="p.id"
+            class="preset-card"
+            :class="{ selected: selectedPreset === p.id }"
+            :data-testid="`preset-${p.id}`"
+            @click="selectedPreset = p.id"
+          >
+            <span class="preset-label">{{ p.label }}</span>
+            <span class="preset-desc">{{ p.desc }}</span>
+            <span class="preset-meta">{{ p.time }} · {{ p.phases }} phase{{ p.phases > 1 ? 's' : '' }}</span>
+          </button>
+        </div>
+      </div>
+
       <!-- Launch Button (inline) -->
       <button
         data-testid="launch-button"
@@ -386,7 +410,8 @@ function getPipelineStageLabel(stage: string) {
         {{ isLoading ? '起動中...' : '分析を開始' }}
       </button>
       <p class="launch-note">
-        約3分 — 1,000人の社会反応 → 評議会議論 → Decision Brief
+        {{ presets.find(p => p.id === selectedPreset)?.time ?? '約3分' }}
+        — {{ presets.find(p => p.id === selectedPreset)?.desc ?? '' }}
       </p>
     </section>
 
@@ -835,6 +860,61 @@ function getPipelineStageLabel(stage: string) {
 }
 
 .file-drop-summary:hover { color: var(--text-secondary); }
+
+/* Preset Selection */
+.preset-section { margin-top: 1.5rem; }
+.preset-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.75rem;
+}
+.preset-cards {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+.preset-card {
+  flex: 1;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  background: var(--card-bg, #18181b);
+  border: 1px solid var(--border-subtle, #27272a);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  text-align: left;
+}
+.preset-card:hover {
+  border-color: var(--text-muted, #71717a);
+}
+.preset-card.selected {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 1px #6366f1, 0 2px 8px rgba(99, 102, 241, 0.2);
+}
+.preset-label {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--text-primary, #fafafa);
+}
+.preset-card.selected .preset-label { color: #a5b4fc; }
+.preset-desc {
+  font-size: 0.65rem;
+  color: var(--text-muted, #a1a1aa);
+  line-height: 1.3;
+}
+.preset-meta {
+  font-size: 0.6rem;
+  color: var(--text-muted, #71717a);
+  margin-top: auto;
+}
 
 /* Launch */
 .launch-button {
