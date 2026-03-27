@@ -1,11 +1,8 @@
 """Meeting Layer: 代表者+専門家による多ラウンド構造化議論"""
 
-import asyncio
 import logging
-import uuid
 from typing import Any
 
-from src.app.config import settings
 from src.app.llm.multi_client import multi_llm_client
 from src.app.models.conversation_log import ConversationLog
 from src.app.services.conversation_log_store import persist_conversation_logs

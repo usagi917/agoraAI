@@ -1,7 +1,6 @@
 """会話ハイライト抽出: 議論の中から最もインパクトのある瞬間を特定する"""
 
 import logging
-from typing import Any
 
 from src.app.llm.multi_client import multi_llm_client
 

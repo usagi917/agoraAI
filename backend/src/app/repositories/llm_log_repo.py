@@ -1,6 +1,6 @@
 """LLM Call Log リポジトリ"""
 
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.models.llm_call_log import LLMCallLog

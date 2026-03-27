@@ -1,7 +1,6 @@
 """GameMaster: ラウンド実行のメインループ（Concordia方式）"""
 
 import asyncio
-import json
 import logging
 import uuid
 

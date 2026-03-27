@@ -1,7 +1,6 @@
 """グラフ投影: world_state → graph_state + graph_diff（決定的処理、LLM 不要）"""
 
 import uuid
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 

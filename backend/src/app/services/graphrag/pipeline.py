@@ -9,7 +9,6 @@ from src.app.config import settings
 from src.app.models.kg_node import KGNode
 from src.app.models.kg_edge import KGEdge
 from src.app.models.community import Community
-from src.app.services.cost_tracker import record_usage
 from src.app.services.graphrag.chunker import SemanticChunker
 from src.app.services.graphrag.entity_extractor import EntityExtractor
 from src.app.services.graphrag.relation_extractor import RelationExtractor

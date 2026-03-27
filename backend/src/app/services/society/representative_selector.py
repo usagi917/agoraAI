@@ -3,7 +3,6 @@
 import logging
 import uuid
 from collections import defaultdict
-from pathlib import Path
 
 import yaml
 

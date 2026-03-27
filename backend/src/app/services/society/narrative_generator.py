@@ -4,7 +4,6 @@ Meeting の synthesis + activation responses + demographic analysis から
 """
 
 import logging
-from collections import Counter
 
 logger = logging.getLogger(__name__)
 

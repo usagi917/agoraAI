@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.config import settings
 from src.app.models.agent_state import AgentState
 from src.app.services.memory.agent_memory import AgentMemory
-from src.app.services.cognition.bdi_engine import BDIReasoner, BeliefBase, Desire, Intention
+from src.app.services.cognition.bdi_engine import BDIReasoner, Intention
 from src.app.services.cognition.perception import PerceptionEngine
 from src.app.services.cognition.deliberation import DeliberationEngine
 from src.app.services.cognition.action_executor import ActionExecutor

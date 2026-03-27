@@ -1,6 +1,5 @@
 """Society モード API エンドポイント"""
 
-import asyncio
 import logging
 import uuid
 

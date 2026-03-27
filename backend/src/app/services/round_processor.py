@@ -13,8 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.llm.client import llm_client
 from src.app.llm.prompts import ROUND_PROCESS_SYSTEM, ROUND_PROCESS_USER
 from src.app.llm.validator import validate_round_result
-from src.app.models.entity import Entity
-from src.app.models.relation import Relation
 from src.app.models.run import Run
 from src.app.models.timeline_event import TimelineEvent
 from src.app.models.world_state import WorldState

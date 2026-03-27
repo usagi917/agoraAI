@@ -1,6 +1,5 @@
 """応答効率化: 3層戦略でLLM呼び出しを最小化"""
 
-import json
 import logging
 import random
 from dataclasses import dataclass

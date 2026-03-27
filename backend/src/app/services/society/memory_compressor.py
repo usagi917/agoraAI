@@ -1,7 +1,6 @@
 """記憶圧縮: シミュレーション後に agent_profile.memory_summary を更新"""
 
 import logging
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 

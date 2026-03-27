@@ -1,7 +1,6 @@
 """KG Enricher: ナレッジグラフのエンティティ・関係を使ってエージェントプロフィールを強化する"""
 
 import logging
-from typing import Any
 
 logger = logging.getLogger(__name__)
 

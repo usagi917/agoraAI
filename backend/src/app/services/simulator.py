@@ -4,7 +4,6 @@ SingleRunSimulator: Colony 単位の独立実行をサポート
 run_simulation: 後方互換の単体実行エントリーポイント
 """
 
-import json
 import logging
 from datetime import datetime, timezone
 

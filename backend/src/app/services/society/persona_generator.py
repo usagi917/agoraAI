@@ -1,7 +1,6 @@
 """ペルソナナラティブ生成: エージェントにテーマ連動の物語を付与する"""
 
 import logging
-from typing import Any
 
 from src.app.llm.multi_client import multi_llm_client
 

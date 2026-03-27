@@ -1,7 +1,6 @@
 """人口生成サービス: 統計的サンプリングで住民プロフィールを生成（LLM不要）"""
 
 import logging
-import math
 import random
 import uuid
 from typing import Any

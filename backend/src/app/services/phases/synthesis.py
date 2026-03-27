@@ -11,7 +11,6 @@ from src.app.models.simulation import Simulation
 from src.app.services.phases.society_pulse import SocietyPulseResult
 from src.app.services.phases.council_deliberation import CouncilResult
 from src.app.services.decision_briefing import render_decision_brief_markdown
-from src.app.services.meta_score import compute_society_score
 from src.app.services.react_reporter import react_generate_decision_brief
 from src.app.services.society.conversation_highlights import extract_conversation_highlights
 from src.app.sse.manager import sse_manager
