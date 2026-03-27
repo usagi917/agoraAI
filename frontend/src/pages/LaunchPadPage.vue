@@ -361,9 +361,13 @@ function getPipelineStageLabel(stage: string) {
 
       <!-- Free Prompt (visible when no template, or as additional input) -->
       <div v-if="!activeTemplate" class="free-prompt">
+        <label class="free-prompt-label" for="launchpad-prompt">分析プロンプト</label>
         <textarea
+          id="launchpad-prompt"
+          name="launchpad-prompt"
           v-model="promptText"
           class="prompt-textarea"
+          data-testid="launchpad-prompt"
           placeholder="もし〜なら？ — 分析したい仮説やシナリオを入力してください"
           rows="3"
         />
@@ -373,7 +377,6 @@ function getPipelineStageLabel(stage: string) {
       <details class="file-drop-details">
         <summary class="file-drop-summary">ファイルを添付（任意）</summary>
         <InputPanel
-          v-model="promptText"
           :files="files"
           @update:files="files = $event"
         />
@@ -824,6 +827,14 @@ function getPipelineStageLabel(stage: string) {
 /* Free Prompt */
 .free-prompt {
   margin-top: 0.75rem;
+}
+
+.free-prompt-label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 0.4rem;
 }
 
 .prompt-textarea {

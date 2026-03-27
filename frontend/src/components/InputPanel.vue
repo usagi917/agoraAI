@@ -2,12 +2,10 @@
 import { ref } from 'vue'
 
 const props = defineProps<{
-  modelValue: string
   files: File[]
 }>()
 
 const emit = defineEmits<{
-  'update:modelValue': [value: string]
   'update:files': [files: File[]]
 }>()
 
@@ -30,21 +28,6 @@ function handleFileSelect(event: Event) {
 
 <template>
   <div class="input-panel">
-    <!-- Prompt textarea -->
-    <div class="prompt-section">
-      <label class="input-label" for="simulation-prompt">分析プロンプト</label>
-      <textarea
-        id="simulation-prompt"
-        name="simulation-prompt"
-        class="prompt-textarea"
-        :value="modelValue"
-        @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
-        placeholder="もし〜なら？ — 分析したい仮説やシナリオを入力してください。ファイルなしでも起動可能です。"
-        rows="4"
-      ></textarea>
-    </div>
-
-    <!-- File drop zone -->
     <div class="file-section">
       <div class="input-label">
         データ入力
@@ -114,30 +97,6 @@ function handleFileSelect(event: Event) {
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
   border: 1px solid var(--border);
-}
-
-.prompt-textarea {
-  width: 100%;
-  padding: 0.85rem 1rem;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-  font-size: 0.88rem;
-  line-height: 1.6;
-  resize: vertical;
-  outline: none;
-  transition: border-color 0.2s;
-}
-
-.prompt-textarea:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-glow);
-}
-
-.prompt-textarea::placeholder {
-  color: var(--text-muted);
 }
 
 .upload-area {
@@ -214,10 +173,6 @@ function handleFileSelect(event: Event) {
 @media (max-width: 640px) {
   .input-panel {
     gap: 1rem;
-  }
-
-  .prompt-textarea {
-    min-height: 9rem;
   }
 
   .upload-label {
