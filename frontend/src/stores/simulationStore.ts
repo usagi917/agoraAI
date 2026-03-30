@@ -373,10 +373,12 @@ export const useSimulationStore = defineStore('simulation', () => {
     cluster_count: number
     clusters?: Array<{ label: number; size: number; centroid: number[] }>
     echo_chamber?: { homophily_index: number; polarization_index: number }
+    opinionDistribution?: Record<string, number>
   }) {
     propagationCompleted.value = true
     if (data.clusters) propagationClusters.value = data.clusters
     if (data.echo_chamber) echoChamberMetrics.value = data.echo_chamber
+    if (data.opinionDistribution) opinionDistribution.value = data.opinionDistribution
   }
 
   function setEvaluationMetrics(metrics: Record<string, number>) {

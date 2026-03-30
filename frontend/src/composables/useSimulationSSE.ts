@@ -675,6 +675,7 @@ export function useSimulationSSE(simulationId: string) {
           cluster_count: payload.cluster_count,
           clusters: payload.clusters,
           echo_chamber: payload.echo_chamber,
+          opinionDistribution: payload.aggregation?.stance_distribution,
         })
         // Update graph node colors with propagated stances
         if (payload.stance_updates?.length) {

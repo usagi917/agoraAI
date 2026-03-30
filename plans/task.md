@@ -1,4 +1,11 @@
-# Independence Re-Aggregation - Remaining Work
+# Independence Re-Aggregation - Completed
+
+## Status
+
+- Completed on 2026-03-30
+- original `stance` ベースの second-pass re-aggregation は実装済み
+- pre/post aggregation は orchestrator, DB, API, SSE, frontend store まで反映済み
+- backend / frontend の関連テストは実行済み
 
 ## Phase 0: Semantics Freeze
 
@@ -30,13 +37,19 @@
 - [x] SSE payload で pre/post のどちらを送るかを明確化 (`network_propagation_completed` に `aggregation` と `independence_weighting_applied` を追加)
 - [x] DB 保存時に pre/post aggregation の比較ができる形にする (`independence_re_aggregation` セクションを propagation record に追加)
 - [x] `independence_weighting_applied` と `effective_sample_size` が最終集計に残ることを確認
+- [x] activation record に `aggregation_pre_independence` / `responses_summary_pre_independence` を保存
+- [x] simulation metadata に pre/post aggregation と比較サマリを保存
+- [x] propagation API で `aggregation_pre_independence` / `aggregation_post_independence` / 比較サマリを取得可能にする
+- [x] propagation 完了 SSE で frontend の `opinionDistribution` を post-aggregation に更新する
 
 ## Phase 4: Verification
 
 - [x] synthetic case で多数派密クラスターのシェアが下がることを確認
 - [x] `effective_sample_size_post < effective_sample_size_pre` を確認
 - [x] narrative / provenance が補正後 aggregation を読んでも壊れないことを確認
-- [x] 全テスト実行手順を確認し、実行可能環境で回す (58 tests passed)
+- [x] 全テスト実行手順を確認し、実行可能環境で回す
+- [x] `uv run --directory backend pytest tests/test_society_orchestrator.py tests/test_activation_layer.py tests/test_independence_weights.py tests/test_society_api.py` が通る
+- [x] `pnpm test:unit -- src/stores/__tests__/simulationStore.spec.ts` が通る
 
 ## Explicitly Out of Scope
 

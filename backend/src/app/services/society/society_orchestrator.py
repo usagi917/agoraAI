@@ -55,6 +55,59 @@ from src.app.sse.manager import sse_manager
 logger = logging.getLogger(__name__)
 
 
+def _build_activation_phase_data(
+    activation_result: dict,
+    representative_count: int,
+    individual_responses: list[dict],
+) -> dict:
+    """活性化レイヤーの永続化 payload を構築する.
+
+    propagation 後に independence 再集計が走った場合は、
+    pre/post aggregation を同じ activation レコードに保持する。
+    """
+    phase_data = {
+        "aggregation": activation_result["aggregation"],
+        "representative_count": representative_count,
+        "responses_summary": {
+            "total": len(activation_result["responses"]),
+            "stance_distribution": activation_result["aggregation"].get(
+                "stance_distribution", {}
+            ),
+        },
+        "responses": individual_responses,
+    }
+
+    aggregation_pre = activation_result.get("aggregation_pre_independence")
+    if aggregation_pre is not None:
+        phase_data["aggregation_pre_independence"] = aggregation_pre
+        phase_data["responses_summary_pre_independence"] = {
+            "total": len(activation_result["responses"]),
+            "stance_distribution": aggregation_pre.get("stance_distribution", {}),
+        }
+
+    return phase_data
+
+
+def _build_independence_reaggregation_summary(activation_result: dict) -> dict:
+    """pre/post independence 再集計の比較サマリを返す."""
+    aggregation_post = activation_result["aggregation"]
+    aggregation_pre = activation_result.get("aggregation_pre_independence")
+
+    return {
+        "applied": aggregation_pre is not None,
+        "effective_sample_size_pre": (
+            aggregation_pre.get("effective_sample_size")
+            if aggregation_pre is not None else None
+        ),
+        "effective_sample_size_post": aggregation_post.get("effective_sample_size"),
+        "stance_distribution_pre": (
+            aggregation_pre.get("stance_distribution")
+            if aggregation_pre is not None else None
+        ),
+        "stance_distribution_post": aggregation_post.get("stance_distribution"),
+    }
+
+
 def _apply_independence_re_aggregation(
     activation_result: dict,
     clusters: list[dict],
@@ -288,15 +341,11 @@ async def run_society(simulation_id: str) -> None:
                 simulation_id=simulation_id,
                 population_id=pop_id,
                 layer="activation",
-                phase_data={
-                    "aggregation": activation_result["aggregation"],
-                    "representative_count": len(activation_result["representatives"]),
-                    "responses_summary": {
-                        "total": len(activation_result["responses"]),
-                        "stance_distribution": activation_result["aggregation"]["stance_distribution"],
-                    },
-                    "responses": individual_responses,
-                },
+                phase_data=_build_activation_phase_data(
+                    activation_result=activation_result,
+                    representative_count=len(activation_result["representatives"]),
+                    individual_responses=individual_responses,
+                ),
                 usage=activation_result["usage"],
             )
             session.add(activation_record)
@@ -386,6 +435,11 @@ async def run_society(simulation_id: str) -> None:
                     activation_result, cluster_dicts, edges,
                     selected_agent_ids, selected_agents,
                 )
+                activation_record.phase_data = _build_activation_phase_data(
+                    activation_result=activation_result,
+                    representative_count=len(activation_result["representatives"]),
+                    individual_responses=individual_responses,
+                )
 
                 # Prediction Market (with independence-weighted bets)
                 outcomes = list(activation_result["aggregation"]["stance_distribution"].keys())
@@ -428,15 +482,13 @@ async def run_society(simulation_id: str) -> None:
                         "prediction_market": prediction_market.get_prices() if prediction_market else {},
                         "phase_transitions": emergence_tracker.detect_phase_transitions(),
                         "tipping_points": emergence_tracker.detect_tipping_points(),
-                        "independence_re_aggregation": {
-                            "applied": "aggregation_pre_independence" in activation_result,
-                            "effective_sample_size_pre": activation_result.get(
-                                "aggregation_pre_independence", {}
-                            ).get("effective_sample_size"),
-                            "effective_sample_size_post": activation_result["aggregation"].get(
-                                "effective_sample_size"
-                            ),
-                        },
+                        "aggregation_pre_independence": activation_result.get(
+                            "aggregation_pre_independence"
+                        ),
+                        "aggregation_post_independence": activation_result["aggregation"],
+                        "independence_re_aggregation": _build_independence_reaggregation_summary(
+                            activation_result
+                        ),
                     },
                     usage={},
                 )
@@ -461,10 +513,20 @@ async def run_society(simulation_id: str) -> None:
                     "converged": propagation_result.converged,
                     "total_timesteps": propagation_result.total_timesteps,
                     "cluster_count": len(propagation_result.clusters),
+                    "clusters": [
+                        {"label": c.label, "size": c.size, "centroid": c.centroid}
+                        for c in propagation_result.clusters
+                    ],
                     "echo_chamber": propagation_result.metrics.get("echo_chamber", {}),
                     "stance_updates": stance_updates,
+                    "aggregation_pre_independence": activation_result.get(
+                        "aggregation_pre_independence"
+                    ),
                     "independence_weighting_applied": activation_result["aggregation"].get(
                         "independence_weighting_applied", False
+                    ),
+                    "independence_re_aggregation": _build_independence_reaggregation_summary(
+                        activation_result
                     ),
                     "aggregation": activation_result["aggregation"],
                 })
@@ -754,7 +816,13 @@ async def run_society(simulation_id: str) -> None:
                     "population_id": pop_id,
                     "population_count": len(agents),
                     "selected_count": len(selected_agents),
+                    "aggregation_pre_independence": activation_result.get(
+                        "aggregation_pre_independence"
+                    ),
                     "aggregation": activation_result["aggregation"],
+                    "independence_re_aggregation": _build_independence_reaggregation_summary(
+                        activation_result
+                    ),
                     "evaluation": eval_data,
                     "meeting": meeting_report,
                     "usage": total_usage,
@@ -765,7 +833,13 @@ async def run_society(simulation_id: str) -> None:
 
             await sse_manager.publish(simulation_id, "society_completed", {
                 "simulation_id": simulation_id,
+                "aggregation_pre_independence": activation_result.get(
+                    "aggregation_pre_independence"
+                ),
                 "aggregation": activation_result["aggregation"],
+                "independence_re_aggregation": _build_independence_reaggregation_summary(
+                    activation_result
+                ),
                 "evaluation": eval_data,
                 "meeting_available": True,
                 "usage": total_usage,

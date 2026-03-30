@@ -353,6 +353,116 @@ class TestObservabilityPrePostAggregation:
         # 同じスタンスキーを持つ
         assert set(pre["stance_distribution"].keys()) == set(post["stance_distribution"].keys())
 
+    @pytest.mark.asyncio
+    async def test_activation_phase_payload_persists_pre_and_post_aggregations(self):
+        """activation 保存 payload に pre/post aggregation が両方載ること."""
+        from src.app.services.society.population_generator import generate_population
+        from src.app.services.society.activation_layer import (
+            _aggregate_opinions,
+            _parse_activation_response,
+        )
+        from src.app.services.society.society_orchestrator import (
+            _apply_independence_re_aggregation,
+            _build_activation_phase_data,
+        )
+
+        agents = await generate_population("test-pop", count=30, seed=42)
+        agent_ids = [a["id"] for a in agents]
+        responses = [
+            _parse_activation_response({
+                "stance": "賛成" if i < 20 else "反対",
+                "confidence": 0.8,
+                "reason": f"理由{i}",
+                "concern": "",
+                "priority": "",
+            })
+            for i in range(30)
+        ]
+
+        activation_result = {
+            "responses": responses,
+            "aggregation": _aggregate_opinions(responses, agents=agents),
+        }
+        individual_responses = [
+            {
+                "agent_id": agent["id"],
+                "agent_index": agent.get("agent_index", 0),
+                "stance": resp["stance"],
+                "confidence": resp["confidence"],
+                "reason": resp["reason"],
+                "concern": resp["concern"],
+                "priority": resp["priority"],
+            }
+            for agent, resp in zip(agents, responses)
+        ]
+
+        clusters = [{"member_ids": agent_ids[:20], "size": 20}]
+        edges = [
+            {"agent_id": agent_ids[i], "target_id": agent_ids[j], "strength": 0.9}
+            for i in range(20) for j in range(i + 1, 20)
+        ]
+
+        _apply_independence_re_aggregation(
+            activation_result, clusters, edges, agent_ids, agents,
+        )
+        phase_data = _build_activation_phase_data(
+            activation_result=activation_result,
+            representative_count=8,
+            individual_responses=individual_responses,
+        )
+
+        assert phase_data["aggregation"] == activation_result["aggregation"]
+        assert phase_data["aggregation_pre_independence"] == activation_result["aggregation_pre_independence"]
+        assert phase_data["responses_summary"]["stance_distribution"] == activation_result["aggregation"]["stance_distribution"]
+        assert phase_data["responses_summary_pre_independence"]["stance_distribution"] == activation_result["aggregation_pre_independence"]["stance_distribution"]
+
+    @pytest.mark.asyncio
+    async def test_reaggregation_summary_contains_pre_post_comparison_metrics(self):
+        """propagation 保存用 summary が pre/post 分布と n_eff を持つこと."""
+        from src.app.services.society.population_generator import generate_population
+        from src.app.services.society.activation_layer import (
+            _aggregate_opinions,
+            _parse_activation_response,
+        )
+        from src.app.services.society.society_orchestrator import (
+            _apply_independence_re_aggregation,
+            _build_independence_reaggregation_summary,
+        )
+
+        agents = await generate_population("test-pop", count=30, seed=42)
+        agent_ids = [a["id"] for a in agents]
+        responses = [
+            _parse_activation_response({
+                "stance": "賛成" if i < 20 else "反対",
+                "confidence": 0.8,
+                "reason": f"理由{i}",
+                "concern": "",
+                "priority": "",
+            })
+            for i in range(30)
+        ]
+
+        activation_result = {
+            "responses": responses,
+            "aggregation": _aggregate_opinions(responses, agents=agents),
+        }
+        clusters = [{"member_ids": agent_ids[:20], "size": 20}]
+        edges = [
+            {"agent_id": agent_ids[i], "target_id": agent_ids[j], "strength": 0.9}
+            for i in range(20) for j in range(i + 1, 20)
+        ]
+
+        _apply_independence_re_aggregation(
+            activation_result, clusters, edges, agent_ids, agents,
+        )
+        summary = _build_independence_reaggregation_summary(activation_result)
+
+        assert summary["applied"] is True
+        assert summary["effective_sample_size_pre"] == activation_result["aggregation_pre_independence"]["effective_sample_size"]
+        assert summary["effective_sample_size_post"] == activation_result["aggregation"]["effective_sample_size"]
+        assert summary["stance_distribution_pre"] == activation_result["aggregation_pre_independence"]["stance_distribution"]
+        assert summary["stance_distribution_post"] == activation_result["aggregation"]["stance_distribution"]
+
 
 class TestVerificationPhase:
     """Phase 4: narrative / provenance が補正後 aggregation でも壊れないことを確認."""

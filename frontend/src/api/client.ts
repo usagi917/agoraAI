@@ -849,6 +849,15 @@ export interface PropagationData {
   prediction_market: Record<string, number>
   phase_transitions: Array<{ timestep: number; type: string }>
   tipping_points: Array<{ timestep: number; cascade_ratio: number }>
+  aggregation_pre_independence?: Record<string, any> | null
+  aggregation_post_independence?: Record<string, any>
+  independence_re_aggregation?: {
+    applied: boolean
+    effective_sample_size_pre?: number | null
+    effective_sample_size_post?: number | null
+    stance_distribution_pre?: Record<string, number> | null
+    stance_distribution_post?: Record<string, number> | null
+  }
 }
 
 export async function getPropagation(simId: string): Promise<{ phase_data: PropagationData | null }> {
