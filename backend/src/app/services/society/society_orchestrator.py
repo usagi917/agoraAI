@@ -46,11 +46,66 @@ from src.app.services.society.network_propagation import (
 )
 from src.app.services.society.stigmergy_service import StigmergyBoard
 from src.app.services.society.prediction_market import PredictionMarket
+from src.app.services.society.statistical_inference import compute_independence_weights
+from src.app.services.society.activation_layer import _aggregate_opinions
 from src.app.services.society.emergence_tracker import EmergenceTracker
 from src.app.services.society.output_validator import explain_activation_meeting_gap
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
+
+
+def _apply_independence_re_aggregation(
+    activation_result: dict,
+    clusters: list[dict],
+    edges: list[dict],
+    agent_ids: list[str],
+    agents: list[dict],
+) -> dict[str, float]:
+    """independence weights を計算し、activation_result を second-pass で再集計する.
+
+    - 重みが計算でき、かつ非自明（全員 1.0 でない）な場合のみ再集計を実行。
+    - 再集計した場合は activation_result["aggregation_pre_independence"] に元の集計を保存し、
+      activation_result["aggregation"] を補正後に差し替える。
+    - 再集計しなかった場合は activation_result を変更しない。
+
+    Returns:
+        計算された independence_weights (agent_id → weight)。空 dict の場合は計算不可。
+    """
+    if not clusters or not agent_ids:
+        return {}
+
+    try:
+        independence_weights = compute_independence_weights(clusters, edges, agent_ids)
+    except Exception as exc:
+        logger.warning("Independence weight computation failed: %s", exc)
+        return {}
+
+    # 全員ほぼ 1.0 なら再集計不要
+    if all(abs(w - 1.0) < 1e-6 for w in independence_weights.values()):
+        return independence_weights
+
+    # Phase A の集計を退避
+    aggregation_pre = activation_result["aggregation"]
+
+    # Phase B: independence-weighted re-aggregation (original stance を使用)
+    try:
+        re_aggregation = _aggregate_opinions(
+            activation_result["responses"],
+            agents=agents,
+            independence_weights=independence_weights,
+        )
+        activation_result["aggregation_pre_independence"] = aggregation_pre
+        activation_result["aggregation"] = re_aggregation
+        logger.info(
+            "Independence-weighted re-aggregation completed: n_eff=%.1f (pre=%.1f)",
+            re_aggregation.get("effective_sample_size", 0),
+            aggregation_pre.get("effective_sample_size", 0),
+        )
+    except Exception as exc:
+        logger.warning("Independence-weighted re-aggregation failed: %s", exc)
+
+    return independence_weights
 
 
 async def _get_or_create_population(
@@ -322,15 +377,26 @@ async def run_society(simulation_id: str) -> None:
                                     intensity=resp.get("confidence", 0.5),
                                 )
 
-                # Prediction Market
+                # Compute independence weights and re-aggregate
+                cluster_dicts = [
+                    {"member_ids": c.member_ids, "size": c.size}
+                    for c in propagation_result.clusters
+                ]
+                independence_weights = _apply_independence_re_aggregation(
+                    activation_result, cluster_dicts, edges,
+                    selected_agent_ids, selected_agents,
+                )
+
+                # Prediction Market (with independence-weighted bets)
                 outcomes = list(activation_result["aggregation"]["stance_distribution"].keys())
                 if outcomes:
                     prediction_market = PredictionMarket(outcomes=outcomes)
                     for agent, resp in zip(selected_agents, activation_result["responses"]):
                         stance = resp.get("stance", "中立")
                         confidence = resp.get("confidence", 0.5)
+                        ind_w = independence_weights.get(agent["id"], 1.0)
                         if stance in outcomes:
-                            prediction_market.submit_bet(agent["id"], stance, confidence)
+                            prediction_market.submit_bet(agent["id"], stance, confidence, weight=ind_w)
 
                 # Emergence tracking from propagation history
                 for ts_record in propagation_result.timestep_history:
@@ -362,6 +428,15 @@ async def run_society(simulation_id: str) -> None:
                         "prediction_market": prediction_market.get_prices() if prediction_market else {},
                         "phase_transitions": emergence_tracker.detect_phase_transitions(),
                         "tipping_points": emergence_tracker.detect_tipping_points(),
+                        "independence_re_aggregation": {
+                            "applied": "aggregation_pre_independence" in activation_result,
+                            "effective_sample_size_pre": activation_result.get(
+                                "aggregation_pre_independence", {}
+                            ).get("effective_sample_size"),
+                            "effective_sample_size_post": activation_result["aggregation"].get(
+                                "effective_sample_size"
+                            ),
+                        },
                     },
                     usage={},
                 )
@@ -388,6 +463,10 @@ async def run_society(simulation_id: str) -> None:
                     "cluster_count": len(propagation_result.clusters),
                     "echo_chamber": propagation_result.metrics.get("echo_chamber", {}),
                     "stance_updates": stance_updates,
+                    "independence_weighting_applied": activation_result["aggregation"].get(
+                        "independence_weighting_applied", False
+                    ),
+                    "aggregation": activation_result["aggregation"],
                 })
 
                 logger.info(

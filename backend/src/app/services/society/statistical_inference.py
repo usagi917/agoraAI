@@ -253,6 +253,106 @@ def compute_poststratification_weights(
     return weights
 
 
+def compute_independence_weights(
+    clusters: list[dict],
+    edges: list[dict],
+    agent_ids: list[str],
+) -> dict[str, float]:
+    """クラスター構造に基づく独立性補正重みを計算する.
+
+    密に繋がったクラスター内のエージェントは社会的影響で意見が相関しているため、
+    独立した意見としてカウントすると過剰評価になる。
+    本関数はクラスターサイズと内部エッジ強度に基づき割引重みを算出する。
+
+    Formula (agent i in cluster C_k):
+        raw_weight_i = 1 / sqrt(cluster_size_k * avg_internal_edge_strength_k)
+        singleton or no internal edges → raw_weight = 1.0
+        正規化: mean(weights) = 1.0
+
+    Args:
+        clusters: クラスター辞書のリスト。各要素は 'member_ids' (list[str]) と
+                  'size' (int) を持つ。
+        edges: エッジ辞書のリスト。各要素は 'agent_id', 'target_id', 'strength' を持つ。
+        agent_ids: 全エージェント ID のリスト。
+
+    Returns:
+        agent_id → independence_weight の辞書 (float > 0, mean ≈ 1.0)。
+
+    Raises:
+        ValueError: agent_ids が空のとき。
+    """
+    if not agent_ids:
+        raise ValueError("agent_ids must not be empty")
+
+    n = len(agent_ids)
+
+    # Build agent → cluster mapping
+    agent_to_cluster: dict[str, int] = {}
+    for ci, cluster in enumerate(clusters):
+        for mid in cluster.get("member_ids", []):
+            agent_to_cluster[mid] = ci
+
+    # Build set of members per cluster for fast lookup
+    cluster_member_sets: list[set[str]] = [
+        set(c.get("member_ids", [])) for c in clusters
+    ]
+
+    # Compute average internal edge strength per cluster
+    cluster_edge_sums: dict[int, float] = defaultdict(float)
+    cluster_edge_counts: dict[int, int] = defaultdict(int)
+
+    for edge in edges:
+        src = edge.get("agent_id", "")
+        tgt = edge.get("target_id", "")
+        strength = edge.get("strength", 0.0)
+
+        src_ci = agent_to_cluster.get(src)
+        tgt_ci = agent_to_cluster.get(tgt)
+
+        # Both endpoints must be in the same cluster
+        if src_ci is not None and src_ci == tgt_ci:
+            cluster_edge_sums[src_ci] += strength
+            cluster_edge_counts[src_ci] += 1
+
+    # Compute raw weight per cluster
+    cluster_raw_weights: dict[int, float] = {}
+    for ci, cluster in enumerate(clusters):
+        size = cluster.get("size", len(cluster.get("member_ids", [])))
+        if size <= 1:
+            cluster_raw_weights[ci] = 1.0
+            continue
+
+        edge_count = cluster_edge_counts.get(ci, 0)
+        if edge_count == 0:
+            cluster_raw_weights[ci] = 1.0
+            continue
+
+        avg_strength = cluster_edge_sums[ci] / edge_count
+        if avg_strength <= 0:
+            cluster_raw_weights[ci] = 1.0
+            continue
+
+        cluster_raw_weights[ci] = 1.0 / math.sqrt(size * avg_strength)
+
+    # Assign raw weights to each agent
+    raw_weights: dict[str, float] = {}
+    for aid in agent_ids:
+        ci = agent_to_cluster.get(aid)
+        if ci is not None and ci in cluster_raw_weights:
+            raw_weights[aid] = cluster_raw_weights[ci]
+        else:
+            raw_weights[aid] = 1.0
+
+    # Normalize so mean = 1.0
+    total_raw = sum(raw_weights.values())
+    mean_raw = total_raw / n
+
+    if mean_raw > 0:
+        return {aid: w / mean_raw for aid, w in raw_weights.items()}
+    else:
+        return {aid: 1.0 for aid in agent_ids}
+
+
 def load_target_marginals() -> dict[str, dict[str, float]]:
     """日本の人口統計に基づくターゲット周辺分布を返す.
 

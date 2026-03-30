@@ -33,13 +33,13 @@ class PredictionMarket:
         self._quantities: dict[str, float] = {o: 0.0 for o in outcomes}
         self._positions: list[MarketPosition] = []
 
-    def submit_bet(self, agent_id: str, outcome: str, confidence: float) -> None:
-        """Agent bets confidence on an outcome, increasing its quantity."""
+    def submit_bet(self, agent_id: str, outcome: str, confidence: float, weight: float = 1.0) -> None:
+        """Agent bets confidence on an outcome, scaled by independence weight."""
         if outcome not in self._quantities:
             return
         self._positions.append(MarketPosition(agent_id, outcome, confidence))
-        # Scale bet by confidence (higher confidence → more shares)
-        self._quantities[outcome] += confidence
+        # Scale bet by confidence * weight (lower weight for clustered agents)
+        self._quantities[outcome] += confidence * weight
 
     def get_prices(self) -> dict[str, float]:
         """Compute LMSR prices (softmax over quantities/b)."""

@@ -140,7 +140,11 @@ def _parse_activation_response(result: dict | str) -> dict:
     }
 
 
-def _aggregate_opinions(responses: list[dict], agents: list[dict] | None = None) -> dict:
+def _aggregate_opinions(
+    responses: list[dict],
+    agents: list[dict] | None = None,
+    independence_weights: dict[str, float] | None = None,
+) -> dict:
     """意見分布を集計する。_failed レスポンスは除外。
 
     Args:
@@ -148,6 +152,8 @@ def _aggregate_opinions(responses: list[dict], agents: list[dict] | None = None)
         agents: エージェントの辞書リスト。渡された場合は統計的推論（事後層化・
                 ブートストラップCI・実効標本数）を実行する。None の場合は
                 従来互換の処理のみ行う。
+        independence_weights: エージェントID→独立性重みの辞書。渡された場合は
+                人口統計重みと乗算して最終重みとする。None の場合は従来互換。
 
     Returns:
         集計結果の辞書。agents が渡された場合は以下のキーが追加される:
@@ -157,6 +163,7 @@ def _aggregate_opinions(responses: list[dict], agents: list[dict] | None = None)
         - effective_sample_size: 実効標本サイズ (Kish 1965)
         - design_effect: n / n_eff
         - weighting_applied: True（ウェイト付けが実行された場合）
+        - independence_weighting_applied: True（独立性重みが適用された場合）
         - low_sample_warning: n_eff < 30 の場合 True
     """
     total_submitted = len(responses)
@@ -233,6 +240,15 @@ def _aggregate_opinions(responses: list[dict], agents: list[dict] | None = None)
             weights = [1.0] * len(valid_responses)
             weighting_applied = False
 
+        # 独立性重みを乗算（クラスター相関の割引）
+        independence_weighting_applied = False
+        if independence_weights is not None:
+            for i, ag in enumerate(valid_agents_subset):
+                agent_id = ag.get("id", "")
+                ind_w = independence_weights.get(agent_id, 1.0)
+                weights[i] = weights[i] * ind_w
+            independence_weighting_applied = True
+
         # 実効標本サイズ
         try:
             n_eff = effective_sample_size(weights)
@@ -272,6 +288,7 @@ def _aggregate_opinions(responses: list[dict], agents: list[dict] | None = None)
             "effective_sample_size": round(n_eff, 2),
             "design_effect": round(design_effect, 4),
             "weighting_applied": weighting_applied,
+            "independence_weighting_applied": independence_weighting_applied,
             "low_sample_warning": n_eff < 30,
         })
 

@@ -282,3 +282,108 @@ class TestBuildActivationPromptGrounding:
             dummy_agent, "賃金政策", grounding_facts=dummy_grounding_facts
         )
         assert "厚生労働省" in system_prompt
+
+
+# ---------------------------------------------------------------------------
+# Independence-weighted aggregation
+# ---------------------------------------------------------------------------
+
+
+class TestAggregateOpinionsWithIndependenceWeights:
+    """独立性重み付き集計のテスト."""
+
+    def _make_agents(self, n: int) -> list[dict]:
+        regions = ["関東", "関西", "中部", "東北", "九州"]
+        genders = ["male", "female"]
+        age_brackets = ["18-29", "30-49", "50-69", "70+"]
+        return [
+            {
+                "id": f"agent-{i}",
+                "demographics": {
+                    "age": 35,
+                    "gender": genders[i % len(genders)],
+                    "region": regions[i % len(regions)],
+                    "age_bracket": age_brackets[i % len(age_brackets)],
+                },
+            }
+            for i in range(n)
+        ]
+
+    def _make_responses(self, stances: list[str]) -> list[dict]:
+        return [
+            {"stance": s, "confidence": 0.8, "concern": "コスト", "priority": "効率"}
+            for s in stances
+        ]
+
+    def test_independence_weights_none_falls_back(self):
+        """independence_weights=None → 従来と同じ挙動."""
+        agents = self._make_agents(10)
+        responses = self._make_responses(["賛成"] * 5 + ["反対"] * 5)
+
+        agg_without = _aggregate_opinions(responses, agents=agents, independence_weights=None)
+        agg_default = _aggregate_opinions(responses, agents=agents)
+
+        assert agg_without["stance_distribution"] == agg_default["stance_distribution"]
+
+    def test_independence_weights_shift_distribution(self):
+        """多数派クラスターに低い独立性重み → 分布が少数派側にシフト."""
+        agents = self._make_agents(10)
+        # agent 0-7: 賛成 (多数派), agent 8-9: 反対 (少数派)
+        responses = self._make_responses(["賛成"] * 8 + ["反対"] * 2)
+
+        # 多数派クラスター (agent 0-7) を大幅に割り引く
+        independence_weights = {
+            f"agent-{i}": 0.3 for i in range(8)
+        }
+        independence_weights.update({
+            f"agent-{i}": 1.0 for i in range(8, 10)
+        })
+
+        agg_plain = _aggregate_opinions(responses, agents=agents)
+        agg_weighted = _aggregate_opinions(
+            responses, agents=agents, independence_weights=independence_weights,
+        )
+
+        # 独立性重みなし: 賛成 80%
+        assert agg_plain["stance_distribution"]["賛成"] > 0.7
+
+        # 独立性重みあり: 賛成の割合が下がる
+        assert agg_weighted["stance_distribution"]["賛成"] < agg_plain["stance_distribution"]["賛成"]
+
+    def test_independence_weights_reduce_effective_sample_size(self):
+        """独立性重みの分散が大きい → n_eff が小さくなる."""
+        agents = self._make_agents(20)
+        responses = self._make_responses(["賛成"] * 10 + ["反対"] * 10)
+
+        agg_no_ind = _aggregate_opinions(responses, agents=agents)
+
+        # 不均一な独立性重み
+        independence_weights = {
+            f"agent-{i}": (0.3 if i < 10 else 2.0) for i in range(20)
+        }
+        agg_with_ind = _aggregate_opinions(
+            responses, agents=agents, independence_weights=independence_weights,
+        )
+
+        # 重みの分散が大きい → n_eff が小さい
+        assert agg_with_ind["effective_sample_size"] < agg_no_ind["effective_sample_size"]
+
+    def test_aggregation_result_includes_independence_metadata(self):
+        """independence_weights を渡すと結果に independence_weighting_applied が含まれる."""
+        agents = self._make_agents(5)
+        responses = self._make_responses(["賛成"] * 5)
+        weights = {f"agent-{i}": 1.0 for i in range(5)}
+
+        agg = _aggregate_opinions(responses, agents=agents, independence_weights=weights)
+
+        assert "independence_weighting_applied" in agg
+        assert agg["independence_weighting_applied"] is True
+
+    def test_independence_weighting_not_applied_when_none(self):
+        """independence_weights=None → independence_weighting_applied が False."""
+        agents = self._make_agents(5)
+        responses = self._make_responses(["賛成"] * 5)
+
+        agg = _aggregate_opinions(responses, agents=agents, independence_weights=None)
+
+        assert agg.get("independence_weighting_applied") is False

@@ -96,6 +96,41 @@ class TestAggregatePrediction:
         assert prediction["A"] > prediction["B"]
 
 
+class TestWeightedBet:
+    """Independence-weighted bets should reduce cluster influence."""
+
+    def test_weighted_bet_reduces_cluster_influence(self):
+        """weight < 1.0 のエージェントは量が割り引かれる."""
+        market_full = PredictionMarket(outcomes=["A", "B"])
+        market_discounted = PredictionMarket(outcomes=["A", "B"])
+
+        # 通常: confidence=0.9 をそのまま投入
+        market_full.submit_bet("agent_0", "A", confidence=0.9)
+        # 割引: weight=0.3 で投入
+        market_discounted.submit_bet("agent_0", "A", confidence=0.9, weight=0.3)
+
+        # 割引版の方が A の価格が低い
+        assert market_discounted.get_prices()["A"] < market_full.get_prices()["A"]
+
+    def test_unweighted_bet_backward_compatible(self):
+        """weight 未指定時は従来と同じ挙動."""
+        market = PredictionMarket(outcomes=["A", "B"])
+        market.submit_bet("agent_0", "A", confidence=0.8)
+
+        prices = market.get_prices()
+        assert prices["A"] > prices["B"]
+        assert sum(prices.values()) == pytest.approx(1.0, abs=0.01)
+
+    def test_weighted_prices_still_sum_to_one(self):
+        """weighted bets でも LMSR 価格の合計は ≈ 1.0."""
+        market = PredictionMarket(outcomes=["A", "B", "C"])
+        market.submit_bet("a0", "A", 0.9, weight=0.5)
+        market.submit_bet("a1", "B", 0.7, weight=1.0)
+        market.submit_bet("a2", "C", 0.6, weight=0.2)
+
+        assert sum(market.get_prices().values()) == pytest.approx(1.0, abs=0.01)
+
+
 class TestBrierScore:
     """Market calibration via Brier score."""
 
