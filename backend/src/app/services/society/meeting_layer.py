@@ -6,6 +6,8 @@ from typing import Any
 from src.app.llm.multi_client import multi_llm_client
 from src.app.models.conversation_log import ConversationLog
 from src.app.services.conversation_log_store import persist_conversation_logs
+from src.app.services.society.activation_layer import _temperature_from_big_five
+from src.app.services.society.activation_prompts import SPEECH_STYLE_DIRECTIVES
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -65,39 +67,194 @@ def _serialize_argument_for_stream(arg: dict, round_name: str) -> dict[str, Any]
     }
 
 
+def enrich_meeting_with_clusters(
+    participants: list[dict],
+    clusters: list[Any] | None,
+    activation_responses: list[dict],
+) -> list[dict]:
+    """Assign opposing cluster arguments to meeting participants.
+
+    For each participant, finds which cluster they belong to, then collects
+    the top 3 strongest arguments (by confidence) from opposing cluster(s).
+    Devil's advocates receive arguments from ALL clusters they're NOT in.
+
+    Args:
+        participants: Meeting participant dicts with agent_profile.
+        clusters: List of ClusterInfo from network propagation. If empty/None,
+            returns participants unchanged.
+        activation_responses: Activation layer responses with agent_id, stance,
+            confidence, reason.
+
+    Returns:
+        participants list with ``opposing_arguments`` added to each dict.
+    """
+    if not clusters:
+        for p in participants:
+            p.setdefault("opposing_arguments", [])
+        return participants
+
+    # Build response lookup by agent_id
+    resp_by_id: dict[str, dict] = {}
+    for r in activation_responses:
+        resp_by_id[r["agent_id"]] = r
+
+    # Build agent_id -> cluster label mapping
+    agent_cluster: dict[str, int] = {}
+    for cluster in clusters:
+        for member_id in cluster.member_ids:
+            agent_cluster[member_id] = cluster.label
+
+    # Build cluster label -> list of responses mapping
+    cluster_responses: dict[int, list[dict]] = {}
+    for cluster in clusters:
+        resps = []
+        for member_id in cluster.member_ids:
+            resp = resp_by_id.get(member_id)
+            if resp:
+                resps.append(resp)
+        cluster_responses[cluster.label] = resps
+
+    all_cluster_labels = {c.label for c in clusters}
+
+    for p in participants:
+        agent_profile = p.get("agent_profile", {}) or {}
+        agent_id = agent_profile.get("id", "")
+        is_devil = p.get("is_devil_advocate", False)
+
+        my_cluster = agent_cluster.get(agent_id)
+
+        # Determine which clusters to draw arguments from
+        if my_cluster is not None:
+            opposing_labels = all_cluster_labels - {my_cluster}
+        else:
+            # Agent not in any cluster: use all clusters
+            opposing_labels = all_cluster_labels
+
+        # For non-devil advocates, limit to opposing clusters
+        # For devil's advocates, already using all non-own clusters (same logic)
+        opposing_args: list[dict] = []
+        for label in opposing_labels:
+            for resp in cluster_responses.get(label, []):
+                reason = resp.get("reason", "")
+                if reason:
+                    opposing_args.append({
+                        "reason": reason,
+                        "confidence": resp.get("confidence", 0.5),
+                        "stance": resp.get("stance", "中立"),
+                        "agent_id": resp.get("agent_id", ""),
+                    })
+
+        # Sort by confidence descending, take top 3
+        opposing_args.sort(key=lambda x: x["confidence"], reverse=True)
+        p["opposing_arguments"] = opposing_args[:3]
+
+    return participants
+
+
+def _build_balanced_briefing(theme: str, grounding_facts: list[dict] | None = None) -> str:
+    """テーマに関するバランスの取れたブリーフィングを生成する（テンプレートベース、LLM不要）。"""
+    facts_section = ""
+    if grounding_facts:
+        facts_lines = "\n".join(f"・{f['fact']}（{f['source']}）" for f in grounding_facts[:5])
+        facts_section = f"\n【関連データ】\n{facts_lines}\n"
+
+    return (
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"【議論の前提情報】テーマ: {theme}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{facts_section}\n"
+        f"このテーマについて、以下のような賛否の論点が存在します:\n\n"
+        f"【賛成側の主な論点】\n"
+        f"・経済的便益や効率性の向上が期待できる\n"
+        f"・国際的な競争力や先行事例との整合性\n"
+        f"・長期的な社会課題の解決に寄与する可能性\n\n"
+        f"【反対側の主な論点】\n"
+        f"・短期的なコストや負担増への懸念\n"
+        f"・地域格差や社会的弱者への影響\n"
+        f"・実施の実現可能性や副作用のリスク\n\n"
+        f"上記を踏まえた上で、あなた自身の立場から議論してください。\n"
+    )
+
+
+def _build_speech_style_block(speech_style: str) -> str:
+    """speech_style指示ブロックを構築する。"""
+    style = SPEECH_STYLE_DIRECTIVES.get(speech_style, {})
+    if not style:
+        return f"話し方: {speech_style}"
+    return (
+        f"【話し方ルール: {speech_style}】\n"
+        f"{style['instruction']}\n"
+        f"参考: 「{style['example']}」\n"
+        f"禁止: {style['prohibition']}"
+    )
+
+
 def _build_participant_context(participant: dict) -> str:
     """参加者のコンテキスト文字列を構築する。"""
     if participant["role"] == "expert":
         persona = participant.get("persona", {})
-        return (
-            f"【{participant.get('display_name', '専門家')}】\n"
-            f"役割: {persona.get('role', '')}\n"
-            f"焦点: {persona.get('focus', '')}\n"
-            f"思考スタイル: {persona.get('thinking_style', '')}"
-        )
+        # エキスパート固有の性格情報を含める
+        context_parts = [
+            f"【{participant.get('display_name', '専門家')}】",
+            f"役割: {persona.get('role', '')}",
+            f"焦点: {persona.get('focus', '')}",
+            f"思考スタイル: {persona.get('thinking_style', '')}",
+        ]
+        if persona.get("intellectual_biases"):
+            context_parts.append(f"あなたの思考傾向（自覚なし）: {'; '.join(persona['intellectual_biases'])}")
+        if persona.get("blind_spots"):
+            context_parts.append(f"あなたが見落としがちな点: {'; '.join(persona['blind_spots'])}")
+        if persona.get("rhetorical_style"):
+            context_parts.append(f"話し方の癖: {persona['rhetorical_style']}")
+        if persona.get("hot_buttons"):
+            context_parts.append(f"つい熱くなるテーマ: {'; '.join(persona['hot_buttons'])}")
+        return "\n".join(context_parts)
 
     agent = participant["agent_profile"]
     demo = agent.get("demographics", {})
     resp = participant.get("response", {}) or {}
     concern = resp.get("concern", "")
     priority = resp.get("priority", "")
+    speech_style = agent.get("speech_style", "自然")
+
     extra_parts = []
     if concern:
         extra_parts.append(f"最大の懸念: {concern}")
     if priority:
         extra_parts.append(f"重視すること: {priority}")
+    # 生活文脈を追加
+    persona_narrative = agent.get("persona_narrative", "")
+    if persona_narrative:
+        extra_parts.append(f"あなたの背景: {persona_narrative[:200]}")
+    contradiction = agent.get("contradiction", "")
+    if contradiction:
+        extra_parts.append(f"内面の葛藤: {contradiction}")
+    hidden_motivation = agent.get("hidden_motivation", "")
+    if hidden_motivation:
+        extra_parts.append(f"本音（表には出さないが行動に影響）: {hidden_motivation}")
+
     extra_text = "\n".join(extra_parts)
+
+    speech_block = _build_speech_style_block(speech_style)
+
     return (
         f"【市民代表: {demo.get('occupation', '不明')}・{demo.get('age', '?')}歳・{demo.get('region', '不明')}】\n"
         f"スタンス: {resp.get('stance', '中立')} (信頼度: {resp.get('confidence', 0.5):.1%})\n"
         f"理由: {resp.get('reason', '')}\n"
-        f"{extra_text}\n"
-        f"発話スタイル: {agent.get('speech_style', '自然')}"
+        f"{extra_text}\n\n"
+        f"{speech_block}"
     )
 
 
 def _build_meeting_system_prompt(participant: dict, theme: str, round_name: str) -> str:
-    """Meeting 用のシステムプロンプトを構築する。"""
+    """Meeting 用のシステムプロンプトを構築する。
+
+    2フェーズ方式:
+    - Phase 1 (voice): 自然言語で発話（speech_styleを厳守）
+    - Phase 2 (extraction): 別途JSON抽出（この関数では voice を要求）
+
+    出力はJSON形式だが、argument フィールドは完全に自然言語。
+    """
     context = _build_participant_context(participant)
     is_devil_advocate = participant.get("is_devil_advocate", False)
 
@@ -111,43 +268,86 @@ def _build_meeting_system_prompt(participant: dict, theme: str, round_name: str)
         "回答はJSON形式で:\n"
         "{\n"
         '  "position": "あなたの立場の要約（1文）",\n'
-        '  "argument": "300-600文字の主張。自然な言葉で段落として書いてください。'
-        "あなたの経験・知識に基づく具体的な論拠を含めること。"
+        '  "argument": "300-600文字の主張。【重要】あなたの話し方ルールに厳密に従い、'
+        "あなたという人間がそのまま喋っているように書け。"
+        "22歳のフリーターと65歳の元官僚では言葉遣いが全く違うはず。"
+        "経験・知識に基づく具体的な論拠を含め、あなたの口調・語彙・リズムで語れ。"
         '抽象的な一般論は禁止。",\n'
-        '  "evidence": "根拠となる事実・データ・実体験",\n'
+        '  "evidence": "根拠となる事実・データ・実体験（簡潔に）",\n'
         '  "addressed_to": "応答先の参加者名（ラウンド2以降。ラウンド1は空文字）",\n'
-        '  "belief_update": "前ラウンドから立場が変わった場合、何に説得されたかを記述（変化なしなら空文字）",\n'
+        '  "belief_update": "前ラウンドから立場が変わった場合、何に説得されたか（変化なしなら空文字）",\n'
         '  "concerns": ["懸念事項"],\n'
         '  "questions_to_others": ["他の参加者への具体的な質問"]\n'
         "}"
     )
 
     if participant["role"] == "expert":
+        persona = participant.get("persona", {})
         prompts = participant.get("prompts", {})
         expert_instruction = prompts.get("analyze", "専門的知見に基づいて分析してください。")
+
+        # エキスパート固有のキャラクター指示
+        character_parts = []
+        if persona.get("rhetorical_style"):
+            character_parts.append(f"あなたの話し方の癖: {persona['rhetorical_style']}")
+        if persona.get("intellectual_biases"):
+            character_parts.append(
+                "あなたは以下の思考傾向を持っている（自覚なし。自然にこの傾向が発言に表れる）:\n"
+                + "\n".join(f"- {b}" for b in persona["intellectual_biases"])
+            )
+        if persona.get("hot_buttons"):
+            character_parts.append(
+                "以下のテーマに触れると、つい感情が出て普段より強い主張をしてしまう:\n"
+                + "\n".join(f"- {h}" for h in persona["hot_buttons"])
+            )
+        character_block = "\n\n".join(character_parts) if character_parts else ""
+
         return (
             f"あなたは以下の専門家として議論に参加しています。\n\n"
             f"{context}\n\n"
             f"テーマ: {theme}\n\n"
             f"議論フェーズ: {round_name}\n\n"
-            f"専門家としての指示:\n{expert_instruction}"
+            f"専門家としての指示:\n{expert_instruction}\n\n"
+            f"{character_block}"
             f"{devil_advocate_instruction}\n\n"
+            f"【重要】argument は、あなたという専門家が会議室で実際に発言しているように書け。"
+            f"論文の要旨ではなく、生きた人間の発言として。口癖や思考傾向を自然に反映させよ。\n\n"
             f"{json_format}"
         )
 
+    # 市民代表の場合
     belief_update_instruction = (
-        "\n\n【信念更新について】他の参加者の主張が説得力がある場合、あなたの立場を修正することは"
-        "知的誠実さの表れです。頑なに初期立場を維持する必要はありません。"
-        "ただし、変えた場合はその理由を明記してください。"
+        "\n\n【信念更新について】他の参加者の主張に説得力を感じた場合、立場を変えてもよい。"
+        "ただし簡単に変えすぎないこと。あなたには生活実感に基づく確信がある。"
+        "変える場合は「何が」「なぜ」あなたを動かしたのかを具体的に書け。"
     )
+
+    # Opposing cluster arguments (from enrich_meeting_with_clusters)
+    opposing_args = participant.get("opposing_arguments", [])
+    opposing_block = ""
+    if opposing_args:
+        arg_lines = "\n".join(
+            f"- 「{a['reason']}」（{a.get('stance', '不明')}）"
+            for a in opposing_args
+            if a.get("reason")
+        )
+        if arg_lines:
+            opposing_block = (
+                "\n\n以下は対立するグループからの最も強い主張です：\n"
+                f"{arg_lines}\n"
+                "これらの主張を踏まえた上で、自分の立場を明確にしてください。"
+            )
 
     return (
         f"あなたは以下のプロフィールを持つ市民代表として議論に参加しています。\n\n"
         f"{context}\n\n"
         f"テーマ: {theme}\n\n"
         f"議論フェーズ: {round_name}\n\n"
-        f"あなたのプロフィールと価値観に基づいて率直に議論してください。"
+        f"【最重要ルール】あなたのプロフィール・年齢・職業・話し方ルールに基づいて、"
+        f"あなたという人間がそのまま喋っているように議論せよ。"
+        f"全員が同じような敬語で話すのは不自然。あなたのキャラクターを貫け。"
         f"{devil_advocate_instruction}"
+        f"{opposing_block}"
         f"{belief_update_instruction}\n\n"
         f"{json_format}"
     )
@@ -161,6 +361,7 @@ async def _run_meeting_round(
     previous_arguments: list[dict],
     simulation_id: str | None = None,
     session: Any = None,
+    briefing_prefix: str = "",
 ) -> list[dict]:
     """Meeting の1ラウンドを実行する。"""
     multi_llm_client.initialize()
@@ -212,14 +413,19 @@ async def _run_meeting_round(
             round_number,
             f"テーマ「{theme}」について、あなたの立場から議論してください。",
         )
+        if briefing_prefix and round_number == 1:
+            user_prompt = briefing_prefix + "\n\n" + user_prompt
         if prev_summary:
             user_prompt += f"\n\n{prev_summary}"
 
+        agent_temperature = _temperature_from_big_five(
+            p["agent_profile"].get("big_five", {}), base_temperature=0.75,
+        )
         calls.append({
             "provider": p["agent_profile"].get("llm_backend", "openai"),
             "system_prompt": system_prompt,
             "user_prompt": user_prompt,
-            "temperature": 0.75,
+            "temperature": agent_temperature,
             "max_tokens": 4096,
         })
 
@@ -418,19 +624,25 @@ async def _run_direct_exchanges(
             f"300文字以上で、具体的に応答してください。"
         )
 
+        temp_a = _temperature_from_big_five(
+            part_a.get("agent_profile", {}).get("big_five", {}), base_temperature=0.75,
+        )
+        temp_b = _temperature_from_big_five(
+            part_b.get("agent_profile", {}).get("big_five", {}), base_temperature=0.75,
+        )
         calls = [
             {
                 "provider": part_a.get("agent_profile", {}).get("llm_backend", "openai"),
                 "system_prompt": exchange_system_a,
                 "user_prompt": exchange_user_a,
-                "temperature": 0.75,
+                "temperature": temp_a,
                 "max_tokens": 2048,
             },
             {
                 "provider": part_b.get("agent_profile", {}).get("llm_backend", "openai"),
                 "system_prompt": exchange_system_b,
                 "user_prompt": exchange_user_b,
-                "temperature": 0.75,
+                "temperature": temp_b,
                 "max_tokens": 2048,
             },
         ]
@@ -621,6 +833,15 @@ async def run_meeting(
     all_arguments: list[list[dict]] = []
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
+    # バランスド・ブリーフィングを生成（Fishkin 熟議民主主義）
+    grounding_facts: list[dict] = []
+    for p in participants:
+        profile = p.get("agent_profile", {}) or {}
+        facts = profile.get("grounding_facts", [])
+        if isinstance(facts, list):
+            grounding_facts.extend(facts)
+    balanced_briefing = _build_balanced_briefing(theme, grounding_facts if grounding_facts else None)
+
     if simulation_id:
         await sse_manager.publish(simulation_id, "meeting_started", {
             "participant_count": len(participants),
@@ -634,6 +855,7 @@ async def run_meeting(
         arguments = await _run_meeting_round(
             participants, theme, round_idx + 1, round_name,
             previous, simulation_id, session=session,
+            briefing_prefix=balanced_briefing if round_idx == 0 else "",
         )
 
         for arg in arguments:
@@ -711,4 +933,5 @@ async def run_meeting(
         "synthesis": synthesis,
         "participants": participant_summaries,
         "usage": total_usage,
+        "balanced_briefing": balanced_briefing,
     }

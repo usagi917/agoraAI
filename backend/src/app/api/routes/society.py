@@ -319,6 +319,30 @@ async def get_demographics(
     }
 
 
+@router.get("/simulations/{sim_id}/propagation")
+async def get_propagation(
+    sim_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """ネットワーク伝播結果を返す（クラスタ、エコーチェンバー、タイムステップ履歴）。"""
+    result = await session.execute(
+        select(SocietyResult)
+        .where(SocietyResult.simulation_id == sim_id, SocietyResult.layer == "network_propagation")
+        .order_by(SocietyResult.created_at.desc())
+        .limit(1)
+    )
+    record = result.scalar_one_or_none()
+    if not record:
+        return {"phase_data": None}
+
+    return {
+        "id": record.id,
+        "simulation_id": record.simulation_id,
+        "phase_data": record.phase_data,
+        "created_at": record.created_at.isoformat(),
+    }
+
+
 # =============================================================================
 # ソーシャルグラフ & エージェント & 会話 API
 # =============================================================================

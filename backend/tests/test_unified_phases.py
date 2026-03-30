@@ -520,3 +520,562 @@ class TestAPIUnifiedReportBranch:
         assert unified_result["type"] == "unified"
         assert "decision_brief" in unified_result
         assert "agreement_score" in unified_result
+
+
+# ---------------------------------------------------------------------------
+# Phase 2-2: society_orchestrator.py に provenance 構築追加
+# ---------------------------------------------------------------------------
+
+
+class TestOrchestratorStoresProvenance:
+    """run_society 実行後に sim.metadata_json["provenance"] が保存されることのテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_orchestrator_stores_provenance(self):
+        """run_society 完了後に metadata_json に provenance が保存され、
+        必須キー（methodology, data_sources, parameters, quality_metrics,
+        limitations, reproducibility）を全て含む。
+        """
+        from src.app.services.society.society_orchestrator import run_society
+
+        # --- Simulation モック: metadata_json への代入を追跡するために辞書で管理 ---
+        # MagicMock の spec なしでシンプルに attrs を使う
+        metadata_store = {}
+
+        class SimMock:
+            id = "sim-prov-1"
+            prompt_text = "自動運転義務化政策"
+            population_id = None
+            seed = 42
+            status = "running"
+            error_message = None
+            completed_at = None
+
+            @property
+            def metadata_json(self):
+                return metadata_store
+
+            @metadata_json.setter
+            def metadata_json(self, value):
+                metadata_store.clear()
+                metadata_store.update(value)
+
+        mock_sim = SimMock()
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=mock_sim)
+        mock_session.commit = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_session.rollback = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar=MagicMock(return_value=5)))
+
+        # --- 各フェーズのフェイク戻り値 ---
+        fake_agents = [
+            {
+                "id": f"agent-{i}",
+                "agent_index": i,
+                "demographics": {"occupation": "会社員", "age": 30 + i, "region": "東京", "gender": "male"},
+                "llm_backend": "openai",
+            }
+            for i in range(10)
+        ]
+        fake_responses = [
+            {"stance": "賛成", "confidence": 0.8, "reason": "便利になる", "concern": "", "priority": ""}
+            for _ in range(10)
+        ]
+        fake_activation = {
+            "responses": fake_responses,
+            "aggregation": {
+                "stance_distribution": {"賛成": 0.6, "反対": 0.3, "中立": 0.1},
+                "average_confidence": 0.75,
+                "top_concerns": ["安全性"],
+                "effective_sample_size": 8.5,
+            },
+            "representatives": [{"agent_id": "agent-0"}],
+            "usage": {"prompt_tokens": 500, "completion_tokens": 200, "total_tokens": 700},
+        }
+        fake_eval_metrics = [
+            {"metric_name": "consistency", "score": 0.7, "details": {}, "baseline_type": None, "baseline_score": None},
+            {"metric_name": "calibration", "score": 0.65, "details": {}, "baseline_type": None, "baseline_score": None},
+        ]
+        fake_meeting_participants = [
+            {
+                "role": "citizen_representative",
+                "agent_profile": fake_agents[0],
+                "stance": "賛成",
+                "display_name": "田中（会社員・30歳・東京）",
+                "expertise": "",
+            }
+        ]
+        fake_meeting_result = {
+            "rounds": [[{"argument": "主張1", "participant_name": "田中", "role": "citizen_representative", "round": 1}]],
+            "synthesis": {
+                "consensus_points": ["安全性向上"],
+                "disagreement_points": [],
+                "recommendations": ["段階的導入"],
+                "overall_assessment": "概ね肯定的",
+            },
+            "participants": [{"display_name": "田中", "role": "citizen_representative"}],
+            "usage": {"prompt_tokens": 300, "completion_tokens": 150, "total_tokens": 450},
+        }
+
+        with (
+            patch(
+                "src.app.services.society.society_orchestrator.async_session"
+            ) as mock_async_session,
+            patch(
+                "src.app.services.society.society_orchestrator._get_or_create_population",
+                new_callable=AsyncMock,
+                return_value=("pop-prov-1", fake_agents),
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator._save_network",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.select_agents",
+                new_callable=AsyncMock,
+                return_value=fake_agents,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.run_activation",
+                new_callable=AsyncMock,
+                return_value=fake_activation,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.evaluate_society_simulation",
+                new_callable=AsyncMock,
+                return_value=fake_eval_metrics,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.analyze_demographics",
+                return_value={"by_age": {}, "by_region": {}},
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.select_representatives",
+                new_callable=MagicMock,
+                return_value=fake_meeting_participants,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.run_meeting",
+                new_callable=AsyncMock,
+                return_value=fake_meeting_result,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.generate_meeting_report",
+                return_value={"summary": "テスト会議レポート"},
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.update_agent_memories",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.evolve_social_graph",
+                new_callable=AsyncMock,
+            ),
+            patch("src.app.services.society.society_orchestrator.sse_manager") as mock_sse,
+        ):
+            mock_sse.publish = AsyncMock()
+            mock_async_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_async_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await run_society("sim-prov-1")
+
+        # --- provenance が metadata_json に保存されているか確認 ---
+        assert "provenance" in metadata_store, (
+            "metadata_json に 'provenance' キーが存在しない。"
+            f"実際のキー: {list(metadata_store.keys())}"
+        )
+
+        provenance = metadata_store["provenance"]
+        required_keys = {
+            "methodology",
+            "data_sources",
+            "parameters",
+            "quality_metrics",
+            "limitations",
+            "reproducibility",
+        }
+        missing_keys = required_keys - set(provenance.keys())
+        assert not missing_keys, (
+            f"provenance に必須キーが不足: {missing_keys}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 3-4: society_orchestrator.py にグラウンディングフェーズ追加
+# ---------------------------------------------------------------------------
+
+
+class TestOrchestratorLoadsGrounding:
+    """run_society 実行中にグラウンディングフェーズが実行されることのテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_orchestrator_loads_grounding(self):
+        """run_society は Phase 2.5（選抜）の後 Phase 3（活性化）の前に
+        load_grounding_facts と distribute_facts_to_agents を呼び出す。
+        """
+        from src.app.services.society.society_orchestrator import run_society
+
+        metadata_store = {}
+
+        class SimMock:
+            id = "sim-grnd-1"
+            prompt_text = "賃金政策テーマ"
+            population_id = None
+            seed = 42
+            status = "running"
+            error_message = None
+            completed_at = None
+
+            @property
+            def metadata_json(self):
+                return metadata_store
+
+            @metadata_json.setter
+            def metadata_json(self, value):
+                metadata_store.clear()
+                metadata_store.update(value)
+
+        mock_sim = SimMock()
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=mock_sim)
+        mock_session.commit = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_session.rollback = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar=MagicMock(return_value=5)))
+
+        fake_agents = [
+            {
+                "id": f"agent-{i}",
+                "agent_index": i,
+                "demographics": {"occupation": "会社員", "age": 30 + i, "region": "東京", "gender": "male"},
+                "llm_backend": "openai",
+            }
+            for i in range(5)
+        ]
+        fake_responses = [
+            {"stance": "賛成", "confidence": 0.8, "reason": "理由", "concern": "", "priority": ""}
+            for _ in range(5)
+        ]
+        fake_activation = {
+            "responses": fake_responses,
+            "aggregation": {
+                "stance_distribution": {"賛成": 0.8, "反対": 0.2},
+                "average_confidence": 0.8,
+                "top_concerns": [],
+                "effective_sample_size": 5.0,
+            },
+            "representatives": [{"agent_id": "agent-0"}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+        }
+        fake_eval_metrics = [
+            {"metric_name": "consistency", "score": 0.7, "details": {}, "baseline_type": None, "baseline_score": None},
+        ]
+        fake_meeting_participants = [
+            {
+                "role": "citizen_representative",
+                "agent_profile": fake_agents[0],
+                "stance": "賛成",
+                "display_name": "田中（会社員・30歳・東京）",
+                "expertise": "",
+            }
+        ]
+        fake_meeting_result = {
+            "rounds": [[{"argument": "主張1", "participant_name": "田中", "role": "citizen_representative", "round": 1}]],
+            "synthesis": {
+                "consensus_points": [],
+                "disagreement_points": [],
+                "recommendations": [],
+                "overall_assessment": "概ね肯定的",
+            },
+            "participants": [{"display_name": "田中", "role": "citizen_representative"}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+        }
+        fake_grounding_facts = [
+            {
+                "fact": "2024年の実質賃金は前年比-2.5%",
+                "source": "厚生労働省",
+                "date": "2024-12",
+                "category": "economy",
+                "relevance_keywords": ["賃金"],
+            }
+        ]
+        fake_agent_facts = {i: fake_grounding_facts for i in range(len(fake_agents))}
+
+        with (
+            patch(
+                "src.app.services.society.society_orchestrator.async_session"
+            ) as mock_async_session,
+            patch(
+                "src.app.services.society.society_orchestrator._get_or_create_population",
+                new_callable=AsyncMock,
+                return_value=("pop-grnd-1", fake_agents),
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator._save_network",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.select_agents",
+                new_callable=AsyncMock,
+                return_value=fake_agents,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.load_grounding_facts",
+                return_value=fake_grounding_facts,
+            ) as mock_load_grounding,
+            patch(
+                "src.app.services.society.society_orchestrator.distribute_facts_to_agents",
+                return_value=fake_agent_facts,
+            ) as mock_distribute_facts,
+            patch(
+                "src.app.services.society.society_orchestrator.run_activation",
+                new_callable=AsyncMock,
+                return_value=fake_activation,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.evaluate_society_simulation",
+                new_callable=AsyncMock,
+                return_value=fake_eval_metrics,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.analyze_demographics",
+                return_value={"by_age": {}, "by_region": {}},
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.select_representatives",
+                new_callable=MagicMock,
+                return_value=fake_meeting_participants,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.run_meeting",
+                new_callable=AsyncMock,
+                return_value=fake_meeting_result,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.generate_meeting_report",
+                return_value={"summary": "テスト会議レポート"},
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.update_agent_memories",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.evolve_social_graph",
+                new_callable=AsyncMock,
+            ),
+            patch("src.app.services.society.society_orchestrator.sse_manager") as mock_sse,
+        ):
+            mock_sse.publish = AsyncMock()
+            mock_async_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_async_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await run_society("sim-grnd-1")
+
+        # グラウンディング関数が呼ばれたことを確認
+        mock_load_grounding.assert_called_once_with("賃金政策テーマ")
+        mock_distribute_facts.assert_called_once()
+        # distribute_facts_to_agents の第1引数は selected_agents
+        call_args = mock_distribute_facts.call_args
+        assert call_args[0][1] == fake_grounding_facts  # 第2引数: grounding_facts
+        # 各エージェントに grounding_facts が付与されていること
+        # (run_activationが呼ばれた時点でagentに付与済みのはずだが、
+        # モックされているためagentの変化を直接検証する代わりに
+        # distribute_facts_to_agentsが呼ばれたことで十分とする)
+        assert mock_sim.status == "completed"
+
+
+# ---------------------------------------------------------------------------
+# Phase 5-3: Orchestrator に DQI 評価フェーズ追加
+# ---------------------------------------------------------------------------
+
+
+class TestOrchestratorStoresDqi:
+    """run_society 実行後に society_results に layer="deliberation_quality" が保存されることのテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_orchestrator_stores_dqi(self):
+        """run_society 完了後に session.add が layer='deliberation_quality' の
+        SocietyResult で呼ばれていることを確認する。
+        """
+        from src.app.services.society.society_orchestrator import run_society
+
+        metadata_store = {}
+        added_records = []
+
+        class SimMock:
+            id = "sim-dqi-1"
+            prompt_text = "自動運転義務化政策"
+            population_id = None
+            seed = 42
+            status = "running"
+            error_message = None
+            completed_at = None
+
+            @property
+            def metadata_json(self):
+                return metadata_store
+
+            @metadata_json.setter
+            def metadata_json(self, value):
+                metadata_store.clear()
+                metadata_store.update(value)
+
+        mock_sim = SimMock()
+
+        def capture_add(record):
+            added_records.append(record)
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=mock_sim)
+        mock_session.commit = AsyncMock()
+        mock_session.add = MagicMock(side_effect=capture_add)
+        mock_session.rollback = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar=MagicMock(return_value=5)))
+
+        fake_agents = [
+            {
+                "id": f"agent-{i}",
+                "agent_index": i,
+                "demographics": {"occupation": "会社員", "age": 30 + i, "region": "東京", "gender": "male"},
+                "llm_backend": "openai",
+            }
+            for i in range(5)
+        ]
+        fake_responses = [
+            {"stance": "賛成", "confidence": 0.8, "reason": "便利になる", "concern": "", "priority": ""}
+            for _ in range(5)
+        ]
+        fake_activation = {
+            "responses": fake_responses,
+            "aggregation": {
+                "stance_distribution": {"賛成": 0.6, "反対": 0.3, "中立": 0.1},
+                "average_confidence": 0.75,
+                "top_concerns": ["安全性"],
+                "effective_sample_size": 4.5,
+            },
+            "representatives": [{"agent_id": "agent-0"}],
+            "usage": {"prompt_tokens": 500, "completion_tokens": 200, "total_tokens": 700},
+        }
+        fake_eval_metrics = [
+            {"metric_name": "consistency", "score": 0.7, "details": {}, "baseline_type": None, "baseline_score": None},
+        ]
+        fake_meeting_participants = [
+            {
+                "role": "citizen_representative",
+                "agent_profile": fake_agents[0],
+                "stance": "賛成",
+                "display_name": "田中（会社員・30歳・東京）",
+                "expertise": "",
+            }
+        ]
+        # 2ラウンド以上あることで opinion_change が計算可能になる
+        fake_meeting_result = {
+            "rounds": [
+                [{"argument": "賛成の主張", "participant": "田中", "position": "賛成", "round": 1}],
+                [{"argument": "反論を踏まえた主張", "participant": "田中", "position": "中立", "round": 2}],
+            ],
+            "synthesis": {
+                "consensus_points": ["安全性向上"],
+                "disagreement_points": [],
+                "recommendations": ["段階的導入"],
+                "overall_assessment": "概ね肯定的",
+            },
+            "participants": [{"display_name": "田中", "role": "citizen_representative"}],
+            "usage": {"prompt_tokens": 300, "completion_tokens": 150, "total_tokens": 450},
+        }
+
+        with (
+            patch(
+                "src.app.services.society.society_orchestrator.async_session"
+            ) as mock_async_session,
+            patch(
+                "src.app.services.society.society_orchestrator._get_or_create_population",
+                new_callable=AsyncMock,
+                return_value=("pop-dqi-1", fake_agents),
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator._save_network",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.select_agents",
+                new_callable=AsyncMock,
+                return_value=fake_agents,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.run_activation",
+                new_callable=AsyncMock,
+                return_value=fake_activation,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.evaluate_society_simulation",
+                new_callable=AsyncMock,
+                return_value=fake_eval_metrics,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.analyze_demographics",
+                return_value={"by_age": {}, "by_region": {}},
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.select_representatives",
+                new_callable=MagicMock,
+                return_value=fake_meeting_participants,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.run_meeting",
+                new_callable=AsyncMock,
+                return_value=fake_meeting_result,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.generate_meeting_report",
+                return_value={"summary": "テスト会議レポート"},
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.update_agent_memories",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.app.services.society.society_orchestrator.evolve_social_graph",
+                new_callable=AsyncMock,
+            ),
+            patch("src.app.services.society.society_orchestrator.sse_manager") as mock_sse,
+        ):
+            mock_sse.publish = AsyncMock()
+            mock_async_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_async_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await run_society("sim-dqi-1")
+
+        # --- layer="deliberation_quality" の SocietyResult が保存されているか確認 ---
+        from src.app.models.society_result import SocietyResult
+
+        dqi_records = [
+            r for r in added_records
+            if isinstance(r, SocietyResult) and r.layer == "deliberation_quality"
+        ]
+        assert len(dqi_records) == 1, (
+            f"layer='deliberation_quality' の SocietyResult が session.add で渡されなかった。"
+            f"追加されたレコードのレイヤー: {[getattr(r, 'layer', type(r).__name__) for r in added_records]}"
+        )
+
+        dqi_record = dqi_records[0]
+        assert dqi_record.simulation_id == "sim-dqi-1"
+        assert "dqi" in dqi_record.phase_data, (
+            f"phase_data に 'dqi' キーがない。実際のキー: {list(dqi_record.phase_data.keys())}"
+        )
+        assert "opinion_change" in dqi_record.phase_data, (
+            f"phase_data に 'opinion_change' キーがない。実際のキー: {list(dqi_record.phase_data.keys())}"
+        )
+
+        # DQI スコアが provenance の quality_metrics に含まれているか確認
+        assert "provenance" in metadata_store
+        quality_metrics = metadata_store["provenance"].get("quality_metrics", {})
+        assert "dqi_overall" in quality_metrics, (
+            f"provenance.quality_metrics に 'dqi_overall' がない。"
+            f"実際のキー: {list(quality_metrics.keys())}"
+        )
+
+        assert mock_sim.status == "completed"

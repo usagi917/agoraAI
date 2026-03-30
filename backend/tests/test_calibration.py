@@ -1,0 +1,183 @@
+"""Phase 6-1: 予測キャリブレーションのテスト (TDD RED フェーズ)
+
+テスト対象:
+- brier_external: 外部Brierスコア
+- expected_calibration_error: 期待キャリブレーション誤差（ECE）
+- calibration_grade: キャリブレーション品質グレード
+"""
+
+import pytest
+
+from src.app.services.society.calibration import (
+    brier_external,
+    expected_calibration_error,
+    calibration_grade,
+)
+
+
+# ---------------------------------------------------------------------------
+# brier_external
+# ---------------------------------------------------------------------------
+
+class TestBrierExternal:
+    def test_brier_external_perfect_prediction(self):
+        """完全な予測: predicted={"賛成": 1.0, "反対": 0.0}, observed="賛成" → brier = 0.0"""
+        predicted = {"賛成": 1.0, "反対": 0.0}
+        result = brier_external(predicted, "賛成")
+        assert result == pytest.approx(0.0, abs=1e-9)
+
+    def test_brier_external_worst_prediction(self):
+        """最悪の予測: predicted={"賛成": 0.0, "反対": 1.0}, observed="賛成" → brier = 2.0"""
+        predicted = {"賛成": 0.0, "反対": 1.0}
+        result = brier_external(predicted, "賛成")
+        assert result == pytest.approx(2.0, abs=1e-9)
+
+    def test_brier_external_uncertain_prediction(self):
+        """不確かな予測: predicted={"賛成": 0.5, "反対": 0.5}, observed="賛成" → brier = 0.5"""
+        predicted = {"賛成": 0.5, "反対": 0.5}
+        result = brier_external(predicted, "賛成")
+        assert result == pytest.approx(0.5, abs=1e-9)
+
+    def test_brier_external_three_class_perfect(self):
+        """3クラス完全予測: observed class に 1.0 → brier = 0.0"""
+        predicted = {"賛成": 1.0, "反対": 0.0, "中立": 0.0}
+        result = brier_external(predicted, "賛成")
+        assert result == pytest.approx(0.0, abs=1e-9)
+
+    def test_brier_external_three_class_worst(self):
+        """3クラス最悪予測: observed class に 0.0、別 class に 1.0 → brier = 2.0"""
+        predicted = {"賛成": 0.0, "反対": 1.0, "中立": 0.0}
+        result = brier_external(predicted, "賛成")
+        assert result == pytest.approx(2.0, abs=1e-9)
+
+    def test_brier_external_returns_float(self):
+        """返り値は float 型"""
+        result = brier_external({"賛成": 0.7, "反対": 0.3}, "賛成")
+        assert isinstance(result, float)
+
+    def test_brier_external_range(self):
+        """Brier スコアは 0.0〜2.0 の範囲"""
+        predicted = {"賛成": 0.3, "反対": 0.7}
+        result = brier_external(predicted, "反対")
+        assert 0.0 <= result <= 2.0
+
+
+# ---------------------------------------------------------------------------
+# expected_calibration_error
+# ---------------------------------------------------------------------------
+
+class TestExpectedCalibrationError:
+    def _make_well_calibrated(self) -> list[tuple[float, bool]]:
+        """良いキャリブレーション: 予測確率とヒット率がほぼ一致するデータ"""
+        predictions = []
+        # 予測確率 0.1 → 約 10% 的中
+        for i in range(100):
+            predictions.append((0.1, i < 10))
+        # 予測確率 0.5 → 約 50% 的中
+        for i in range(100):
+            predictions.append((0.5, i < 50))
+        # 予測確率 0.9 → 約 90% 的中
+        for i in range(100):
+            predictions.append((0.9, i < 90))
+        return predictions
+
+    def _make_poorly_calibrated(self) -> list[tuple[float, bool]]:
+        """悪いキャリブレーション: 自信過剰（高い確率を予測するが的中率は低い）"""
+        predictions = []
+        # 予測確率 0.9 → 実際は 10% しか的中しない（過信）
+        for i in range(100):
+            predictions.append((0.9, i < 10))
+        # 予測確率 0.8 → 実際は 20% しか的中しない（過信）
+        for i in range(100):
+            predictions.append((0.8, i < 20))
+        return predictions
+
+    def test_ece_well_calibrated(self):
+        """良いキャリブレーション → ECE < 0.05"""
+        predictions = self._make_well_calibrated()
+        ece = expected_calibration_error(predictions)
+        assert ece < 0.05, f"Expected ECE < 0.05 for well-calibrated, got {ece}"
+
+    def test_ece_poorly_calibrated(self):
+        """悪いキャリブレーション → ECE > 0.15"""
+        predictions = self._make_poorly_calibrated()
+        ece = expected_calibration_error(predictions)
+        assert ece > 0.15, f"Expected ECE > 0.15 for poorly-calibrated, got {ece}"
+
+    def test_ece_empty_returns_none(self):
+        """空リスト → None を返す"""
+        result = expected_calibration_error([])
+        assert result is None
+
+    def test_ece_returns_float_or_none(self):
+        """返り値は float または None"""
+        predictions = [(0.7, True), (0.3, False)]
+        result = expected_calibration_error(predictions)
+        assert result is None or isinstance(result, float)
+
+    def test_ece_range(self):
+        """ECE は 0.0〜1.0 の範囲"""
+        predictions = [(0.7, True), (0.3, False), (0.5, True), (0.5, False)]
+        result = expected_calibration_error(predictions)
+        if result is not None:
+            assert 0.0 <= result <= 1.0
+
+    def test_ece_perfect_calibration(self):
+        """完全キャリブレーション: 確率0.0→全て外れ、確率1.0→全て当たり → ECE ≈ 0.0"""
+        predictions = [(1.0, True)] * 50 + [(0.0, False)] * 50
+        ece = expected_calibration_error(predictions)
+        assert ece == pytest.approx(0.0, abs=1e-9)
+
+    def test_ece_custom_n_bins(self):
+        """n_bins パラメータを変えても動作する"""
+        predictions = [(0.5, True), (0.5, False)] * 20
+        ece_10 = expected_calibration_error(predictions, n_bins=10)
+        ece_5 = expected_calibration_error(predictions, n_bins=5)
+        # どちらも有効な float または None
+        assert ece_10 is None or isinstance(ece_10, float)
+        assert ece_5 is None or isinstance(ece_5, float)
+
+
+# ---------------------------------------------------------------------------
+# calibration_grade
+# ---------------------------------------------------------------------------
+
+class TestCalibrationGrade:
+    def test_calibration_grade_well(self):
+        """ECE = 0.03 → 'well_calibrated'"""
+        assert calibration_grade(0.03) == "well_calibrated"
+
+    def test_calibration_grade_moderate(self):
+        """ECE = 0.10 → 'moderate'"""
+        assert calibration_grade(0.10) == "moderate"
+
+    def test_calibration_grade_poor(self):
+        """ECE = 0.20 → 'poor'"""
+        assert calibration_grade(0.20) == "poor"
+
+    def test_calibration_grade_insufficient(self):
+        """ECE = None (空の予測履歴) → 'insufficient_data'"""
+        assert calibration_grade(None) == "insufficient_data"
+
+    def test_calibration_grade_boundary_well_to_moderate(self):
+        """ECE = 0.05 (境界) → 'well_calibrated' または 'moderate'"""
+        grade = calibration_grade(0.05)
+        assert grade in ("well_calibrated", "moderate")
+
+    def test_calibration_grade_boundary_moderate_to_poor(self):
+        """ECE = 0.15 (境界) → 'moderate' または 'poor'"""
+        grade = calibration_grade(0.15)
+        assert grade in ("moderate", "poor")
+
+    def test_calibration_grade_zero_ece(self):
+        """ECE = 0.0 → 'well_calibrated'"""
+        assert calibration_grade(0.0) == "well_calibrated"
+
+    def test_calibration_grade_high_ece(self):
+        """ECE = 0.5 → 'poor'"""
+        assert calibration_grade(0.5) == "poor"
+
+    def test_calibration_grade_returns_string(self):
+        """返り値は str 型"""
+        result = calibration_grade(0.1)
+        assert isinstance(result, str)

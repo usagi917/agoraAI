@@ -476,6 +476,30 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     pendingStanceShifts.value = []
   }
 
+  /**
+   * Bulk update agent stances from propagation results.
+   * Maps opinion values to stance labels and triggers visual updates.
+   */
+  function updateStancesFromPropagation(stanceUpdates: Array<{ agentId: string; stance: string }>) {
+    const shifts: typeof pendingStanceShifts.value = []
+    for (const update of stanceUpdates) {
+      const agent = liveAgents.value.get(update.agentId)
+      if (agent && agent.stance !== update.stance) {
+        shifts.push({
+          agentId: update.agentId,
+          fromStance: agent.stance || '中立',
+          toStance: update.stance,
+          reason: 'network propagation',
+        })
+        agent.stance = update.stance
+      }
+    }
+    if (shifts.length > 0) {
+      pendingStanceShifts.value = shifts
+      liveAgents.value = new Map(liveAgents.value)
+    }
+  }
+
   function setHoveredEdge(edge: typeof hoveredEdge.value) {
     hoveredEdge.value = edge
   }
@@ -530,6 +554,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     clearSpeaking,
     addStanceShifts,
     clearStanceShifts,
+    updateStancesFromPropagation,
     setHoveredEdge,
     setSelectedEdge,
     reset,

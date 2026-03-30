@@ -4,6 +4,8 @@ import logging
 import uuid
 from collections import defaultdict
 
+from src.app.services.society.age_utils import age_bracket_4 as _age_bracket
+
 import yaml
 
 from src.app.config import settings
@@ -33,6 +35,8 @@ def _load_expert_template(persona_name: str) -> dict:
         with open(template_path) as f:
             return yaml.safe_load(f) or {}
     return {}
+
+
 
 
 def _cluster_by_stance(
@@ -204,6 +208,123 @@ async def select_representatives(
                 "stance": resp.get("stance", "中立"),
             })
             citizen_count += 1
+
+    # === 多様性制約（年齢帯・地域・性別）===
+    # 既に選出済みの市民代表エージェントIDを追跡
+    selected_agent_ids = {
+        p["agent_profile"].get("id")
+        for p in participants
+        if p["role"] == "citizen_representative"
+    }
+
+    # 未選出エージェントを confidence 高い順にソートしたプール
+    remaining_pool = sorted(
+        [
+            (a, r) for a, r in zip(valid_agents, valid_responses)
+            if a.get("id") not in selected_agent_ids
+        ],
+        key=lambda x: x[1].get("confidence", 0.5),
+        reverse=True,
+    )
+
+    def _current_citizens() -> list[dict]:
+        return [p for p in participants if p["role"] == "citizen_representative"]
+
+    def _swap_or_add(candidate_agent: dict, candidate_resp: dict) -> None:
+        """候補を市民代表として追加 or 最低 confidence の代表と入れ替える。"""
+        new_entry = {
+            "agent_profile": candidate_agent,
+            "response": candidate_resp,
+            "role": "citizen_representative",
+            "expertise": "",
+            "stance": candidate_resp.get("stance", "中立"),
+        }
+        current = _current_citizens()
+        if len(current) < max_citizen_reps:
+            participants.append(new_entry)
+        else:
+            # confidence 最小の市民代表と入れ替え
+            weakest = min(
+                current,
+                key=lambda p: p["response"].get("confidence", 0.5) if p["response"] else 0.0,
+            )
+            idx = participants.index(weakest)
+            selected_agent_ids.discard(weakest["agent_profile"].get("id"))
+            participants[idx] = new_entry
+        selected_agent_ids.add(candidate_agent.get("id"))
+
+    # --- 年齢帯: 最低3帯 ---
+    current_brackets = {
+        _age_bracket(p["agent_profile"]["demographics"]["age"])
+        for p in _current_citizens()
+        if p["agent_profile"].get("demographics", {}).get("age") is not None
+    }
+    if len(current_brackets) < 3:
+        missing_brackets = {"18-29", "30-49", "50-69", "70+"} - current_brackets
+        for bracket in sorted(missing_brackets):
+            candidates = [
+                (a, r) for a, r in remaining_pool
+                if a.get("id") not in selected_agent_ids
+                and a.get("demographics", {}).get("age") is not None
+                and _age_bracket(a["demographics"]["age"]) == bracket
+            ]
+            if candidates:
+                _swap_or_add(candidates[0][0], candidates[0][1])
+                current_brackets.add(bracket)
+            else:
+                logger.warning(
+                    "Diversity fallback: no candidate for age bracket %s", bracket
+                )
+        if len(current_brackets) < 3:
+            logger.warning(
+                "Cannot satisfy >=3 age brackets; population lacks diversity. Got: %s",
+                current_brackets,
+            )
+
+    # --- 地域: 最低3地域 ---
+    current_regions = {
+        p["agent_profile"]["demographics"]["region"]
+        for p in _current_citizens()
+        if p["agent_profile"].get("demographics", {}).get("region")
+    }
+    if len(current_regions) < 3:
+        needed = 3 - len(current_regions)
+        region_candidates = [
+            (a, r) for a, r in remaining_pool
+            if a.get("id") not in selected_agent_ids
+            and a.get("demographics", {}).get("region") not in current_regions
+        ]
+        added = 0
+        for a, r in region_candidates:
+            if added >= needed:
+                break
+            region = a["demographics"]["region"]
+            if region not in current_regions:
+                _swap_or_add(a, r)
+                current_regions.add(region)
+                added += 1
+        if len(current_regions) < 3:
+            logger.warning(
+                "Cannot satisfy >=3 regions; population lacks diversity. Got: %s",
+                current_regions,
+            )
+
+    # --- 性別: 男女両方 ---
+    current_genders = {
+        p["agent_profile"]["demographics"]["gender"]
+        for p in _current_citizens()
+        if p["agent_profile"].get("demographics", {}).get("gender")
+    }
+    for gender in sorted({"male", "female"} - current_genders):
+        gender_candidates = [
+            (a, r) for a, r in remaining_pool
+            if a.get("id") not in selected_agent_ids
+            and a.get("demographics", {}).get("gender") == gender
+        ]
+        if gender_candidates:
+            _swap_or_add(gender_candidates[0][0], gender_candidates[0][1])
+        else:
+            logger.warning("Diversity fallback: no candidate for gender %s", gender)
 
     # === 専門家の追加 ===
     # LLMベースでテーマに最適な専門家を選出

@@ -839,6 +839,23 @@ export async function getNarrative(simId: string): Promise<{ phase_data: Narrati
   return data
 }
 
+export interface PropagationData {
+  converged: boolean
+  total_timesteps: number
+  cluster_count: number
+  clusters: Array<{ label: number; size: number; centroid: number[] }>
+  echo_chamber: { homophily_index: number; polarization_index: number }
+  stigmergy_topics: Array<{ topic: string; intensity: number }>
+  prediction_market: Record<string, number>
+  phase_transitions: Array<{ timestep: number; type: string }>
+  tipping_points: Array<{ timestep: number; cascade_ratio: number }>
+}
+
+export async function getPropagation(simId: string): Promise<{ phase_data: PropagationData | null }> {
+  const { data } = await api.get(`/society/simulations/${simId}/propagation`)
+  return data
+}
+
 // === Transcript API ===
 
 export interface TranscriptEntry {
