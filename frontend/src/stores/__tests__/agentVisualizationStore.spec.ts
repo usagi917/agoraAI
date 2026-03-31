@@ -12,7 +12,7 @@ describe('agentVisualizationStore', () => {
   it('setThinkingAgent sets and auto-clears after timeout', () => {
     const store = useAgentVisualizationStore()
 
-    store.setThinkingAgent('agent-1', 'TestAgent')
+    store.setThinkingAgent('agent-1')
     expect(store.thinkingAgentId).toBe('agent-1')
     expect(store.agentStatusMap['agent-1']).toBe('thinking')
 
@@ -24,7 +24,7 @@ describe('agentVisualizationStore', () => {
   it('clearThinkingAgent clears immediately', () => {
     const store = useAgentVisualizationStore()
 
-    store.setThinkingAgent('agent-1', 'TestAgent')
+    store.setThinkingAgent('agent-1')
     store.clearThinkingAgent('agent-1')
     expect(store.thinkingAgentId).toBeNull()
   })
@@ -34,7 +34,7 @@ describe('agentVisualizationStore', () => {
 
     expect(store.getAgentStatus('unknown-agent')).toBe('idle')
 
-    store.setThinkingAgent('agent-1', 'TestAgent')
+    store.setThinkingAgent('agent-1')
     expect(store.getAgentStatus('agent-1')).toBe('thinking')
   })
 
@@ -119,7 +119,7 @@ describe('agentVisualizationStore', () => {
   it('reset clears all state', () => {
     const store = useAgentVisualizationStore()
 
-    store.setThinkingAgent('agent-1', 'Test')
+    store.setThinkingAgent('agent-1')
     store.addRecentThought({
       agentId: 'a1',
       agentName: 'A',

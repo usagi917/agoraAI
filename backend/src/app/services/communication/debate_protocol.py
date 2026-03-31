@@ -115,18 +115,21 @@ class DebateProtocol:
         debate_result.consensus_reached = judge_result.get("consensus", False)
 
         # SSE: 討論結果をフロントエンドに配信
-        await sse_manager.publish_debate_result(run_id, {
-            "channel_id": channel.id,
-            "topic": topic,
-            "winner_agent_id": debate_result.winner_agent_id,
-            "winning_argument": debate_result.winning_argument,
-            "judge_reasoning": debate_result.judge_reasoning,
-            "consensus_reached": debate_result.consensus_reached,
-            "arguments": [
-                {"agent_id": a.agent_id, "claim": a.claim, "type": a.argument_type, "strength": a.strength}
-                for a in debate_result.arguments
-            ],
-        })
+        try:
+            await sse_manager.publish_debate_result(run_id, {
+                "channel_id": channel.id,
+                "topic": topic,
+                "winner_agent_id": debate_result.winner_agent_id,
+                "winning_argument": debate_result.winning_argument,
+                "judge_reasoning": debate_result.judge_reasoning,
+                "consensus_reached": debate_result.consensus_reached,
+                "arguments": [
+                    {"agent_id": a.agent_id, "claim": a.claim, "type": a.argument_type, "strength": a.strength}
+                    for a in debate_result.arguments
+                ],
+            })
+        except Exception:
+            logger.warning("SSE publish failed for debate_result (topic=%s)", topic[:30])
 
         return debate_result
 

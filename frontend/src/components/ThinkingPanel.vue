@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useCognitiveStore } from '../stores/cognitiveStore'
 import { useAgentVisualizationStore } from '../stores/agentVisualizationStore'
 
@@ -26,18 +26,21 @@ const isThinking = computed(() => vizStore.thinkingAgentId !== null)
 // タイプライター効果
 const displayedText = ref('')
 const targetText = ref('')
+let _typewriterInterval: ReturnType<typeof setInterval> | null = null
 
 watch(() => latestThought.value?.reasoningChain, (newText) => {
   if (!newText) return
+  if (_typewriterInterval) clearInterval(_typewriterInterval)
   targetText.value = newText
   displayedText.value = ''
   let i = 0
-  const interval = setInterval(() => {
+  _typewriterInterval = setInterval(() => {
     if (i < targetText.value.length) {
       displayedText.value = targetText.value.slice(0, i + 1)
       i++
     } else {
-      clearInterval(interval)
+      if (_typewriterInterval) clearInterval(_typewriterInterval)
+      _typewriterInterval = null
     }
   }, 15)
 })
@@ -97,6 +100,13 @@ const memoryTimeline = computed(() => {
 })
 
 const recentThoughts = computed(() => vizStore.recentThoughts.slice(-8).reverse())
+
+onBeforeUnmount(() => {
+  if (_typewriterInterval) {
+    clearInterval(_typewriterInterval)
+    _typewriterInterval = null
+  }
+})
 </script>
 
 <template>

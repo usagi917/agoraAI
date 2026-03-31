@@ -29,7 +29,7 @@ export function useCognitiveSSE() {
       }
 
       case 'agent_thinking_started':
-        vizStore.setThinkingAgent(payload.agent_id || payload.agent_name || '', payload.agent_name || '')
+        vizStore.setThinkingAgent(payload.agent_id || payload.agent_name || '')
         break
 
       case 'agent_thinking_completed':

@@ -59,10 +59,13 @@ class DeliberationEngine:
             incoming_messages=messages_str,
         )
 
-        await sse_manager.publish(run_id, "agent_thinking_started", {
-            "agent_name": agent_name,
-            "stage": "deliberation",
-        })
+        try:
+            await sse_manager.publish(run_id, "agent_thinking_started", {
+                "agent_name": agent_name,
+                "stage": "deliberation",
+            })
+        except Exception:
+            logger.warning("SSE publish failed for agent_thinking_started (agent=%s)", agent_name)
 
         result, usage = await llm_client.call_with_retry(
             task_name="bdi_deliberate",
@@ -75,12 +78,15 @@ class DeliberationEngine:
         await record_usage(session, run_id, f"bdi_deliberate_{agent_name}", usage)
 
         if not isinstance(result, dict):
-            await sse_manager.publish(run_id, "agent_thinking_completed", {
-                "agent_name": agent_name,
-                "chosen_action": "待機",
-                "reasoning_chain": "推論失敗",
-                "status": "failed",
-            })
+            try:
+                await sse_manager.publish(run_id, "agent_thinking_completed", {
+                    "agent_name": agent_name,
+                    "chosen_action": "待機",
+                    "reasoning_chain": "推論失敗",
+                    "status": "failed",
+                })
+            except Exception:
+                logger.warning("SSE publish failed for agent_thinking_completed (agent=%s)", agent_name)
             return {
                 "reasoning_chain": "推論失敗",
                 "chosen_action": "待機",
@@ -89,12 +95,15 @@ class DeliberationEngine:
                 "belief_updates": [],
             }
 
-        await sse_manager.publish(run_id, "agent_thinking_completed", {
-            "agent_name": agent_name,
-            "chosen_action": result.get("chosen_action", ""),
-            "reasoning_chain": result.get("reasoning_chain", "")[:500],
-            "status": "success",
-        })
+        try:
+            await sse_manager.publish(run_id, "agent_thinking_completed", {
+                "agent_name": agent_name,
+                "chosen_action": result.get("chosen_action", ""),
+                "reasoning_chain": result.get("reasoning_chain", "")[:500],
+                "status": "success",
+            })
+        except Exception:
+            logger.warning("SSE publish failed for agent_thinking_completed (agent=%s)", agent_name)
 
         return result
 

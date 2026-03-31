@@ -126,7 +126,7 @@ export const useAgentVisualizationStore = defineStore('agentVisualization', () =
     agentStatusMap.value[agentId] = status
   }
 
-  function setThinkingAgent(agentId: string, _agentName: string) {
+  function setThinkingAgent(agentId: string) {
     thinkingAgentId.value = agentId
     agentStatusMap.value[agentId] = 'thinking'
 

@@ -334,22 +334,25 @@ class CognitiveAgent:
         session.add(state)
 
         # SSE: フロントエンドにBDI状態をリアルタイム配信
-        await sse_manager.publish(self.run_id, "agent_state_updated", {
-            "agent_id": self.agent_id,
-            "agent_name": self.name,
-            "round": round_number,
-            "beliefs": self.beliefs.to_list()[:20],
-            "desires": [d.to_dict() for d in self.desires],
-            "intentions": [i.to_dict() for i in self.intentions],
-            "action_taken": action_result.get("action_description", ""),
-            "reasoning_chain": deliberation_result.get("reasoning_chain", ""),
-            "trust_map": self.trust_map,
-            "mental_models": {
-                k: {"predicted_action": v.get("predicted_action", ""), "trust_level": v.get("trust_level", 0.5)}
-                for k, v in list(self.mental_models.items())[:5]
-            },
-            "communication_intents": self._communication_intents,
-        })
+        try:
+            await sse_manager.publish(self.run_id, "agent_state_updated", {
+                "agent_id": self.agent_id,
+                "agent_name": self.name,
+                "round": round_number,
+                "beliefs": self.beliefs.to_list()[:20],
+                "desires": [d.to_dict() for d in self.desires],
+                "intentions": [i.to_dict() for i in self.intentions],
+                "action_taken": action_result.get("action_description", ""),
+                "reasoning_chain": deliberation_result.get("reasoning_chain", ""),
+                "trust_map": self.trust_map,
+                "mental_models": {
+                    k: {"predicted_action": v.get("predicted_action", ""), "trust_level": v.get("trust_level", 0.5)}
+                    for k, v in list(self.mental_models.items())[:5]
+                },
+                "communication_intents": self._communication_intents,
+            })
+        except Exception:
+            logger.warning("SSE publish failed for agent_state_updated (agent=%s)", self.agent_id)
 
     @property
     def importance(self) -> float:
