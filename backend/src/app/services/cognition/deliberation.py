@@ -23,6 +23,7 @@ class DeliberationEngine:
         self,
         session,
         run_id: str,
+        agent_id: str | None,
         agent_name: str,
         beliefs: list[dict],
         desires: list[dict],
@@ -32,6 +33,7 @@ class DeliberationEngine:
         incoming_messages: list[dict] | None = None,
     ) -> dict:
         """行動の熟慮・推論を行う。"""
+        stable_agent_id = agent_id or agent_name
         beliefs_str = json.dumps(beliefs[:20], ensure_ascii=False) if beliefs else "[]"
         desires_str = json.dumps(desires, ensure_ascii=False) if desires else "[]"
         intentions_str = json.dumps(intentions, ensure_ascii=False) if intentions else "[]"
@@ -61,6 +63,7 @@ class DeliberationEngine:
 
         try:
             await sse_manager.publish(run_id, "agent_thinking_started", {
+                "agent_id": stable_agent_id,
                 "agent_name": agent_name,
                 "stage": "deliberation",
             })
@@ -80,6 +83,7 @@ class DeliberationEngine:
         if not isinstance(result, dict):
             try:
                 await sse_manager.publish(run_id, "agent_thinking_completed", {
+                    "agent_id": stable_agent_id,
                     "agent_name": agent_name,
                     "chosen_action": "待機",
                     "reasoning_chain": "推論失敗",
@@ -97,6 +101,7 @@ class DeliberationEngine:
 
         try:
             await sse_manager.publish(run_id, "agent_thinking_completed", {
+                "agent_id": stable_agent_id,
                 "agent_name": agent_name,
                 "chosen_action": result.get("chosen_action", ""),
                 "reasoning_chain": result.get("reasoning_chain", "")[:500],

@@ -113,10 +113,14 @@ const {
 
 const commPulse = useCommunicationPulse(graph, getInternalNodes)
 let lastProcessedFlowIndex = 0
+let commPulseFrameId: number | null = null
 
 watch(
   () => vizStore.communicationFlows.length,
   (newLen) => {
+    if (newLen < lastProcessedFlowIndex) {
+      lastProcessedFlowIndex = newLen
+    }
     if (newLen <= lastProcessedFlowIndex) return
     const newFlows = vizStore.communicationFlows.slice(lastProcessedFlowIndex)
     lastProcessedFlowIndex = newLen
@@ -128,6 +132,23 @@ watch(
     }
   },
 )
+
+function startCommunicationPulseLoop() {
+  if (commPulseFrameId !== null) return
+
+  const tick = (time: number) => {
+    commPulse.update(time / 1000)
+    commPulseFrameId = requestAnimationFrame(tick)
+  }
+
+  commPulseFrameId = requestAnimationFrame(tick)
+}
+
+function stopCommunicationPulseLoop() {
+  if (commPulseFrameId === null) return
+  cancelAnimationFrame(commPulseFrameId)
+  commPulseFrameId = null
+}
 
 const stageLabel = computed(() => {
   if (store.isSocietyMode) {
@@ -613,6 +634,7 @@ onMounted(async () => {
   try {
     await bootstrapSimulation()
     agentStatusRing.startAnimationLoop(getInternalNodes)
+    startCommunicationPulseLoop()
   } catch (error) {
     console.error('Simulation bootstrap failed:', error)
     store.init(simId, store.mode, store.promptText)
@@ -627,6 +649,7 @@ onUnmounted(() => {
   societyGraphStore.reset()
   vizStore.reset()
   agentStatusRing.stopAnimationLoop()
+  stopCommunicationPulseLoop()
   commPulse.dispose()
   selectedEntity.value = null
 })

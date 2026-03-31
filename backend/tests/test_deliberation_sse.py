@@ -47,6 +47,7 @@ async def test_deliberate_publishes_thinking_started(
     await engine.deliberate(
         session=db_session,
         run_id="run_1",
+        agent_id="agent_1",
         agent_name="テストエージェント",
         beliefs=[],
         desires=[],
@@ -59,6 +60,7 @@ async def test_deliberate_publishes_thinking_started(
     started_calls = [c for c in calls if c.args[1] == "agent_thinking_started"]
     assert len(started_calls) == 1
     payload = started_calls[0].args[2]
+    assert payload["agent_id"] == "agent_1"
     assert payload["agent_name"] == "テストエージェント"
     assert payload["stage"] == "deliberation"
 
@@ -74,6 +76,7 @@ async def test_deliberate_publishes_thinking_completed(
     result = await engine.deliberate(
         session=db_session,
         run_id="run_1",
+        agent_id="agent_1",
         agent_name="テストエージェント",
         beliefs=[],
         desires=[],
@@ -86,6 +89,7 @@ async def test_deliberate_publishes_thinking_completed(
     completed_calls = [c for c in calls if c.args[1] == "agent_thinking_completed"]
     assert len(completed_calls) == 1
     payload = completed_calls[0].args[2]
+    assert payload["agent_id"] == "agent_1"
     assert payload["agent_name"] == "テストエージェント"
     assert payload["status"] == "success"
     assert "reasoning_chain" in payload
@@ -107,6 +111,7 @@ async def test_thinking_completed_on_failure(
         result = await engine.deliberate(
             session=db_session,
             run_id="run_1",
+            agent_id="agent_1",
             agent_name="テストエージェント",
             beliefs=[],
             desires=[],
@@ -118,4 +123,5 @@ async def test_thinking_completed_on_failure(
         calls = mock_sse.publish.call_args_list
         completed_calls = [c for c in calls if c.args[1] == "agent_thinking_completed"]
         assert len(completed_calls) == 1
+        assert completed_calls[0].args[2]["agent_id"] == "agent_1"
         assert completed_calls[0].args[2]["status"] == "failed"

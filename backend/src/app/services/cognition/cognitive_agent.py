@@ -229,7 +229,7 @@ class CognitiveAgent:
     async def deliberate(self, session: AsyncSession, round_number: int) -> dict:
         """熟慮・行動計画を立てる。"""
         result = await self.deliberation.deliberate(
-            session, self.run_id, self.name,
+            session, self.run_id, self.agent_id, self.name,
             beliefs=self.beliefs.to_list(),
             desires=[d.to_dict() for d in self.desires],
             intentions=[i.to_dict() for i in self.intentions],
