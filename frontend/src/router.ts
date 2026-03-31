@@ -20,11 +20,6 @@ const router = createRouter({
       component: () => import('./pages/ResultsPage.vue'),
     },
     {
-      path: '/sample/:id',
-      name: 'sample',
-      component: () => import('./pages/SampleResultPage.vue'),
-    },
-    {
       path: '/populations',
       name: 'populations',
       component: () => import('./pages/PopulationPage.vue'),

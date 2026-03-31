@@ -1,35 +1,61 @@
-# Task: シミュレーション精度・堅牢性改善 (H1, H2, M1-M5)
+# Task: Real-Time Agent Visualization Enhancement
 
-> Plan: `plans/hashed-jumping-dijkstra.md`
+> Plan: `plans/kind-prancing-beaver.md`
 > Created: 2026-03-31
 
 ---
 
-## Phase 1: H1 — LMSR 数値オーバーフロー修正
-- [x] Red: オーバーフローテスト追加 (`test_prediction_market.py`)
-- [x] Green: log-sum-exp トリック適用 (`prediction_market.py`)
-- [x] Refactor: 既存テスト全パス確認 (16/16 passed)
+## Phase 1: AgentActivityTicker (最優先)
 
-## Phase 2: H2 — Poststratification cap 後の再正規化
-- [x] Red: cap 後 mean≈1.0 保証テスト追加 (`test_statistical_inference.py`)
-- [x] Green: 反復正規化実装 (`statistical_inference.py`)
-- [x] Refactor: 既存テスト全パス確認 (23/23 passed)
+### Store拡張 (Red -> Green -> Refactor)
+- [x] agentVisualizationStore.spec.ts: tickerEvents computed テスト追加
+- [x] agentVisualizationStore.spec.ts: addDialogueEvent テスト追加
+- [x] agentVisualizationStore.ts: TickerEvent interface + dialogueEvents + addDialogueEvent + tickerEvents 実装
+- [x] テスト通過確認 (15/15)
 
-## Phase 3: M1-M2 — KL divergence / EMD の重複解消
-- [x] Red: `distribution_metrics.py` 単体テスト作成
-- [x] Green: 共通モジュール作成 + import 差し替え
-- [x] Refactor: 重複コード削除、既存テスト全パス確認 (47/47 passed)
+### AgentActivityTicker コンポーネント (Red -> Green -> Refactor)
+- [x] AgentActivityTicker.spec.ts: テスト作成
+- [x] AgentActivityTicker.vue: コンポーネント実装
+- [x] テスト通過確認 (7/7)
 
-## Phase 4: M3 — auto_compare の冗長計算解消
-- [x] Green: `best_match_source` を活用し KL 再計算削除
-- [x] Refactor: 不要 import 削除、既存テスト全パス確認 (21/21 passed)
+### SSE統合 + SimulationPage統合
+- [x] useCognitiveSSE.ts: debate_result/conversation の通信フロー充実化
+- [x] useSimulationSSE.ts: meeting_dialogue で addDialogueEvent 呼び出し
+- [x] SimulationPage.vue: AgentActivityTicker 配置
+- [x] 型チェック通過
 
-## Phase 5: M4 — Polarization Index の飽和問題修正
-- [x] Red: U字型分布の polarization テスト追加
-- [x] Green: 正規化分母を 0.083 → 0.25 に変更
-- [x] Refactor: 既存テスト全パス確認 (20/20 passed)
+## Phase 2: LiveDialogueStream
 
-## Phase 6: M5 — Stance-Opinion 変換の非対称性
-- [x] Red: 低 confidence roundtrip テスト追加
-- [x] Green: ドキュメントコメント追加
-- [x] Refactor: 全テストスイート 845 passed
+### コンポーネント (Red -> Green -> Refactor)
+- [x] LiveDialogueStream.spec.ts: テスト作成
+- [x] LiveDialogueStream.vue: コンポーネント実装
+- [x] テスト通過確認 (4/4)
+
+### ページ統合
+- [x] layoutRules.ts: dialogue タブ追加
+- [x] SimulationPage.vue: LiveDialogueStream 統合
+- [x] 型チェック通過
+
+## Phase 3: Communication Pulse Lines
+
+### Composable (Red -> Green -> Refactor)
+- [x] useCommunicationPulse.spec.ts: テスト作成
+- [x] useCommunicationPulse.ts: composable 実装
+- [x] テスト通過確認 (5/5)
+
+### グラフ統合
+- [x] SimulationPage.vue: useCommunicationPulse 統合 + communicationFlows watch
+- [x] 型チェック通過
+
+## Phase 4: DigitalWorkspaceBackground
+
+### コンポーネント (Red -> Green -> Refactor)
+- [x] DigitalWorkspaceBackground.spec.ts: テスト作成
+- [x] DigitalWorkspaceBackground.vue: コンポーネント実装
+- [x] テスト通過確認 (4/4)
+- [x] SimulationPage.vue: graph-empty-backdrop 置換
+- [x] 型チェック通過
+
+## 最終検証
+- [x] pnpm test 全通過 (81/81 passed, 18 test files)
+- [x] pnpm build エラーなし (367ms)

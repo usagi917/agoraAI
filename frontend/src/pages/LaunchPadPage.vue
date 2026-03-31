@@ -286,37 +286,8 @@ function getPipelineStageLabel(stage: string) {
         {{ bootstrapError || runtimeHealth?.live_simulation_message }}
       </p>
       <p v-if="runtimeHealth && !runtimeHealth.live_simulation_available" class="runtime-hint">
-        `docker compose up --build` だけでサンプル結果は見られます。ライブ実行を有効にするには、`OPENAI_API_KEY` を `.env` またはシェル環境変数で渡してください。
+        ライブ実行を有効にするには、`OPENAI_API_KEY` を `.env` またはシェル環境変数で渡してください。
       </p>
-    </section>
-
-    <!-- Sample Results -->
-    <section class="section">
-      <div class="section-header">
-        <h3 class="section-title">サンプルを見る</h3>
-        <span class="section-badge">API Key不要</span>
-      </div>
-      <p class="sample-desc">APIキーなしでも分析結果のデモをご覧いただけます。</p>
-      <div class="sample-grid">
-        <router-link to="/sample/sample-business-001" class="sample-card">
-          <div class="sample-card-top">
-            <span class="sample-mode-tag unified">UNIFIED</span>
-            <span class="sample-category">ビジネス分析</span>
-          </div>
-          <h4 class="sample-card-title">EVバッテリー市場参入分析</h4>
-          <p class="sample-card-desc">1,000人の社会反応 + 10人の評議会議論 + Decision Briefの統合レポート</p>
-          <span class="sample-card-cta">結果を見る &rarr;</span>
-        </router-link>
-        <router-link to="/sample/sample-pmboard-001" class="sample-card">
-          <div class="sample-card-top">
-            <span class="sample-mode-tag unified">UNIFIED</span>
-            <span class="sample-category">政策シミュレーション</span>
-          </div>
-          <h4 class="sample-card-title">建設プロジェクト管理SaaS</h4>
-          <p class="sample-card-desc">社会受容性分析 + ステークホルダー反応予測 + Go/No-Go判定</p>
-          <span class="sample-card-cta">結果を見る &rarr;</span>
-        </router-link>
-      </div>
     </section>
 
     <!-- Unified Input Section -->
@@ -625,14 +596,6 @@ function getPipelineStageLabel(stage: string) {
 @keyframes connectorPulse {
   0%, 100% { opacity: 0.4; }
   50% { opacity: 1; }
-}
-
-.sample-mode-tag.unified {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.15));
-  color: #a5b4fc;
-  border-color: rgba(99, 102, 241, 0.35);
-  font-weight: 700;
-  letter-spacing: 0.06em;
 }
 
 .runtime-notice {
@@ -1016,79 +979,6 @@ function getPipelineStageLabel(stage: string) {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-}
-
-.sample-desc {
-  font-size: 0.82rem;
-  color: var(--text-muted);
-  margin-bottom: 0.75rem;
-}
-
-.sample-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-  gap: 0.75rem;
-}
-
-.sample-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--panel-padding);
-  cursor: pointer;
-  transition: border-color 0.25s, box-shadow 0.25s;
-  text-decoration: none;
-  color: var(--text-primary);
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.sample-card:hover {
-  border-color: var(--accent);
-  box-shadow: 0 0 12px rgba(99, 102, 241, 0.15);
-}
-
-.sample-card-top {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.sample-mode-tag {
-  font-family: var(--font-mono);
-  font-size: 0.6rem;
-  font-weight: 700;
-  padding: 0.1rem 0.35rem;
-  border-radius: 3px;
-  background: var(--accent-subtle);
-  color: var(--accent);
-  text-transform: uppercase;
-}
-
-.sample-category {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  color: var(--text-muted);
-}
-
-.sample-card-title {
-  font-size: 0.95rem;
-  font-weight: 600;
-}
-
-.sample-card-desc {
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
-
-.sample-card-cta {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--accent);
-  font-weight: 500;
-  margin-top: auto;
 }
 
 .template-grid {

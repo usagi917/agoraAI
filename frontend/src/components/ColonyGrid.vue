@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ColonyState } from '../stores/simulationStore'
 
-const props = defineProps<{
+defineProps<{
   colonies: ColonyState[]
 }>()
 
@@ -24,6 +24,25 @@ const statusLabel = (status: string) => {
     default: return status
   }
 }
+
+function progressPercent(colony: ColonyState): number {
+  return colony.totalRounds > 0 ? (colony.currentRound / colony.totalRounds) * 100 : 0
+}
+
+function sparklinePoints(colony: ColonyState): string {
+  if (colony.totalRounds <= 0) return ''
+  const total = colony.totalRounds
+  const current = colony.currentRound
+  const width = 80
+  const height = 16
+  const points: string[] = []
+  for (let i = 0; i <= Math.min(current, total); i++) {
+    const x = (i / total) * width
+    const y = height - (i / total) * height * 0.8 - Math.sin(i * 0.8) * 2
+    points.push(`${x},${y}`)
+  }
+  return points.join(' ')
+}
 </script>
 
 <template>
@@ -32,8 +51,11 @@ const statusLabel = (status: string) => {
       v-for="colony in colonies"
       :key="colony.id"
       class="colony-card"
-      :class="{ adversarial: colony.adversarial, running: colony.status === 'running' }"
+      :class="{ adversarial: colony.adversarial, running: colony.status === 'running', completed: colony.status === 'completed' }"
     >
+      <!-- アクセントライン -->
+      <div class="accent-line" :style="{ background: colony.status === 'running' ? `linear-gradient(90deg, var(--accent), var(--success))` : colony.status === 'completed' ? `var(--success)` : `var(--border)` }" />
+
       <div class="colony-header">
         <span class="colony-index">C{{ colony.colonyIndex + 1 }}</span>
         <span
@@ -43,20 +65,36 @@ const statusLabel = (status: string) => {
         >
           敵対
         </span>
+        <span v-if="colony.status === 'completed'" class="check-badge">&#10003;</span>
       </div>
 
       <div class="colony-perspective">{{ colony.perspectiveLabel }}</div>
 
       <div class="colony-meta">
         <span class="meta-item" title="温度">T={{ colony.temperature }}</span>
+        <span v-if="colony.eventCount" class="meta-item event-count" title="イベント数">{{ colony.eventCount }} events</span>
+      </div>
+
+      <!-- スパークライン -->
+      <div v-if="colony.status === 'running' || colony.status === 'completed'" class="colony-sparkline">
+        <svg viewBox="0 0 80 16" preserveAspectRatio="none" class="sparkline-svg">
+          <polyline
+            :points="sparklinePoints(colony)"
+            fill="none"
+            :stroke="colony.status === 'completed' ? 'var(--success)' : 'var(--accent)'"
+            stroke-width="1.5"
+            stroke-linejoin="round"
+            stroke-linecap="round"
+          />
+        </svg>
       </div>
 
       <div class="colony-progress" v-if="colony.status === 'running'">
         <div class="progress-bar">
           <div
             class="progress-fill"
-            :style="{ width: colony.totalRounds > 0 ? `${(colony.currentRound / colony.totalRounds) * 100}%` : '0%' }"
-          ></div>
+            :style="{ width: `${progressPercent(colony)}%` }"
+          />
         </div>
         <span class="progress-text">{{ colony.currentRound }}/{{ colony.totalRounds }}</span>
       </div>
@@ -65,7 +103,7 @@ const statusLabel = (status: string) => {
         <span
           class="status-dot"
           :style="{ background: statusColor(colony.status) }"
-        ></span>
+        />
         {{ statusLabel(colony.status) }}
       </div>
     </div>
@@ -83,16 +121,39 @@ const statusLabel = (status: string) => {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 1rem;
-  transition: border-color 0.3s;
+  padding: 0;
+  overflow: hidden;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.colony-card > *:not(.accent-line) {
+  padding: 0 1rem;
+}
+
+.colony-card > .colony-header {
+  padding-top: 0.75rem;
+}
+
+.colony-card > .colony-status {
+  padding-bottom: 0.75rem;
 }
 
 .colony-card.running {
   border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.08);
+}
+
+.colony-card.completed {
+  border-color: rgba(34, 197, 94, 0.3);
 }
 
 .colony-card.adversarial {
   border-left: 3px solid var(--danger);
+}
+
+.accent-line {
+  height: 3px;
+  width: 100%;
 }
 
 .colony-header {
@@ -118,6 +179,12 @@ const statusLabel = (status: string) => {
   border-radius: 999px;
 }
 
+.check-badge {
+  font-size: 0.7rem;
+  color: var(--success);
+  font-weight: 700;
+}
+
 .colony-perspective {
   font-size: 0.8rem;
   color: var(--text-secondary);
@@ -137,12 +204,28 @@ const statusLabel = (status: string) => {
   color: var(--text-muted);
 }
 
+.event-count {
+  color: var(--accent);
+  opacity: 0.7;
+}
+
+.colony-sparkline {
+  height: 16px;
+  margin-bottom: 0.4rem;
+}
+
+.sparkline-svg {
+  width: 100%;
+  height: 100%;
+  opacity: 0.6;
+}
+
 .colony-progress {
   margin-bottom: 0.5rem;
 }
 
 .progress-bar {
-  height: 3px;
+  height: 4px;
   background: var(--border);
   border-radius: 2px;
   overflow: hidden;
@@ -151,7 +234,7 @@ const statusLabel = (status: string) => {
 
 .progress-fill {
   height: 100%;
-  background: var(--accent);
+  background: linear-gradient(90deg, var(--accent), var(--success));
   border-radius: 2px;
   transition: width 0.3s ease;
 }

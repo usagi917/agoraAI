@@ -28,8 +28,6 @@ class Settings(BaseSettings):
     config_dir: Path = _project_root / "config"
     templates_dir: Path = _project_root / "templates"
     data_dir: Path = _project_root / "data"
-    sample_results_dir: Path = _project_root / "sample_results"
-
     # Swarm settings
     max_concurrent_colonies: int = 5
     llm_cache_ttl: int = 3600  # seconds

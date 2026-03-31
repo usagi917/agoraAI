@@ -898,9 +898,3 @@ export async function getTranscript(
   return data
 }
 
-// === Sample Results API (API Key不要) ===
-
-export async function getSampleResult(sampleId: string) {
-  const { data } = await api.get(`/simulations/samples/${sampleId}`)
-  return data
-}

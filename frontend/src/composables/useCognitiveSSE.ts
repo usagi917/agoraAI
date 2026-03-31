@@ -1,5 +1,6 @@
 import { useCognitiveStore, type AgentBDIState, type MemoryEntry, type ReflectionEntry, type ToMRelation } from '../stores/cognitiveStore'
 import { useEvaluationStore, type EvaluationRound } from '../stores/evaluationStore'
+import { useAgentVisualizationStore } from '../stores/agentVisualizationStore'
 
 /**
  * 認知シミュレーション用SSEイベントハンドラー。
@@ -8,6 +9,7 @@ import { useEvaluationStore, type EvaluationRound } from '../stores/evaluationSt
 export function useCognitiveSSE() {
   const cognitiveStore = useCognitiveStore()
   const evaluationStore = useEvaluationStore()
+  const vizStore = useAgentVisualizationStore()
 
   function handleCognitiveEvent(eventType: string, payload: Record<string, any>) {
     switch (eventType) {
@@ -26,6 +28,24 @@ export function useCognitiveSSE() {
         break
       }
 
+      case 'agent_thinking_started':
+        vizStore.setThinkingAgent(payload.agent_id || payload.agent_name || '', payload.agent_name || '')
+        break
+
+      case 'agent_thinking_completed':
+        vizStore.clearThinkingAgent(payload.agent_id || payload.agent_name || '')
+        if (payload.status === 'success') {
+          vizStore.addRecentThought({
+            agentId: payload.agent_id || payload.agent_name || '',
+            agentName: payload.agent_name || '',
+            reasoningChain: payload.reasoning_chain || '',
+            chosenAction: payload.chosen_action || '',
+            timestamp: Date.now(),
+          })
+          vizStore.setAgentStatus(payload.agent_id || payload.agent_name || '', 'executing')
+        }
+        break
+
       case 'agent_state_updated': {
         const state: AgentBDIState = {
           agentId: payload.agent_id,
@@ -40,6 +60,7 @@ export function useCognitiveSSE() {
           mentalModels: payload.mental_models || {},
         }
         cognitiveStore.updateAgentState(state)
+        vizStore.setAgentStatus(payload.agent_id, 'idle')
         break
       }
 
@@ -108,6 +129,51 @@ export function useCognitiveSSE() {
         evaluationStore.addRound(evaluation)
         break
       }
+
+      case 'conversation_started':
+        if (payload.initiator_id) {
+          const participants = payload.participants || []
+          const targetId = participants.find((p: string) => p !== payload.initiator_id) || ''
+          vizStore.addCommunicationFlow({
+            sourceId: payload.initiator_id,
+            targetId,
+            messageType: 'conversation',
+            content: payload.topic || 'conversation started',
+            timestamp: Date.now(),
+          })
+        }
+        break
+
+      case 'conversation_turn_advanced':
+      case 'conversation_concluded':
+        if (payload.initiator_id && payload.channel_id) {
+          vizStore.addCommunicationFlow({
+            sourceId: payload.initiator_id,
+            targetId: '',
+            messageType: 'conversation',
+            content: payload.topic || eventType,
+            timestamp: Date.now(),
+          })
+        }
+        break
+
+      case 'debate_result':
+        if (payload.winner_agent_id) {
+          vizStore.setAgentStatus(payload.winner_agent_id, 'idle')
+        }
+        for (const arg of payload.arguments || []) {
+          if (arg.agent_id) {
+            vizStore.setAgentStatus(arg.agent_id, 'idle')
+            vizStore.addCommunicationFlow({
+              sourceId: arg.agent_id,
+              targetId: payload.winner_agent_id || '',
+              messageType: 'debate',
+              content: arg.claim || arg.type || 'debate argument',
+              timestamp: Date.now(),
+            })
+          }
+        }
+        break
     }
   }
 

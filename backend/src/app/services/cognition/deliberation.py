@@ -7,6 +7,7 @@ from src.app.llm.client import llm_client
 from src.app.llm.prompts import BDI_DELIBERATE_SYSTEM, BDI_DELIBERATE_USER
 from src.app.llm.validator import validate_bdi_deliberation
 from src.app.services.cost_tracker import record_usage
+from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,11 @@ class DeliberationEngine:
             incoming_messages=messages_str,
         )
 
+        await sse_manager.publish(run_id, "agent_thinking_started", {
+            "agent_name": agent_name,
+            "stage": "deliberation",
+        })
+
         result, usage = await llm_client.call_with_retry(
             task_name="bdi_deliberate",
             system_prompt=BDI_DELIBERATE_SYSTEM,
@@ -69,6 +75,12 @@ class DeliberationEngine:
         await record_usage(session, run_id, f"bdi_deliberate_{agent_name}", usage)
 
         if not isinstance(result, dict):
+            await sse_manager.publish(run_id, "agent_thinking_completed", {
+                "agent_name": agent_name,
+                "chosen_action": "待機",
+                "reasoning_chain": "推論失敗",
+                "status": "failed",
+            })
             return {
                 "reasoning_chain": "推論失敗",
                 "chosen_action": "待機",
@@ -76,6 +88,13 @@ class DeliberationEngine:
                 "commitment_strength": 0.5,
                 "belief_updates": [],
             }
+
+        await sse_manager.publish(run_id, "agent_thinking_completed", {
+            "agent_name": agent_name,
+            "chosen_action": result.get("chosen_action", ""),
+            "reasoning_chain": result.get("reasoning_chain", "")[:500],
+            "status": "success",
+        })
 
         return result
 

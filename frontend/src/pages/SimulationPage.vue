@@ -27,6 +27,14 @@ import SocietyProgress from '../components/SocietyProgress.vue'
 import OpinionDistribution from '../components/OpinionDistribution.vue'
 import LiveSocietyGraph from '../components/LiveSocietyGraph.vue'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
+import { useCognitiveStore } from '../stores/cognitiveStore'
+import { useAgentVisualizationStore } from '../stores/agentVisualizationStore'
+import { useAgentStatusRing } from '../composables/useAgentStatusRing'
+import { useCommunicationPulse, type PulseType } from '../composables/useCommunicationPulse'
+import ThinkingPanel from '../components/ThinkingPanel.vue'
+import AgentActivityTicker from '../components/AgentActivityTicker.vue'
+import LiveDialogueStream from '../components/LiveDialogueStream.vue'
+import DigitalWorkspaceBackground from '../components/DigitalWorkspaceBackground.vue'
 import {
   getDefaultLiveSecondaryTab,
   getLivePrimaryView,
@@ -61,6 +69,8 @@ const store = useSimulationStore()
 const graphStore = useGraphStore()
 const activityStore = useActivityStore()
 const societyGraphStore = useSocietyGraphStore()
+const cognitiveStore = useCognitiveStore()
+const vizStore = useAgentVisualizationStore()
 const sse = useSimulationSSE(simId)
 
 const entityTypeColors: Record<string, string> = {
@@ -90,13 +100,34 @@ const thinkingMode = computed<ThinkingVisualMode>(() => {
   return 'idle'
 })
 
+const agentStatusRing = useAgentStatusRing()
+
 const {
   graph,
   graphError,
   setFullGraph,
   applyDiff: applyGraphDiff,
   resetCamera,
-} = useForceGraph(graphCanvas, thinkingMode)
+  getInternalNodes,
+} = useForceGraph(graphCanvas, thinkingMode, { nodeExtension: agentStatusRing.nodeExtension })
+
+const commPulse = useCommunicationPulse(graph, getInternalNodes)
+let lastProcessedFlowIndex = 0
+
+watch(
+  () => vizStore.communicationFlows.length,
+  (newLen) => {
+    if (newLen <= lastProcessedFlowIndex) return
+    const newFlows = vizStore.communicationFlows.slice(lastProcessedFlowIndex)
+    lastProcessedFlowIndex = newLen
+    for (const flow of newFlows) {
+      const pulseType: PulseType = flow.messageType === 'debate' ? 'debate'
+        : flow.messageType === 'conversation' ? 'communication'
+        : 'thinking'
+      commPulse.addPulseLine(flow.sourceId, flow.targetId, pulseType)
+    }
+  },
+)
 
 const stageLabel = computed(() => {
   if (store.isSocietyMode) {
@@ -311,6 +342,7 @@ const liveLayoutContext = computed(() => ({
   mode: sim.value?.mode,
   hasColonies: showColonyGrid.value,
   hasActivity: activityStore.entries.length > 0 || !!store.promptText,
+  hasCognitiveData: cognitiveStore.cognitiveMode === 'advanced' || vizStore.recentThoughts.length > 0,
 }))
 const livePrimaryView = computed<LivePrimaryView>(() => getLivePrimaryView(liveLayoutContext.value))
 const liveSecondaryTabs = computed<LiveSecondaryTab[]>(() => getLiveSecondaryTabs(liveLayoutContext.value))
@@ -319,6 +351,8 @@ const liveSecondaryLabels: Record<LiveSecondaryTab, string> = {
   activity: 'Activity',
   society: 'Society',
   colonies: 'Colonies',
+  thinking: 'Thinking',
+  dialogue: 'Dialogue',
 }
 const livePrimaryTitle = computed(() => (
   livePrimaryView.value === 'society'
@@ -578,6 +612,7 @@ async function bootstrapSimulation() {
 onMounted(async () => {
   try {
     await bootstrapSimulation()
+    agentStatusRing.startAnimationLoop(getInternalNodes)
   } catch (error) {
     console.error('Simulation bootstrap failed:', error)
     store.init(simId, store.mode, store.promptText)
@@ -590,6 +625,9 @@ onUnmounted(() => {
   graphStore.reset()
   activityStore.clear()
   societyGraphStore.reset()
+  vizStore.reset()
+  agentStatusRing.stopAnimationLoop()
+  commPulse.dispose()
   selectedEntity.value = null
 })
 
@@ -793,7 +831,12 @@ function goToResults() {
                 </div>
               </div>
               <div v-else-if="graphStore.nodes.length === 0" class="graph-empty" :class="graphContainerClass">
-                <div class="graph-empty-backdrop"></div>
+                <DigitalWorkspaceBackground :mode="thinkingMode" />
+                <div class="graph-empty-rings">
+                  <div class="ring ring-1" />
+                  <div class="ring ring-2" />
+                  <div class="ring ring-3" />
+                </div>
                 <div class="graph-empty-shell">
                   <div class="graph-empty-eyebrow">{{ emptyState.eyebrow }}</div>
                   <div class="graph-empty-title">{{ emptyState.title }}</div>
@@ -811,6 +854,7 @@ function goToResults() {
                 <span class="phase-label">{{ phaseOverlay.label }}</span>
               </div>
             </template>
+            <AgentActivityTicker />
           </div>
           <button v-if="!store.isSocietyMode && graphStore.nodes.length > 0 && !graphError" class="reset-camera-btn" @click="resetCamera" title="中心に戻す">&#8962;</button>
           <div v-if="!store.isSocietyMode && graphStore.nodes.length > 0 && !graphError" class="graph-legend">
@@ -917,6 +961,14 @@ function goToResults() {
           </div>
           <ColonyGrid v-if="showColonyGrid" :colonies="store.colonies" />
           <p v-else class="prompt-text">現在のフェーズでは colony は表示されません。</p>
+        </div>
+
+        <div v-if="activeSecondaryTab === 'thinking'" class="panel-card thinking-tab">
+          <ThinkingPanel />
+        </div>
+
+        <div v-if="activeSecondaryTab === 'dialogue'" class="panel-card dialogue-tab">
+          <LiveDialogueStream />
         </div>
       </div>
     </div>
@@ -1122,6 +1174,31 @@ function goToResults() {
   animation: breathe 5s ease-in-out infinite;
 }
 
+.graph-empty-rings {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(59, 130, 246, 0.15);
+  animation: ring-expand 4s ease-out infinite;
+}
+
+.ring-1 { width: 80px; height: 80px; animation-delay: 0s; }
+.ring-2 { width: 80px; height: 80px; animation-delay: 1.3s; }
+.ring-3 { width: 80px; height: 80px; animation-delay: 2.6s; }
+
+@keyframes ring-expand {
+  0% { transform: scale(1); opacity: 0.6; border-color: rgba(59, 130, 246, 0.3); }
+  100% { transform: scale(4); opacity: 0; border-color: rgba(59, 130, 246, 0); }
+}
+
 .graph-empty-shell {
   position: relative;
   z-index: 1;
@@ -1214,6 +1291,8 @@ function goToResults() {
 }
 
 .panel-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--panel-padding); }
+.thinking-tab { min-height: 20rem; max-height: 36rem; overflow-y: auto; }
+.dialogue-tab { flex: 1; min-height: 20rem; overflow: hidden; }
 .panel-count { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); background: rgba(255,255,255,0.04); padding: 0.1rem 0.4rem; border-radius: 4px; }
 .panel-count.live { color: var(--success); background: rgba(34,197,94,0.1); }
 
