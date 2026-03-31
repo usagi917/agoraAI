@@ -84,6 +84,33 @@ class TestStanceOpinionConversion:
             recovered = _convert_opinion_to_stance(opinion)
             assert recovered == stance
 
+    def test_low_confidence_roundtrip_compresses_extreme_stances(self):
+        """Low confidence compresses extreme stances toward center.
+
+        This is intentional: an agent who says "賛成" with confidence=0.3
+        is effectively "条件付き賛成" — their low conviction moderates
+        their position. The opinion value 0.62 falls in the 条件付き賛成
+        band [0.6, 0.8).
+        """
+        # 賛成 + low confidence → opinion closer to center → 条件付き賛成
+        opinion = _convert_stance_to_opinion("賛成", 0.3)
+        recovered = _convert_opinion_to_stance(opinion)
+        assert recovered == "条件付き賛成", (
+            f"賛成 with confidence=0.3 should compress to 条件付き賛成, got {recovered}"
+        )
+
+        # 反対 + low confidence → opinion closer to center → 条件付き反対
+        opinion = _convert_stance_to_opinion("反対", 0.3)
+        recovered = _convert_opinion_to_stance(opinion)
+        assert recovered == "条件付き反対", (
+            f"反対 with confidence=0.3 should compress to 条件付き反対, got {recovered}"
+        )
+
+        # 中立 is stable at any confidence (base=0.5, always maps back)
+        opinion = _convert_stance_to_opinion("中立", 0.3)
+        recovered = _convert_opinion_to_stance(opinion)
+        assert recovered == "中立"
+
 
 # ===========================================================================
 # Test: Reflection Trigger
@@ -276,6 +303,71 @@ class TestEchoChamberMetrics:
 # ===========================================================================
 # Test: LLM Reflection
 # ===========================================================================
+
+class TestPolarizationIndex:
+    """Polarization index should distinguish degrees of bimodality."""
+
+    @pytest.mark.asyncio
+    async def test_polarization_distinguishes_moderate_from_extreme(self):
+        """Moderate polarization should have lower index than extreme polarization."""
+        from src.app.services.society.network_propagation import _compute_echo_chamber_metrics
+
+        # Moderate: opinions clustered at 0.3 and 0.7
+        moderate_agents = [
+            {"id": f"a{i}", "opinion": [0.3]} for i in range(5)
+        ] + [
+            {"id": f"b{i}", "opinion": [0.7]} for i in range(5)
+        ]
+        edges = [{"agent_id": "a0", "target_id": "b0"}]
+
+        # Extreme: opinions at 0.0 and 1.0
+        extreme_agents = [
+            {"id": f"a{i}", "opinion": [0.0]} for i in range(5)
+        ] + [
+            {"id": f"b{i}", "opinion": [1.0]} for i in range(5)
+        ]
+
+        moderate_metrics = _compute_echo_chamber_metrics(moderate_agents, edges)
+        extreme_metrics = _compute_echo_chamber_metrics(extreme_agents, edges)
+
+        assert extreme_metrics["polarization_index"] > moderate_metrics["polarization_index"], (
+            f"Extreme ({extreme_metrics['polarization_index']}) should be > "
+            f"moderate ({moderate_metrics['polarization_index']})"
+        )
+
+    @pytest.mark.asyncio
+    async def test_polarization_not_saturated_for_semi_extreme(self):
+        """Semi-extreme bimodal (0.15 vs 0.85) should NOT saturate to same value
+        as fully extreme (0.0 vs 1.0). Variance 0.1225 should remain < 1.0.
+
+        With 0.083 normalization: 0.1225/0.083 = 1.48 → clamped to 1.0 (saturated!)
+        With 0.25 normalization: 0.1225/0.25 = 0.49 (correct differentiation)
+        """
+        from src.app.services.society.network_propagation import _compute_echo_chamber_metrics
+
+        # Semi-extreme: 0.15 vs 0.85
+        semi_agents = [
+            {"id": f"a{i}", "opinion": [0.15]} for i in range(5)
+        ] + [
+            {"id": f"b{i}", "opinion": [0.85]} for i in range(5)
+        ]
+        # Fully extreme: 0.0 vs 1.0
+        extreme_agents = [
+            {"id": f"a{i}", "opinion": [0.0]} for i in range(5)
+        ] + [
+            {"id": f"b{i}", "opinion": [1.0]} for i in range(5)
+        ]
+        edges = [{"agent_id": "a0", "target_id": "b0"}]
+
+        semi_metrics = _compute_echo_chamber_metrics(semi_agents, edges)
+        extreme_metrics = _compute_echo_chamber_metrics(extreme_agents, edges)
+
+        # Semi-extreme should be strictly less than fully extreme
+        assert semi_metrics["polarization_index"] < extreme_metrics["polarization_index"], (
+            f"Semi-extreme ({semi_metrics['polarization_index']}) should be < "
+            f"extreme ({extreme_metrics['polarization_index']}), but both saturated"
+        )
+
 
 class TestLLMReflection:
     """LLM reflection should generate explanations for agents with large opinion shifts."""

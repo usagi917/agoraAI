@@ -345,3 +345,30 @@ class TestComputePoststratificationWeights:
         weights = compute_poststratification_weights(agents, responses, target, cap=5.0)
 
         assert len(weights) == n
+
+    def test_poststratification_mean_one_after_cap(self):
+        """cap 適用後もウェイトの平均が ≈ 1.0 であること。
+
+        1人だけ稀少カテゴリ（70+ & その他 & other）で cap=2.0 とすると、
+        raking で高ウェイトが割り当てられた後 cap でクリップされる。
+        再正規化がなければ mean ≠ 1.0 になる。
+        """
+        agents = [
+            {"demographics": {"age": 75, "age_bracket": "70+", "region": "その他", "gender": "other"}},
+        ] + [
+            {"demographics": {"age": 25, "age_bracket": "18-29", "region": "関東", "gender": "male"}}
+            for _ in range(19)
+        ]
+        responses = self._make_responses(20)
+        target = {
+            "age_bracket": {"18-29": 0.13, "30-49": 0.30, "50-69": 0.31, "70+": 0.26},
+            "region": {"関東": 0.35, "その他": 0.65},
+            "gender": {"male": 0.485, "other": 0.515},
+        }
+
+        weights = compute_poststratification_weights(agents, responses, target, cap=2.0)
+
+        mean_w = sum(weights) / len(weights)
+        assert math.isclose(mean_w, 1.0, abs_tol=0.05), (
+            f"Mean weight after cap should be ≈ 1.0, got {mean_w:.4f}"
+        )

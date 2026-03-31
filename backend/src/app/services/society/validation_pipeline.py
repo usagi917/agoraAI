@@ -20,7 +20,6 @@ from src.app.repositories.validation_repo import ValidationRepository
 from src.app.services.society.survey_anchor import (
     ComparisonReport,
     compare_with_surveys,
-    kl_divergence_symmetric,
 )
 from src.app.services.society.transfer_calibrator import (
     BiasProfile,
@@ -70,12 +69,9 @@ async def auto_compare(
         return None
 
     repo = ValidationRepository(session)
-    best_survey = min(
-        report["matched_surveys"],
-        key=lambda survey: kl_divergence_symmetric(
-            record.simulated_distribution,
-            survey["stance_distribution"],
-        ),
+    best_survey = next(
+        s for s in report["matched_surveys"]
+        if s["source"] == report["best_match_source"]
     )
     await repo.resolve(
         record_id=record.id,

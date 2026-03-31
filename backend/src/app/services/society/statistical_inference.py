@@ -253,13 +253,15 @@ def compute_poststratification_weights(
         if max_change < tol:
             break
 
-    # 正規化: 平均ウェイト = 1.0 になるよう正規化
-    mean_w = sum(weights) / n
-    if mean_w > 0:
-        weights = [w / mean_w for w in weights]
-
-    # cap を再適用（正規化後に超えた場合）
-    weights = [min(w, cap) for w in weights]
+    # 正規化 + cap を収束するまで反復（cap でクリップ後も mean=1.0 を保証）
+    for _ in range(10):
+        mean_w = sum(weights) / n
+        if mean_w > 0:
+            weights = [w / mean_w for w in weights]
+        capped = [min(w, cap) for w in weights]
+        if capped == weights:
+            break
+        weights = capped
 
     return weights
 

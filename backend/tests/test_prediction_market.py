@@ -151,3 +151,37 @@ class TestBrierScore:
 
         brier = market.compute_brier_score("B")
         assert brier > 0.5  # poor prediction
+
+
+class TestNumericalStability:
+    """LMSR should not overflow with extreme quantities."""
+
+    def test_large_quantities_no_overflow(self):
+        """Very large quantities should not cause OverflowError."""
+        market = PredictionMarket(outcomes=["A", "B"], liquidity=10.0)
+        # Simulate many high-confidence bets on one outcome
+        for i in range(1000):
+            market.submit_bet(f"agent_{i}", "A", confidence=0.95)
+
+        prices = market.get_prices()
+        assert sum(prices.values()) == pytest.approx(1.0, abs=0.01)
+        assert prices["A"] > prices["B"]
+
+    def test_extreme_quantity_difference(self):
+        """Extreme imbalance (q=10000 vs q=0) should not overflow."""
+        market = PredictionMarket(outcomes=["A", "B"], liquidity=10.0)
+        # Directly set extreme quantities
+        market._quantities["A"] = 10000.0
+        market._quantities["B"] = 0.0
+
+        prices = market.get_prices()
+        assert sum(prices.values()) == pytest.approx(1.0, abs=0.01)
+        # A should dominate
+        assert prices["A"] > 0.99
+
+    def test_all_zero_quantities_uniform(self):
+        """All-zero quantities should give uniform prices (no division issues)."""
+        market = PredictionMarket(outcomes=["A", "B", "C"])
+        prices = market.get_prices()
+        for p in prices.values():
+            assert p == pytest.approx(1 / 3, abs=0.01)

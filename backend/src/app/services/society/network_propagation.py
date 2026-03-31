@@ -48,9 +48,20 @@ _STANCE_THRESHOLDS: list[tuple[float, str]] = [
 
 
 def _convert_stance_to_opinion(stance: str, confidence: float) -> list[float]:
-    """Convert stance label + confidence to 1D opinion vector."""
+    """Convert stance label + confidence to 1D opinion vector.
+
+    High confidence preserves the stance's extremity, while low confidence
+    compresses the opinion toward the center (0.5). This means a roundtrip
+    conversion (stance → opinion → stance) is only guaranteed to preserve
+    the original stance when confidence >= ~0.5 for extreme stances.
+
+    Example: stance="賛成" (base=0.9), confidence=0.3
+      → opinion = 0.5 + (0.9 - 0.5) * 0.3 = 0.62
+      → back to stance: 0.62 ∈ [0.6, 0.8) → "条件付き賛成"
+
+    This is intentional: low conviction moderates the expressed position.
+    """
     base = _STANCE_TO_BASE.get(stance, 0.5)
-    # Modulate: high confidence pushes toward extremes, low confidence toward center
     opinion = 0.5 + (base - 0.5) * confidence
     return [round(opinion, 4)]
 
@@ -206,8 +217,10 @@ def _compute_echo_chamber_metrics(
         polarization = 0.0
     else:
         variance = float(np.var(opinions))
-        # Normalize: max variance for uniform [0,1] is 1/12 ≈ 0.083
-        polarization = min(variance / 0.083, 1.0)
+        # Normalize by max variance for Bernoulli on [0,1] = 0.25
+        # (half at 0, half at 1). Using 0.25 instead of 1/12 avoids
+        # saturation for moderately bimodal distributions.
+        polarization = min(variance / 0.25, 1.0)
 
     return {
         "homophily_index": round(homophily, 4),
