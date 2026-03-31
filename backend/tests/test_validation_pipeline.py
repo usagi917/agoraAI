@@ -273,6 +273,32 @@ class TestValidationPipeline:
         assert "emd" in report
 
     @pytest.mark.asyncio
+    async def test_auto_compare_persists_best_match_into_validation_record(self, db_session):
+        """auto_compare() が best-match survey を ValidationRecord に反映する"""
+        record = await register_result(
+            db_session, "sim-P3b", "外交", "politics", SIM_DIST
+        )
+
+        report = await auto_compare(db_session, record, FIXTURES_DIR)
+
+        assert report is not None
+        repo = ValidationRepository(db_session)
+        persisted = await repo.get(record.id)
+        best_survey = next(
+            survey
+            for survey in report["matched_surveys"]
+            if survey["source"] == report["best_match_source"]
+        )
+        assert persisted is not None
+        assert persisted.validated_at is not None
+        assert persisted.actual_distribution == best_survey["stance_distribution"]
+        assert persisted.survey_source == best_survey["source"]
+        assert persisted.survey_date == best_survey["survey_date"]
+
+        accuracy_report = await generate_accuracy_report(db_session)
+        assert accuracy_report["total_validated"] == 1
+
+    @pytest.mark.asyncio
     async def test_auto_compare_no_relevant_survey(self, db_session, tmp_path):
         """関連調査なしで None を返す"""
         empty_dir = tmp_path / "empty"

@@ -74,6 +74,28 @@ class TestLoadSurveyData:
         with pytest.raises(ValueError, match="1.0"):
             load_survey_data(str(tmp_path))
 
+    def test_load_survey_data_rejects_missing_stance_labels(self, tmp_path):
+        """必須5スタンスのいずれかが欠けた分布は reject する"""
+        bad_yaml = tmp_path / "missing_stance.yaml"
+        bad_yaml.write_text(
+            "surveys:\n"
+            "  - theme: test\n"
+            "    question: test\n"
+            "    source: test\n"
+            "    survey_date: '2024-01'\n"
+            "    sample_size: 100\n"
+            "    method: test\n"
+            "    theme_category: social\n"
+            "    relevance_keywords: [test]\n"
+            "    stance_distribution:\n"
+            "      賛成: 0.40\n"
+            "      条件付き賛成: 0.20\n"
+            "      中立: 0.20\n"
+            "      条件付き反対: 0.20\n"
+        )
+        with pytest.raises(ValueError, match="Missing stance keys"):
+            load_survey_data(str(tmp_path))
+
 
 class TestFindRelevantSurveys:
     def test_find_relevant_surveys_by_keyword(self):

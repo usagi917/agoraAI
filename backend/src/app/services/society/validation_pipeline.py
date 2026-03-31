@@ -20,6 +20,7 @@ from src.app.repositories.validation_repo import ValidationRepository
 from src.app.services.society.survey_anchor import (
     ComparisonReport,
     compare_with_surveys,
+    kl_divergence_symmetric,
 )
 from src.app.services.society.transfer_calibrator import (
     BiasProfile,
@@ -59,12 +60,30 @@ async def auto_compare(
     record: ValidationRecord,
     survey_data_dir: str,
 ) -> ComparisonReport | None:
-    """関連する調査データと自動比較し ComparisonReport を返す。"""
-    return compare_with_surveys(
+    """関連する調査データと自動比較し、比較結果をレコードへ反映して返す。"""
+    report = compare_with_surveys(
         record.simulated_distribution,
         record.theme_text,
         survey_data_dir,
     )
+    if report is None:
+        return None
+
+    repo = ValidationRepository(session)
+    best_survey = min(
+        report["matched_surveys"],
+        key=lambda survey: kl_divergence_symmetric(
+            record.simulated_distribution,
+            survey["stance_distribution"],
+        ),
+    )
+    await repo.resolve(
+        record_id=record.id,
+        actual_distribution=best_survey["stance_distribution"],
+        survey_source=best_survey["source"],
+        survey_date=best_survey["survey_date"],
+    )
+    return report
 
 
 async def resolve_with_actual(

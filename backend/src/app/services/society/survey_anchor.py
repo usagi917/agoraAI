@@ -59,11 +59,18 @@ def _validate_survey_record(record: dict) -> SurveyRecord:
             raise ValueError(f"Missing required field: {field}")
 
     dist = record["stance_distribution"]
+    expected_keys = set(STANCE_ORDER)
 
-    invalid_keys = set(dist.keys()) - set(STANCE_ORDER)
+    invalid_keys = set(dist.keys()) - expected_keys
     if invalid_keys:
         raise ValueError(
             f"Unknown stance keys: {invalid_keys}. Expected: {STANCE_ORDER}"
+        )
+
+    missing_keys = expected_keys - set(dist.keys())
+    if missing_keys:
+        raise ValueError(
+            f"Missing stance keys: {sorted(missing_keys)}. Expected all: {STANCE_ORDER}"
         )
 
     total = sum(dist.values())
