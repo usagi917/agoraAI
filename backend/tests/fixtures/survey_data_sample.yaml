@@ -1,0 +1,38 @@
+surveys:
+  - theme: "外交問題"
+    question: "日本の外交は正しい方向に進んでいると思いますか"
+    source: "内閣府「外交に関する世論調査」2024年"
+    survey_date: "2024-01"
+    sample_size: 3000
+    method: "個別面接聴取"
+    theme_category: "politics"
+    relevance_keywords:
+      - "外交"
+      - "国際関係"
+      - "日米関係"
+      - "外交政策"
+    stance_distribution:
+      賛成: 0.25
+      条件付き賛成: 0.20
+      中立: 0.30
+      条件付き反対: 0.15
+      反対: 0.10
+
+  - theme: "防衛政策"
+    question: "日本の防衛力を強化すべきだと思いますか"
+    source: "内閣府「自衛隊・防衛問題に関する世論調査」2024年"
+    survey_date: "2024-01"
+    sample_size: 3000
+    method: "個別面接聴取"
+    theme_category: "security"
+    relevance_keywords:
+      - "防衛"
+      - "自衛隊"
+      - "安全保障"
+      - "軍事"
+    stance_distribution:
+      賛成: 0.30
+      条件付き賛成: 0.25
+      中立: 0.20
+      条件付き反対: 0.15
+      反対: 0.10

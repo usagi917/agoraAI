@@ -1,0 +1,40 @@
+surveys:
+  - theme: "原子力発電の利用"
+    question: "原子力発電を今後どうすべきだと思いますか"
+    source: "内閣府「原子力に関する世論調査」2023年"
+    survey_date: "2023-11"
+    sample_size: 2883
+    method: "個別面接聴取"
+    theme_category: "environment"
+    relevance_keywords:
+      - "原子力"
+      - "原発"
+      - "エネルギー"
+      - "電力"
+      - "再稼働"
+    stance_distribution:
+      賛成: 0.12
+      条件付き賛成: 0.25
+      中立: 0.23
+      条件付き反対: 0.22
+      反対: 0.18
+
+  - theme: "再生可能エネルギー推進"
+    question: "再生可能エネルギーの導入をさらに推進すべきだと思いますか"
+    source: "内閣府「原子力に関する世論調査」2023年"
+    survey_date: "2023-11"
+    sample_size: 2883
+    method: "個別面接聴取"
+    theme_category: "environment"
+    relevance_keywords:
+      - "再生可能エネルギー"
+      - "太陽光"
+      - "風力"
+      - "脱炭素"
+      - "エネルギー"
+    stance_distribution:
+      賛成: 0.38
+      条件付き賛成: 0.30
+      中立: 0.15
+      条件付き反対: 0.10
+      反対: 0.07

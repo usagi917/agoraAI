@@ -16,6 +16,8 @@ import random
 from collections import defaultdict
 from typing import Optional
 
+from src.app.services.society.age_utils import age_bracket_4 as _age_bracket
+
 
 def effective_sample_size(weights: list[float]) -> float:
     """実効標本サイズを計算する (Kish 1965).
@@ -106,6 +108,7 @@ def bootstrap_confidence_intervals(
     n_bootstrap: int = 1000,
     ci: float = 0.95,
     seed: Optional[int] = None,
+    extra_uncertainty: float = 0.0,
 ) -> dict[str, tuple[float, float]]:
     """ブートストラップ法でスタンス分布の信頼区間を計算する.
 
@@ -115,6 +118,7 @@ def bootstrap_confidence_intervals(
         n_bootstrap: ブートストラップ反復回数 (デフォルト 1000)
         ci         : 信頼水準 (デフォルト 0.95)
         seed       : 乱数シード (再現性のため)
+        extra_uncertainty: CI 幅を ± extra_uncertainty で拡張 (トランスファー補正不確実性用)
 
     Returns:
         スタンス → (下限, 上限) のタプル。
@@ -160,7 +164,9 @@ def bootstrap_confidence_intervals(
         # インデックスをクランプ
         lo_idx = max(0, min(lo_idx, n_bootstrap - 1))
         hi_idx = max(0, min(hi_idx, n_bootstrap - 1))
-        result[stance] = (sorted_vals[lo_idx], sorted_vals[hi_idx])
+        lo_val = max(0.0, sorted_vals[lo_idx] - extra_uncertainty)
+        hi_val = min(1.0, sorted_vals[hi_idx] + extra_uncertainty)
+        result[stance] = (lo_val, hi_val)
 
     return result
 
@@ -180,7 +186,8 @@ def compute_poststratification_weights(
 
     Args:
         agents          : エージェントの辞書リスト。'demographics' キー以下に
-                          age_bracket, region, gender を持つ。
+                          region, gender を持つ。age_bracket が無い場合は
+                          age から導出する。
         responses       : 各エージェントの応答辞書のリスト（現時点では未使用だが
                           インターフェース統一のため受け取る）
         target_marginals: 次元 → カテゴリ → ターゲット比率 の辞書
@@ -207,6 +214,10 @@ def compute_poststratification_weights(
         for agent in agents:
             demographics = agent.get("demographics", {})
             value = demographics.get(dim, "")
+            if dim == "age_bracket" and value in ("", None):
+                age = demographics.get("age")
+                if age is not None:
+                    value = _age_bracket(age)
             dim_to_values[dim].append(str(value))
 
     for iteration in range(max_iter):

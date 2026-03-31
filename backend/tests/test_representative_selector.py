@@ -21,6 +21,17 @@ class TestClusterByStance:
         assert len(clusters["賛成"]) == 2
         assert len(clusters["反対"]) == 1
 
+    def test_prefers_propagated_stance(self):
+        agents = [{"id": "a1"}, {"id": "a2"}]
+        responses = [
+            {"stance": "賛成", "propagated_stance": "反対"},
+            {"stance": "中立"},
+        ]
+        clusters = _cluster_by_stance(agents, responses)
+        assert len(clusters["反対"]) == 1
+        assert len(clusters["中立"]) == 1
+        assert "賛成" not in clusters
+
 
 class TestSelectRepresentatives:
     @pytest.mark.asyncio
@@ -67,6 +78,30 @@ class TestSelectRepresentatives:
         participants = await select_representatives(agents, responses, max_citizen_reps=6, max_experts=0)
         stances = {p.get("stance") for p in participants if p["role"] == "citizen_representative"}
         assert len(stances) >= 2
+
+    @pytest.mark.asyncio
+    async def test_uses_propagated_stance_for_participants(self):
+        agents = [
+            {"id": "a1", "demographics": {"occupation": "test", "age": 28, "region": "北海道"}, "big_five": {}, "speech_style": "test"},
+            {"id": "a2", "demographics": {"occupation": "test", "age": 45, "region": "東北"}, "big_five": {}, "speech_style": "test"},
+            {"id": "a3", "demographics": {"occupation": "test", "age": 62, "region": "九州"}, "big_five": {}, "speech_style": "test"},
+        ]
+        responses = [
+            {"stance": "賛成", "propagated_stance": "反対", "confidence": 0.9},
+            {"stance": "中立", "confidence": 0.8},
+            {"stance": "条件付き賛成", "confidence": 0.7},
+        ]
+
+        participants = await select_representatives(
+            agents, responses, max_citizen_reps=3, max_experts=0
+        )
+        citizen_stances = {
+            p["agent_profile"]["id"]: p["stance"]
+            for p in participants
+            if p["role"] == "citizen_representative"
+        }
+
+        assert citizen_stances["a1"] == "反対"
 
 
 # ---------------------------------------------------------------------------
@@ -229,3 +264,59 @@ class TestDiversityGuarantees:
         citizens = [p for p in participants if p["role"] == "citizen_representative"]
         assert len(citizens) >= 1, "Should return at least 1 citizen even on fallback"
         assert len(citizens) <= 6, "Should not exceed max_citizen_reps"
+
+    @pytest.mark.asyncio
+    async def test_diversity_constraints_recover_after_swap(self):
+        """後続 swap のあとに年齢帯・地域カバレッジを再回復できること。"""
+        agents = [
+            {
+                "id": "a1",
+                "demographics": {"age": 20, "gender": "male", "region": "北海道", "occupation": "職業1"},
+                "big_five": {},
+                "speech_style": "普通",
+            },
+            {
+                "id": "a2",
+                "demographics": {"age": 35, "gender": "female", "region": "北海道", "occupation": "職業2"},
+                "big_five": {},
+                "speech_style": "普通",
+            },
+            {
+                "id": "a3",
+                "demographics": {"age": 55, "gender": "male", "region": "東北", "occupation": "職業3"},
+                "big_five": {},
+                "speech_style": "普通",
+            },
+            {
+                "id": "a4",
+                "demographics": {"age": 58, "gender": "female", "region": "九州", "occupation": "職業4"},
+                "big_five": {},
+                "speech_style": "普通",
+            },
+            {
+                "id": "a5",
+                "demographics": {"age": 38, "gender": "female", "region": "東北", "occupation": "職業5"},
+                "big_five": {},
+                "speech_style": "普通",
+            },
+        ]
+        responses = [
+            {"stance": "賛成", "confidence": 0.95},
+            {"stance": "反対", "confidence": 0.7},
+            {"stance": "条件付き賛成", "confidence": 0.6},
+            {"stance": "中立", "confidence": 0.9},
+            {"stance": "中立", "confidence": 0.8},
+        ]
+
+        participants = await select_representatives(
+            agents, responses, max_citizen_reps=3, max_experts=0
+        )
+        citizens = [p for p in participants if p["role"] == "citizen_representative"]
+        brackets = {
+            _age_bracket(p["agent_profile"]["demographics"]["age"])
+            for p in citizens
+        }
+        regions = {p["agent_profile"]["demographics"]["region"] for p in citizens}
+
+        assert len(brackets) == 3
+        assert len(regions) == 3

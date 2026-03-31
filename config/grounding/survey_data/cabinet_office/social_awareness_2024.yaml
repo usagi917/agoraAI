@@ -1,0 +1,38 @@
+surveys:
+  - theme: "社会への満足度"
+    question: "現在の社会に全体として満足していますか"
+    source: "内閣府「社会意識に関する世論調査」2024年"
+    survey_date: "2024-02"
+    sample_size: 5308
+    method: "郵送法"
+    theme_category: "social"
+    relevance_keywords:
+      - "社会満足度"
+      - "生活満足"
+      - "社会意識"
+      - "暮らし"
+    stance_distribution:
+      賛成: 0.22
+      条件付き賛成: 0.30
+      中立: 0.18
+      条件付き反対: 0.18
+      反対: 0.12
+
+  - theme: "国の方向性"
+    question: "日本の国は良い方向に向かっていると思いますか"
+    source: "内閣府「社会意識に関する世論調査」2024年"
+    survey_date: "2024-02"
+    sample_size: 5308
+    method: "郵送法"
+    theme_category: "social"
+    relevance_keywords:
+      - "国の方向性"
+      - "日本の将来"
+      - "社会"
+      - "方向"
+    stance_distribution:
+      賛成: 0.15
+      条件付き賛成: 0.20
+      中立: 0.22
+      条件付き反対: 0.25
+      反対: 0.18

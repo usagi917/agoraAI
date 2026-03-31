@@ -12,6 +12,7 @@ from src.app.services.society.calibration import (
     brier_external,
     expected_calibration_error,
     calibration_grade,
+    apply_transfer_calibration,
 )
 
 
@@ -181,3 +182,42 @@ class TestCalibrationGrade:
         """返り値は str 型"""
         result = calibration_grade(0.1)
         assert isinstance(result, str)
+
+
+# ---------------------------------------------------------------------------
+# apply_transfer_calibration (Phase 6 統合)
+# ---------------------------------------------------------------------------
+
+STANCES = ["賛成", "条件付き賛成", "中立", "条件付き反対", "反対"]
+
+
+class TestApplyTransferCalibration:
+    def _build_profile(self):
+        return {
+            "economy": {
+                "賛成": {"mean_deviation": 0.10, "sample_count": 20, "std_deviation": 0.02},
+                "条件付き賛成": {"mean_deviation": 0.0, "sample_count": 20, "std_deviation": 0.01},
+                "中立": {"mean_deviation": -0.05, "sample_count": 20, "std_deviation": 0.02},
+                "条件付き反対": {"mean_deviation": -0.03, "sample_count": 20, "std_deviation": 0.01},
+                "反対": {"mean_deviation": -0.02, "sample_count": 20, "std_deviation": 0.01},
+            }
+        }
+
+    def test_apply_transfer_calibration(self):
+        """ラッパー関数が transfer_calibrator を呼び出し、補正済み分布を返す"""
+        dist = {"賛成": 0.40, "条件付き賛成": 0.20, "中立": 0.15, "条件付き反対": 0.15, "反対": 0.10}
+        profile = self._build_profile()
+        result = apply_transfer_calibration(dist, profile, "economy")
+        assert isinstance(result, dict)
+        assert abs(sum(result.values()) - 1.0) < 0.001
+        # 賛成のバイアスが正なので補正後は減少
+        assert result["賛成"] < dist["賛成"]
+
+    def test_brier_external_with_calibrated_distribution(self):
+        """トランスファー補正後の分布で Brier Score 計算"""
+        dist = {"賛成": 0.40, "条件付き賛成": 0.20, "中立": 0.15, "条件付き反対": 0.15, "反対": 0.10}
+        profile = self._build_profile()
+        calibrated = apply_transfer_calibration(dist, profile, "economy")
+        brier = brier_external(calibrated, "賛成")
+        assert isinstance(brier, float)
+        assert 0.0 <= brier <= 2.0

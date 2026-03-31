@@ -145,6 +145,7 @@ class TestRunNetworkPropagation:
         assert isinstance(result, PropagationResult)
         assert len(result.final_opinions) == 5
         assert len(result.timestep_history) > 0
+        assert all(len(ts.opinions) == 5 for ts in result.timestep_history)
         assert isinstance(result.clusters, list)
         assert isinstance(result.converged, bool)
         assert isinstance(result.total_timesteps, int)

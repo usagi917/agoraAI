@@ -1,4 +1,4 @@
-"""予測キャリブレーション: 外部Brierスコア、期待キャリブレーション誤差（ECE）、グレード評価。
+"""予測キャリブレーション: 外部Brierスコア、期待キャリブレーション誤差（ECE）、グレード評価、トランスファー補正。
 
 公式:
   Brier外部スコア: Σ(p_i - o_i)² ただし o_i = 1 if i == observed_outcome else 0
@@ -7,6 +7,11 @@
 """
 
 import math
+
+from src.app.services.society.transfer_calibrator import (
+    BiasProfile,
+    apply_transfer_correction,
+)
 
 
 def brier_external(
@@ -90,3 +95,15 @@ def calibration_grade(ece: float | None) -> str:
     if ece < 0.15:
         return "moderate"
     return "poor"
+
+
+def apply_transfer_calibration(
+    raw_distribution: dict[str, float],
+    bias_profile: BiasProfile,
+    theme_category: str,
+) -> dict[str, float]:
+    """トランスファー補正を適用する薄いラッパー。
+
+    transfer_calibrator.apply_transfer_correction() を呼び出す。
+    """
+    return apply_transfer_correction(raw_distribution, bias_profile, theme_category)
