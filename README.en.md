@@ -1,116 +1,147 @@
 # Agent AI
 
 [![日本語](https://img.shields.io/badge/lang-日本語-green.svg)](README.md)
+[![CI](https://github.com/usagi917/agoraAI/actions/workflows/ci.yml/badge.svg)](https://github.com/usagi917/agoraAI/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](backend/pyproject.toml)
 [![Node.js 20+](https://img.shields.io/badge/node-20%2B-339933.svg)](frontend/package.json)
-[![Docker Compose](https://img.shields.io/badge/docker-compose-2496ED.svg)](docker-compose.yml)
 
-A multi-agent platform where AI agents with BDI cognitive architecture automatically run **social reaction simulation → council debate → decision report** from a research question.
-
-```mermaid
-flowchart LR
-    Input["Prompt\nDocuments"] --> SP
-
-    subgraph Pipeline
-        SP["Society Pulse\n50–200 agent reactions"] --> CO["Council\n10 reps × 3-round debate"]
-        CO --> SY["Synthesis\nDecision Brief"]
-    end
-
-    SY --> Output["Decision Report\nscenario comparison · agreement score"]
-```
-
-## Features
-
-- **Social reaction simulation** — 50–200 demographically-modeled agents generate initial reactions and elect representatives
-- **Council deliberation** — 10 representatives including a Devil's Advocate run 3 rounds of structured debate
-- **Decision Brief** — Automated report with scenario comparison, agreement scores, and recommended actions
-- **GraphRAG** — Knowledge graph construction from input documents, evolving through discourse
-- **BDI cognition + Theory of Mind** — Belief-Desire-Intention cycle with mental models for deep reasoning
-- **3-layer memory** — Episodic, semantic, and procedural memory for long-term agent recall
-- **Multi-LLM** — OpenAI / Gemini / Anthropic routing with automatic fallback
-- **Real-time UI** — SSE progress streaming, 3D social graph, KG explorer, conversation transcripts
+> A multi-agent analysis app that runs social reaction simulation, council debate, and Decision Brief generation in one UI. The `frontend` is built with Vue 3 + Vite, and the `backend` is built with FastAPI + async SQLAlchemy.
 
 ## Quick Start
 
 ```bash
-cp .env.example .env        # Set OPENAI_API_KEY=...
+cp .env.example .env
+# Set OPENAI_API_KEY if you want live execution
 docker compose up --build
 ```
 
 - App: http://localhost:3000
 - API docs: http://localhost:8000/docs
+- Health check: http://localhost:8000/health
 
-> The UI still loads without `OPENAI_API_KEY`, but live execution will be disabled.
+The app still boots without `OPENAI_API_KEY`. Live execution is disabled, but you can still browse sample results and inspect the UI.
+
+## What It Does
+
+- Starts analysis from four guided question flows:
+  - market entry
+  - product acceptance
+  - policy impact
+  - option comparison
+- Accepts `.txt`, `.md`, and `.pdf` uploads alongside free-form prompts and stores them per project.
+- Runs five execution presets:
+  - `quick`
+  - `standard`
+  - `deep`
+  - `research`
+  - `baseline`
+- Streams live progress through SSE with activity feed, social response views, and a 3D graph.
+- Shows Decision Briefs, scenario comparison, agreement heatmaps, propagation analysis, transcripts, reruns, and follow-up questions on the results page.
+- Generates, browses, and forks population datasets.
+- Exposes sample runs that work without an API key.
+
+## Execution Pipeline
+
+| Preset | Backend phases | Purpose |
+| --- | --- | --- |
+| `quick` | `society_pulse -> synthesis` | Fast first-pass judgment |
+| `standard` | `society_pulse -> council -> synthesis` | Default analysis flow |
+| `deep` | `society_pulse -> multi_perspective -> council -> pm_analysis -> synthesis` | Deeper analysis with PM review |
+| `research` | `society_pulse -> issue_mining -> multi_perspective -> intervention -> synthesis` | Issue mining and intervention comparison |
+| `baseline` | dedicated baseline execution | Single-LLM baseline |
+
+Legacy mode names are normalized internally. For example, `unified -> standard`, `society_first -> research`, and `single -> quick`.
+
+The current implementation works like this:
+
+- Society Pulse builds a large synthetic population from config, selects 100 agents, and runs activation plus evaluation.
+- Council selects up to 6 citizen representatives and 4 experts, then runs a 3-round debate.
+- Synthesis combines social responses and council output into a Decision Brief.
+
+## Screens
+
+| Route | Screen | Main contents |
+| --- | --- | --- |
+| `/` | LaunchPad | template selection, guided wizard, prompt input, file upload, recent runs |
+| `/sim/:id` | Live Simulation | SSE progress, Simulation Progress, Colony / Society views, 3D graph |
+| `/sim/:id/results` | Results | Decision Brief, scenario comparison, propagation analysis, transcript, follow-ups |
+| `/sample/:id` | Sample Result | sample result viewer |
+| `/populations` | Populations | population generation, listing, forking |
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-    subgraph Frontend["Frontend — Vue 3 + Three.js"]
-        LP[LaunchPad] --> SIM[Live Simulation\nSSE · 3D graph]
-        SIM --> RES[Results\nDecision Brief · KG Explorer]
+    subgraph Frontend["Frontend"]
+        UI["Vue 3 + Vite"]
+        STORE["Pinia stores"]
+        GRAPH["Three.js / 3d-force-graph"]
     end
 
-    subgraph Backend["Backend — FastAPI"]
-        API[REST API + SSE] --> DISP[Dispatcher]
-        DISP --> PHASE[Phase Runner\nquick / standard / deep / research]
-        PHASE --> SOC[Society\npopulation · reactions]
-        PHASE --> COU[Council\ndebate · KG evolution]
-        PHASE --> SYN[Synthesis\nreport generation]
-        SOC & COU & SYN --> COG[Cognition\nBDI · ToM · Memory]
-        SOC & COU & SYN --> GRAG[GraphRAG\nKG build · evolution]
-        SOC & COU & SYN --> LLM[LLM Client\nOpenAI / Gemini / Anthropic]
+    subgraph Backend["Backend"]
+        API["FastAPI REST + SSE"]
+        ORCH["Simulation dispatcher / unified orchestrator"]
+        SOC["Society services"]
+        LLM["Multi-LLM routing"]
+        DB["Async SQLAlchemy"]
     end
 
-    subgraph Infra["Infrastructure"]
-        PG[(PostgreSQL)]
-        RD[(Redis)]
+    subgraph Data["Data / Infra"]
+        SQLITE["SQLite (local default)"]
+        POSTGRES["PostgreSQL (Compose)"]
+        REDIS["Redis (Compose)"]
+        CFG["config/*.yaml + templates/ja/*.yaml"]
     end
 
-    Frontend <-->|REST + SSE| API
-    Backend --> PG & RD
+    UI --> API
+    STORE --> API
+    GRAPH --> API
+    API --> ORCH
+    ORCH --> SOC
+    ORCH --> LLM
+    API --> DB
+    DB --> SQLITE
+    DB --> POSTGRES
+    ORCH --> CFG
+    API -. optional .-> REDIS
 ```
 
-## Execution Presets
+Notes:
 
-| Preset | Phase Pipeline | Purpose |
-| --- | --- | --- |
-| **quick** | Society Pulse → Synthesis | Fast overview |
-| **standard** | Society Pulse → Council → Synthesis | **Default**. Social reactions + council debate |
-| **deep** | Society Pulse → Multi-Perspective → Council → PM Analysis → Synthesis | Deep dive with PM analysis |
-| **research** | Society Pulse → Issue Mining → Multi-Perspective → Intervention → Synthesis | Issue extraction + intervention simulation |
-| **baseline** | Single LLM analysis | Baseline comparison |
+- The production `frontend` container is served by Nginx and proxies `/api` plus SSE to `backend:8000`.
+- On startup, the `backend` seeds templates from `templates/ja/*.yaml`.
+- SQLite is the default local database. Docker Compose uses PostgreSQL.
 
-Legacy mode names (`unified`, `pipeline`, `swarm`, etc.) map to the presets above for backward compatibility.
+## API Quick Start
 
-## Screens
-
-| Route | Screen | Content |
-| --- | --- | --- |
-| `/` | LaunchPad | Template selection, question wizard, prompt input, file upload |
-| `/sim/:id` | Live Simulation | SSE progress, Colony status, activity feed, 3D social graph |
-| `/sim/:id/results` | Results | Decision Brief, findings, scenario comparison, transcript, KG explorer |
-| `/sample/:id` | Sample Result | Browse sample results |
-| `/populations` | Populations | Generate, browse, and fork population data |
-
-## API
+### 1. Create a simulation from a prompt
 
 ```bash
-# 1. Create simulation
 curl -X POST http://localhost:8000/simulations \
   -H "Content-Type: application/json" \
-  -d '{"mode":"standard","prompt_text":"Analyze EV battery market entry","evidence_mode":"strict"}'
+  -d '{
+    "mode": "standard",
+    "execution_profile": "standard",
+    "template_name": "market_entry",
+    "prompt_text": "Should we enter the EV battery market?",
+    "evidence_mode": "strict"
+  }'
+```
 
-# 2. Stream progress (SSE)
+### 2. Stream progress over SSE
+
+```bash
 curl -N http://localhost:8000/simulations/SIM_ID/stream
+```
 
-# 3. Fetch report
+### 3. Fetch the final report
+
+```bash
 curl http://localhost:8000/simulations/SIM_ID/report
 ```
 
-<details>
-<summary>All endpoints</summary>
+### Key endpoints
 
 ```text
 GET  /health
@@ -121,17 +152,6 @@ GET  /projects/{project_id}
 POST /projects/{project_id}/documents
 GET  /projects/{project_id}/documents
 
-POST /runs
-GET  /runs
-GET  /runs/{run_id}
-GET  /runs/{run_id}/stream
-GET  /runs/{run_id}/report
-GET  /runs/{run_id}/timeline
-GET  /runs/{run_id}/events
-GET  /runs/{run_id}/graph
-POST /runs/{run_id}/followups
-POST /runs/{run_id}/rerun
-
 POST /simulations
 GET  /simulations
 GET  /simulations/samples
@@ -141,11 +161,11 @@ GET  /simulations/{sim_id}/stream
 GET  /simulations/{sim_id}/graph
 GET  /simulations/{sim_id}/graph/history
 GET  /simulations/{sim_id}/report
-GET  /simulations/{sim_id}/backtest
-POST /simulations/{sim_id}/backtest
 GET  /simulations/{sim_id}/timeline
 POST /simulations/{sim_id}/followups
 POST /simulations/{sim_id}/rerun
+GET  /simulations/{sim_id}/backtest
+POST /simulations/{sim_id}/backtest
 
 GET  /society/populations
 POST /society/populations/generate
@@ -156,110 +176,150 @@ GET  /society/simulations/{sim_id}/meeting
 GET  /society/simulations/{sim_id}/evaluation
 GET  /society/simulations/{sim_id}/narrative
 GET  /society/simulations/{sim_id}/demographics
+GET  /society/simulations/{sim_id}/propagation
 GET  /society/simulations/{sim_id}/social-graph
 GET  /society/simulations/{sim_id}/agents
 GET  /society/simulations/{sim_id}/agents/{agent_id}
 GET  /society/simulations/{sim_id}/transcript
 GET  /society/simulations/{sim_id}/conversations
 
+GET  /runs
+POST /runs
+GET  /runs/{run_id}
+GET  /runs/{run_id}/stream
+GET  /runs/{run_id}/report
+GET  /runs/{run_id}/timeline
+GET  /runs/{run_id}/events
+GET  /runs/{run_id}/graph
+POST /runs/{run_id}/followups
+POST /runs/{run_id}/rerun
+
 GET  /admin/costs
 GET  /admin/quality-metrics
 ```
 
-</details>
-
 ## Local Development
 
-Prerequisites: Python 3.11+, `uv`, Node.js 20+, `pnpm`, Docker Compose
+### Minimal setup
+
+`.env.example` points to SQLite by default, so you can boot the backend without extra infrastructure.
 
 ```bash
-# Infrastructure only
-docker compose up -d postgres redis
+cp .env.example .env
 
-# Backend
-cd backend && uv sync --extra dev
+cd backend
+uv sync --extra dev
 uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
-
-# Frontend (separate terminal)
-cd frontend && pnpm install && pnpm dev
 ```
 
-Frontend dev server runs at http://localhost:5173, proxying `/api` to port 8000. Set `.env` `DATABASE_URL` to SQLite if you don't need local PostgreSQL.
+In another terminal:
+
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
+
+- Frontend dev server: http://localhost:5173
+- Vite proxies `/api` to `http://localhost:8000`
+
+### With PostgreSQL and Redis
+
+```bash
+docker compose up -d postgres redis
+```
+
+To match the Docker stack more closely, set `.env` like this:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://agentai:agentai@localhost:5432/agentai
+REDIS_URL=redis://localhost:6379/0
+```
 
 ## Tests
 
 ```bash
-cd backend && uv run pytest                    # Backend
-cd frontend && pnpm build && pnpm test:unit    # Frontend (unit)
-pnpm exec playwright install chromium && pnpm test:e2e  # E2E
+# backend
+cd backend
+uv run pytest -q
+
+# frontend unit
+cd frontend
+pnpm build
+pnpm test:unit
+
+# frontend e2e
+pnpm exec playwright install --with-deps chromium
+pnpm test:e2e
 ```
+
+CI runs backend tests, frontend build, frontend unit tests, and Playwright E2E.
 
 ## Configuration
 
-### Environment Variables
+### Main environment variables
 
 | Variable | Purpose |
 | --- | --- |
-| `OPENAI_API_KEY` | Enable live execution (default provider) |
-| `GOOGLE_API_KEY` | For Gemini provider |
-| `ANTHROPIC_API_KEY` | For Anthropic provider |
-| `DATABASE_URL` | DB connection (default: PostgreSQL, switchable to SQLite) |
-| `REDIS_URL` | LLM cache & session management |
-| `LLM_MODEL` | Default model (default: `gpt-4o`) |
-| `COGNITIVE_MODE` | `legacy` / `advanced` |
-| `MAX_ACTIVE_AGENTS` | Max agent count (default: `100`) |
-| `MAX_CONCURRENT_AGENTS` | Concurrent agent count (default: `30`) |
-| `MAX_CONCURRENT_COLONIES` | Concurrent colony count (default: `5`) |
-| `LLM_CACHE_TTL` | LLM cache TTL in seconds (default: `3600`) |
+| `OPENAI_API_KEY` | live execution with the OpenAI provider |
+| `GOOGLE_API_KEY` | Gemini provider |
+| `ANTHROPIC_API_KEY` | Anthropic provider |
+| `LLM_MODEL` | base model setting; task-specific overrides live in `config/models.yaml` |
+| `DATABASE_URL` | database connection; `.env.example` uses SQLite, Compose uses PostgreSQL |
+| `REDIS_URL` | Redis connection; enabled in Compose |
+| `BACKEND_HOST` / `BACKEND_PORT` | FastAPI bind settings |
+| `VITE_API_BASE_URL` | frontend API base URL |
+| `COGNITIVE_MODE` | `legacy` or `advanced` |
+| `MAX_ACTIVE_AGENTS` | max cognitive agents |
+| `MAX_CONCURRENT_AGENTS` | concurrent cognitive cycles |
+| `MAX_CONCURRENT_COLONIES` | concurrent multi-perspective / colony jobs |
+| `LLM_CACHE_TTL` | cache TTL in seconds |
 
-### Config Files
+### Main config files
 
 | File | Purpose |
 | --- | --- |
-| `config/models.yaml` | Task-level model routing (3 tiers) |
-| `config/llm_providers.yaml` | Multi-provider + fallback order |
-| `config/cognitive.yaml` | BDI, memory, Theory of Mind, Game Master |
-| `config/graphrag.yaml` | KG extraction & community detection |
-| `config/perspectives.yaml` | 12 analytical perspectives (incl. adversarial) |
-| `config/population_mix.yaml` | Demographics distribution & per-layer LLM weights |
-| `config/swarm_profiles.yaml` | Colony counts & round counts |
+| `config/models.yaml` | provider and task-level model selection |
+| `config/llm_providers.yaml` | OpenAI / Gemini / Anthropic definitions and fallback order |
+| `config/population_mix.yaml` | population size, attribute distributions, per-layer provider weights |
+| `config/cognitive.yaml` | cognition, communication, and scheduling settings |
+| `config/graphrag.yaml` | knowledge graph extraction config |
+| `templates/ja/*.yaml` | analysis templates used by LaunchPad |
 
 ### Templates
 
-| Directory | Contents |
-| --- | --- |
-| `templates/ja/` | 5 analysis templates |
-| `templates/ja/pm_board/` | 4 PM Board personas |
-| `templates/ja/experts/` | 6 expert templates |
+On startup, YAML files under `templates/ja` are loaded as templates. The current repo includes:
 
-## Project Structure
+- `business_analysis`
+- `market_entry`
+- `policy_impact`
+- `policy_simulation`
+- `scenario_exploration`
+
+There are also helper templates under `templates/ja/pm_board` and `templates/ja/experts`.
+
+## Repository Layout
 
 ```text
 .
-├── backend/src/app/
-│   ├── api/routes/          # FastAPI routers (7)
-│   ├── models/              # SQLAlchemy models (34)
-│   ├── services/
-│   │   ├── phases/          # Execution phases (7)
-│   │   ├── society/         # Social simulation (21)
-│   │   ├── graphrag/        # KG extraction pipeline (8)
-│   │   ├── cognition/       # BDI + ToM (8)
-│   │   ├── memory/          # 3-layer memory (6)
-│   │   ├── communication/   # Debate protocol (4)
-│   │   ├── game_master/     # Environment management (4)
-│   │   ├── scheduling/      # Agent scheduling (1)
-│   │   └── *.py             # Orchestrators & utilities (28)
-│   ├── llm/                 # Multi-LLM client + adapters
-│   └── sse/                 # SSE manager
-├── frontend/src/
-│   ├── pages/               # 6 pages
-│   ├── components/          # 19 components
-│   ├── composables/         # 7 composables (3D graph, etc.)
-│   └── stores/              # 8 Pinia stores
-├── config/                  # YAML configs
-├── templates/ja/            # Templates
-├── experiments/             # Experiment scripts
-└── docker-compose.yml       # PostgreSQL, Redis, Backend, Frontend
+├── backend/
+│   ├── src/app/api/routes/      # FastAPI routes
+│   ├── src/app/services/        # orchestration, society, cognition, GraphRAG
+│   ├── src/app/llm/             # LLM clients and adapters
+│   ├── tests/                   # pytest
+│   └── pyproject.toml
+├── frontend/
+│   ├── src/pages/               # LaunchPad / Simulation / Results / Sample / Populations
+│   ├── src/components/          # UI components
+│   ├── src/stores/              # Pinia stores
+│   ├── tests/e2e/               # Playwright
+│   └── package.json
+├── config/                      # YAML configuration
+├── templates/                   # analysis templates
+├── sample_results/              # sample runs without API keys
+├── docker-compose.yml
+├── README.md
+└── README.en.md
 ```
 
 ## Contributing

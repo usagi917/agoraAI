@@ -1,4 +1,12 @@
-"""Society オーケストレータ: Population→選抜→活性化→評価→結果保存"""
+"""Society オーケストレータ: Population→選抜→活性化→ネットワーク伝播→評価→結果保存
+
+Swarm Intelligence Pipeline:
+  Population → Network → Selection → Grounding → Activation
+  → Network Propagation (Bounded Confidence + Friedkin-Johnsen)
+  → Stigmergy → Prediction Market → Echo Chamber Detection
+  → Representative Selection (from propagated opinions)
+  → Meeting → Evaluation → Narrative → Memory/Graph Evolution
+"""
 
 import logging
 import uuid
@@ -21,17 +29,136 @@ from src.app.services.society.population_generator import (
 from src.app.services.society.network_generator import generate_network
 from src.app.services.society.agent_selector import select_agents
 from src.app.services.society.activation_layer import run_activation
+from src.app.services.society.data_grounding import load_grounding_facts, distribute_facts_to_agents
 from src.app.services.society.evaluation import evaluate_society_simulation
 from src.app.services.society.representative_selector import select_representatives
-from src.app.services.society.meeting_layer import run_meeting
+from src.app.services.society.meeting_layer import run_meeting, enrich_meeting_with_clusters
 from src.app.services.society.meeting_report import generate_meeting_report
 from src.app.services.society.memory_compressor import update_agent_memories
 from src.app.services.society.graph_evolution import evolve_social_graph
 from src.app.services.society.demographic_analyzer import analyze_demographics
 from src.app.services.society.narrative_generator import generate_narrative
+from src.app.services.society.deliberation_quality import compute_dqi, measure_opinion_change
+from src.app.services.society.provenance import build_provenance
+from src.app.services.society.network_propagation import (
+    run_network_propagation,
+    _convert_opinion_to_stance,
+)
+from src.app.services.society.stigmergy_service import StigmergyBoard
+from src.app.services.society.prediction_market import PredictionMarket
+from src.app.services.society.statistical_inference import compute_independence_weights
+from src.app.services.society.activation_layer import _aggregate_opinions
+from src.app.services.society.emergence_tracker import EmergenceTracker
+from src.app.services.society.output_validator import explain_activation_meeting_gap
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
+
+
+def _build_activation_phase_data(
+    activation_result: dict,
+    representative_count: int,
+    individual_responses: list[dict],
+) -> dict:
+    """活性化レイヤーの永続化 payload を構築する.
+
+    propagation 後に independence 再集計が走った場合は、
+    pre/post aggregation を同じ activation レコードに保持する。
+    """
+    phase_data = {
+        "aggregation": activation_result["aggregation"],
+        "representative_count": representative_count,
+        "responses_summary": {
+            "total": len(activation_result["responses"]),
+            "stance_distribution": activation_result["aggregation"].get(
+                "stance_distribution", {}
+            ),
+        },
+        "responses": individual_responses,
+    }
+
+    aggregation_pre = activation_result.get("aggregation_pre_independence")
+    if aggregation_pre is not None:
+        phase_data["aggregation_pre_independence"] = aggregation_pre
+        phase_data["responses_summary_pre_independence"] = {
+            "total": len(activation_result["responses"]),
+            "stance_distribution": aggregation_pre.get("stance_distribution", {}),
+        }
+
+    return phase_data
+
+
+def _build_independence_reaggregation_summary(activation_result: dict) -> dict:
+    """pre/post independence 再集計の比較サマリを返す."""
+    aggregation_post = activation_result["aggregation"]
+    aggregation_pre = activation_result.get("aggregation_pre_independence")
+
+    return {
+        "applied": aggregation_pre is not None,
+        "effective_sample_size_pre": (
+            aggregation_pre.get("effective_sample_size")
+            if aggregation_pre is not None else None
+        ),
+        "effective_sample_size_post": aggregation_post.get("effective_sample_size"),
+        "stance_distribution_pre": (
+            aggregation_pre.get("stance_distribution")
+            if aggregation_pre is not None else None
+        ),
+        "stance_distribution_post": aggregation_post.get("stance_distribution"),
+    }
+
+
+def _apply_independence_re_aggregation(
+    activation_result: dict,
+    clusters: list[dict],
+    edges: list[dict],
+    agent_ids: list[str],
+    agents: list[dict],
+) -> dict[str, float]:
+    """independence weights を計算し、activation_result を second-pass で再集計する.
+
+    - 重みが計算でき、かつ非自明（全員 1.0 でない）な場合のみ再集計を実行。
+    - 再集計した場合は activation_result["aggregation_pre_independence"] に元の集計を保存し、
+      activation_result["aggregation"] を補正後に差し替える。
+    - 再集計しなかった場合は activation_result を変更しない。
+
+    Returns:
+        計算された independence_weights (agent_id → weight)。空 dict の場合は計算不可。
+    """
+    if not clusters or not agent_ids:
+        return {}
+
+    try:
+        independence_weights = compute_independence_weights(clusters, edges, agent_ids)
+    except Exception as exc:
+        logger.warning("Independence weight computation failed: %s", exc)
+        return {}
+
+    # 全員ほぼ 1.0 なら再集計不要
+    if all(abs(w - 1.0) < 1e-6 for w in independence_weights.values()):
+        return independence_weights
+
+    # Phase A の集計を退避
+    aggregation_pre = activation_result["aggregation"]
+
+    # Phase B: independence-weighted re-aggregation (original stance を使用)
+    try:
+        re_aggregation = _aggregate_opinions(
+            activation_result["responses"],
+            agents=agents,
+            independence_weights=independence_weights,
+        )
+        activation_result["aggregation_pre_independence"] = aggregation_pre
+        activation_result["aggregation"] = re_aggregation
+        logger.info(
+            "Independence-weighted re-aggregation completed: n_eff=%.1f (pre=%.1f)",
+            re_aggregation.get("effective_sample_size", 0),
+            aggregation_pre.get("effective_sample_size", 0),
+        )
+    except Exception as exc:
+        logger.warning("Independence-weighted re-aggregation failed: %s", exc)
+
+    return independence_weights
 
 
 async def _get_or_create_population(
@@ -163,6 +290,19 @@ async def run_society(simulation_id: str) -> None:
                 ],
             })
 
+            # === Phase 2.7: Grounding ===
+            try:
+                grounding_facts = load_grounding_facts(theme)
+                agent_facts = distribute_facts_to_agents(selected_agents, grounding_facts)
+                # 各エージェントに grounding_facts を付与
+                for idx, agent in enumerate(selected_agents):
+                    agent["grounding_facts"] = agent_facts.get(idx, [])
+                logger.info("Grounding: %d facts loaded, distributed to %d agents", len(grounding_facts), len(selected_agents))
+            except Exception as exc:
+                logger.warning("Grounding failed, continuing without: %s", exc)
+                for agent in selected_agents:
+                    agent["grounding_facts"] = []
+
             # === Phase 3: Activation ===
             await sse_manager.publish(simulation_id, "society_activation_started", {
                 "agent_count": len(selected_agents),
@@ -201,15 +341,11 @@ async def run_society(simulation_id: str) -> None:
                 simulation_id=simulation_id,
                 population_id=pop_id,
                 layer="activation",
-                phase_data={
-                    "aggregation": activation_result["aggregation"],
-                    "representative_count": len(activation_result["representatives"]),
-                    "responses_summary": {
-                        "total": len(activation_result["responses"]),
-                        "stance_distribution": activation_result["aggregation"]["stance_distribution"],
-                    },
-                    "responses": individual_responses,
-                },
+                phase_data=_build_activation_phase_data(
+                    activation_result=activation_result,
+                    representative_count=len(activation_result["representatives"]),
+                    individual_responses=individual_responses,
+                ),
                 usage=activation_result["usage"],
             )
             session.add(activation_record)
@@ -222,6 +358,188 @@ async def run_society(simulation_id: str) -> None:
                 "selected_agent_ids": selected_agent_ids,
                 "usage": activation_result["usage"],
             })
+
+            # === Phase 3.5: Network Propagation (Swarm Intelligence) ===
+            propagation_result = None
+            stigmergy_board = StigmergyBoard()
+            prediction_market = None
+            emergence_tracker = EmergenceTracker()
+
+            try:
+                # Load edges for selected agents
+                edge_result = await session.execute(
+                    select(SocialEdge).where(SocialEdge.population_id == pop_id)
+                )
+                edges_db = edge_result.scalars().all()
+                edges = [
+                    {
+                        "agent_id": e.agent_id,
+                        "target_id": e.target_id,
+                        "strength": e.strength,
+                    }
+                    for e in edges_db
+                    if e.agent_id in selected_agent_ids and e.target_id in selected_agent_ids
+                ]
+
+                # Prepare responses with agent_id
+                responses_with_ids = []
+                for agent, resp in zip(selected_agents, activation_result["responses"]):
+                    responses_with_ids.append({
+                        **resp,
+                        "agent_id": agent["id"],
+                    })
+
+                await sse_manager.publish(simulation_id, "network_propagation_started", {
+                    "agent_count": len(selected_agents),
+                    "edge_count": len(edges),
+                })
+
+                async def on_propagation_timestep(record):
+                    await sse_manager.publish(simulation_id, "propagation_timestep", {
+                        "timestep": record.timestep,
+                        "opinion_distribution": record.opinion_distribution,
+                        "entropy": record.entropy,
+                        "cluster_count": record.cluster_count,
+                        "max_delta": record.max_delta,
+                    })
+
+                propagation_result = await run_network_propagation(
+                    agents=selected_agents,
+                    initial_responses=responses_with_ids,
+                    edges=edges,
+                    theme=theme,
+                    max_timesteps=20,
+                    confidence_threshold=0.4,
+                    on_timestep=on_propagation_timestep,
+                )
+
+                # Stigmergy: extract topics from agent concerns
+                for resp in activation_result["responses"]:
+                    concern = resp.get("concern", "")
+                    if concern:
+                        # Simple topic extraction from concerns
+                        for keyword in ["財源", "格差", "負担", "教育", "生活", "経済", "安全", "環境", "雇用", "福祉"]:
+                            if keyword in concern:
+                                stigmergy_board.deposit(
+                                    resp.get("agent_id", ""),
+                                    keyword,
+                                    intensity=resp.get("confidence", 0.5),
+                                )
+
+                # Compute independence weights and re-aggregate
+                cluster_dicts = [
+                    {"member_ids": c.member_ids, "size": c.size}
+                    for c in propagation_result.clusters
+                ]
+                independence_weights = _apply_independence_re_aggregation(
+                    activation_result, cluster_dicts, edges,
+                    selected_agent_ids, selected_agents,
+                )
+                activation_record.phase_data = _build_activation_phase_data(
+                    activation_result=activation_result,
+                    representative_count=len(activation_result["representatives"]),
+                    individual_responses=individual_responses,
+                )
+
+                # Prediction Market (with independence-weighted bets)
+                outcomes = list(activation_result["aggregation"]["stance_distribution"].keys())
+                if outcomes:
+                    prediction_market = PredictionMarket(outcomes=outcomes)
+                    for agent, resp in zip(selected_agents, activation_result["responses"]):
+                        stance = resp.get("stance", "中立")
+                        confidence = resp.get("confidence", 0.5)
+                        ind_w = independence_weights.get(agent["id"], 1.0)
+                        if stance in outcomes:
+                            prediction_market.submit_bet(agent["id"], stance, confidence, weight=ind_w)
+
+                # Emergence tracking from propagation history
+                for ts_record in propagation_result.timestep_history:
+                    emergence_tracker.record_timestep({
+                        "timestep": ts_record.timestep,
+                        "opinions": propagation_result.final_opinions if ts_record.timestep == propagation_result.total_timesteps - 1 else [[0.5]] * len(selected_agents),
+                        "agent_ids": selected_agent_ids,
+                    })
+
+                # Save propagation result
+                propagation_record = SocietyResult(
+                    id=str(uuid.uuid4()),
+                    simulation_id=simulation_id,
+                    population_id=pop_id,
+                    layer="network_propagation",
+                    phase_data={
+                        "converged": propagation_result.converged,
+                        "total_timesteps": propagation_result.total_timesteps,
+                        "cluster_count": len(propagation_result.clusters),
+                        "clusters": [
+                            {"label": c.label, "size": c.size, "centroid": c.centroid}
+                            for c in propagation_result.clusters
+                        ],
+                        "echo_chamber": propagation_result.metrics.get("echo_chamber", {}),
+                        "stigmergy_topics": [
+                            {"topic": t.topic, "intensity": t.intensity}
+                            for t in stigmergy_board.get_salient_topics(top_k=10)
+                        ],
+                        "prediction_market": prediction_market.get_prices() if prediction_market else {},
+                        "phase_transitions": emergence_tracker.detect_phase_transitions(),
+                        "tipping_points": emergence_tracker.detect_tipping_points(),
+                        "aggregation_pre_independence": activation_result.get(
+                            "aggregation_pre_independence"
+                        ),
+                        "aggregation_post_independence": activation_result["aggregation"],
+                        "independence_re_aggregation": _build_independence_reaggregation_summary(
+                            activation_result
+                        ),
+                    },
+                    usage={},
+                )
+                session.add(propagation_record)
+
+                # Update activation responses with propagated opinions
+                stance_updates = []
+                if propagation_result and propagation_result.final_opinions:
+                    for i, opinion in enumerate(propagation_result.final_opinions):
+                        if i < len(activation_result["responses"]) and i < len(selected_agents):
+                            new_stance = _convert_opinion_to_stance(opinion)
+                            old_stance = activation_result["responses"][i].get("stance", "")
+                            activation_result["responses"][i]["propagated_stance"] = new_stance
+                            activation_result["responses"][i]["opinion_vector"] = opinion
+                            if new_stance != old_stance:
+                                stance_updates.append({
+                                    "agent_id": selected_agents[i]["id"],
+                                    "stance": new_stance,
+                                })
+
+                await sse_manager.publish(simulation_id, "network_propagation_completed", {
+                    "converged": propagation_result.converged,
+                    "total_timesteps": propagation_result.total_timesteps,
+                    "cluster_count": len(propagation_result.clusters),
+                    "clusters": [
+                        {"label": c.label, "size": c.size, "centroid": c.centroid}
+                        for c in propagation_result.clusters
+                    ],
+                    "echo_chamber": propagation_result.metrics.get("echo_chamber", {}),
+                    "stance_updates": stance_updates,
+                    "aggregation_pre_independence": activation_result.get(
+                        "aggregation_pre_independence"
+                    ),
+                    "independence_weighting_applied": activation_result["aggregation"].get(
+                        "independence_weighting_applied", False
+                    ),
+                    "independence_re_aggregation": _build_independence_reaggregation_summary(
+                        activation_result
+                    ),
+                    "aggregation": activation_result["aggregation"],
+                })
+
+                logger.info(
+                    "Network propagation completed: %d timesteps, converged=%s, %d clusters",
+                    propagation_result.total_timesteps,
+                    propagation_result.converged,
+                    len(propagation_result.clusters),
+                )
+
+            except Exception as exc:
+                logger.warning("Network propagation failed, continuing without: %s", exc)
 
             # === Phase 4: Evaluation ===
             eval_metrics = await evaluate_society_simulation(
@@ -277,6 +595,14 @@ async def run_society(simulation_id: str) -> None:
                 max_citizen_reps=6,
                 max_experts=4,
             )
+
+            # Enrich meeting participants with cluster-based counter-arguments
+            if propagation_result and propagation_result.clusters:
+                enrich_meeting_with_clusters(
+                    meeting_participants,
+                    propagation_result.clusters,
+                    responses_with_ids,
+                )
 
             meeting_result = await run_meeting(
                 meeting_participants, theme,
@@ -337,7 +663,105 @@ async def run_society(simulation_id: str) -> None:
             session.add(meeting_record)
             await session.commit()
 
-            # === Phase 5.5: Narrative Report ===
+            # === Phase 5.05: Prediction Market Resolution ===
+            if prediction_market:
+                try:
+                    synthesis = meeting_result.get("synthesis", {})
+                    majority_stance = synthesis.get("majority_stance", "")
+                    if majority_stance and majority_stance in [o for o in prediction_market._outcomes]:
+                        payoffs = prediction_market.resolve(majority_stance)
+                        brier = prediction_market.compute_brier_score(majority_stance)
+                        logger.info("Prediction market resolved: Brier=%.3f", brier)
+                except Exception as exc:
+                    logger.warning("Prediction market resolution failed: %s", exc)
+
+            # === Phase 5.1: Deliberation Quality Assessment ===
+            dqi_overall_score = None
+            try:
+                meeting_rounds = meeting_result.get("rounds", [])
+                dqi_result = compute_dqi(meeting_rounds)
+                opinion_change = measure_opinion_change(meeting_rounds)
+                dqi_data = {
+                    "dqi": dqi_result,
+                    "opinion_change": opinion_change,
+                }
+                dqi_society_result = SocietyResult(
+                    id=str(uuid.uuid4()),
+                    simulation_id=simulation_id,
+                    population_id=pop_id,
+                    layer="deliberation_quality",
+                    phase_data=dqi_data,
+                    usage={},
+                )
+                session.add(dqi_society_result)
+                dqi_overall_score = dqi_result.get("overall_dqi")
+            except Exception as exc:
+                logger.warning("DQI evaluation failed: %s", exc)
+
+            # === Phase 5.5: Provenance 構築 ===
+            quality_metrics = {m["metric_name"]: m["score"] for m in eval_metrics}
+            if dqi_overall_score is not None:
+                quality_metrics["dqi_overall"] = dqi_overall_score
+
+            provenance = build_provenance(
+                population_size=len(agents),
+                selected_count=len(selected_agents),
+                effective_sample_size=activation_result["aggregation"].get(
+                    "effective_sample_size", float(len(selected_agents))
+                ),
+                activation_params={"temperature": 0.5},
+                meeting_params={
+                    "num_rounds": 3,
+                    "participants": len(meeting_participants),
+                },
+                quality_metrics=quality_metrics,
+                seed=sim.seed,
+            )
+
+            # Augment provenance with network propagation data
+            if propagation_result:
+                provenance["network_propagation"] = {
+                    "model": "Bounded Confidence (Hegselmann-Krause) + Friedkin-Johnsen",
+                    "max_timesteps": 20,
+                    "actual_timesteps": propagation_result.total_timesteps,
+                    "converged": propagation_result.converged,
+                    "cluster_count": len(propagation_result.clusters),
+                    "echo_chamber": propagation_result.metrics.get("echo_chamber", {}),
+                }
+
+            # === Phase 5.5: Gap Explanation + Narrative Report ===
+            # Explain activation-meeting gap
+            propagation_data_for_gap = None
+            if propagation_result:
+                propagation_data_for_gap = {
+                    "converged": propagation_result.converged,
+                    "total_timesteps": propagation_result.total_timesteps,
+                    "clusters": [
+                        {"label": c.label, "size": c.size, "centroid": c.centroid, "member_ids": c.member_ids}
+                        for c in propagation_result.clusters
+                    ],
+                    "echo_chamber": propagation_result.metrics.get("echo_chamber", {}),
+                    "timestep_history": [
+                        {"timestep": ts.timestep, "opinion_distribution": ts.opinion_distribution}
+                        for ts in propagation_result.timestep_history
+                    ],
+                }
+
+            gap_explanation = explain_activation_meeting_gap(
+                aggregation=activation_result["aggregation"],
+                synthesis=meeting_result.get("synthesis", {}),
+                meeting_participants=meeting_participants,
+                propagation_data=propagation_data_for_gap,
+            )
+
+            # Prepare cluster data for v2 narrative
+            narrative_clusters = None
+            if propagation_result and propagation_result.clusters:
+                narrative_clusters = [
+                    {"label": c.label, "size": c.size, "centroid": c.centroid, "member_ids": c.member_ids}
+                    for c in propagation_result.clusters
+                ]
+
             narrative = generate_narrative(
                 selected_agents,
                 activation_result["responses"],
@@ -345,7 +769,13 @@ async def run_society(simulation_id: str) -> None:
                 activation_result["aggregation"],
                 demographic_analysis,
                 meeting_rounds=meeting_result.get("rounds"),
+                provenance=provenance,
+                clusters=narrative_clusters,
             )
+
+            # Enrich narrative with gap explanation
+            narrative["gap_explanation"] = gap_explanation
+
             narrative_record = SocietyResult(
                 id=str(uuid.uuid4()),
                 simulation_id=simulation_id,
@@ -386,17 +816,30 @@ async def run_society(simulation_id: str) -> None:
                     "population_id": pop_id,
                     "population_count": len(agents),
                     "selected_count": len(selected_agents),
+                    "aggregation_pre_independence": activation_result.get(
+                        "aggregation_pre_independence"
+                    ),
                     "aggregation": activation_result["aggregation"],
+                    "independence_re_aggregation": _build_independence_reaggregation_summary(
+                        activation_result
+                    ),
                     "evaluation": eval_data,
                     "meeting": meeting_report,
                     "usage": total_usage,
                 },
+                "provenance": provenance,
             }
             await session.commit()
 
             await sse_manager.publish(simulation_id, "society_completed", {
                 "simulation_id": simulation_id,
+                "aggregation_pre_independence": activation_result.get(
+                    "aggregation_pre_independence"
+                ),
                 "aggregation": activation_result["aggregation"],
+                "independence_re_aggregation": _build_independence_reaggregation_summary(
+                    activation_result
+                ),
                 "evaluation": eval_data,
                 "meeting_available": True,
                 "usage": total_usage,

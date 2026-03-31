@@ -2,6 +2,9 @@
 
 import logging
 import random
+from collections import defaultdict
+
+from src.app.services.society.age_utils import age_bracket_4 as _age_bracket
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +21,41 @@ TOPIC_KEYWORDS: dict[str, list[str]] = {
     "welfare": ["福祉", "年金", "生活保護", "子育て", "少子化", "高齢化"],
     "energy": ["エネルギー", "原発", "太陽光", "風力", "電力", "蓄電"],
 }
+
+
+
+
+def _build_demographic_quotas(agents: list[dict], target_count: int) -> dict:
+    """母集団の人口統計分布を集計し、target_count に応じた各セルの目標数を算出する。
+
+    Returns:
+        {
+          "age_brackets": {"18-29": int, ...},
+          "regions":      {"北海道": int, ...},
+          "genders":      {"male": int, ...},
+        }
+    """
+    n = len(agents)
+    if n == 0:
+        return {"age_brackets": {}, "regions": {}, "genders": {}}
+
+    age_counts: dict[str, int] = defaultdict(int)
+    region_counts: dict[str, int] = defaultdict(int)
+    gender_counts: dict[str, int] = defaultdict(int)
+
+    for a in agents:
+        demo = a.get("demographics", {})
+        age_counts[_age_bracket(demo.get("age", 30))] += 1
+        region_counts[demo.get("region", "")] += 1
+        gender_counts[demo.get("gender", "")] += 1
+
+    ratio = target_count / n
+
+    age_quotas = {k: max(1, round(v * ratio)) for k, v in age_counts.items()}
+    region_quotas = {k: max(1, round(v * ratio)) for k, v in region_counts.items() if k}
+    gender_quotas = {k: max(1, round(v * ratio)) for k, v in gender_counts.items() if k}
+
+    return {"age_brackets": age_quotas, "regions": region_quotas, "genders": gender_quotas}
 
 
 def _extract_relevant_topics(theme: str) -> list[str]:
@@ -86,27 +124,82 @@ def _stratified_sample(
     return selected[:target_count]
 
 
-def _ensure_diversity(
+def _ensure_demographic_quotas(
     agents: list[dict],
     selected_indices: list[int],
 ) -> list[int]:
-    """選抜結果の多様性を検証し、不足属性があれば補充する。"""
+    """選抜結果の人口統計的多様性を検証し、不足属性があれば補充する。
+
+    保証する制約:
+    - 全地域を少なくとも1人ずつカバー（元の動作を維持）
+    - 少なくとも3つの年齢帯を含む
+    - 男女両方を含む
+    """
     selected_set = set(selected_indices)
 
-    # 地域の多様性チェック
+    # ---- 地域の多様性チェック（既存ロジック維持） ----
     selected_regions = {agents[i].get("demographics", {}).get("region", "") for i in selected_indices}
     all_regions = {a.get("demographics", {}).get("region", "") for a in agents}
     missing_regions = all_regions - selected_regions
 
     for region in missing_regions:
-        # 該当地域から1人追加
         for i, a in enumerate(agents):
             if i not in selected_set and a.get("demographics", {}).get("region") == region:
                 selected_indices.append(i)
                 selected_set.add(i)
                 break
 
+    # ---- 年齢帯の多様性チェック（最低3帯） ----
+    MIN_AGE_BRACKETS = 3
+    selected_brackets = {
+        _age_bracket(agents[i].get("demographics", {}).get("age", 30))
+        for i in selected_indices
+    }
+    all_brackets = {
+        _age_bracket(a.get("demographics", {}).get("age", 30))
+        for a in agents
+    }
+    missing_brackets = all_brackets - selected_brackets
+
+    # 不足している年齢帯が多様性下限に引っかかる場合は補充
+    for bracket in missing_brackets:
+        if len(selected_brackets) >= MIN_AGE_BRACKETS:
+            break
+        for i, a in enumerate(agents):
+            if (
+                i not in selected_set
+                and _age_bracket(a.get("demographics", {}).get("age", 30)) == bracket
+            ):
+                selected_indices.append(i)
+                selected_set.add(i)
+                selected_brackets.add(bracket)
+                break
+
+    # ---- 性別の多様性チェック（男女両方） ----
+    selected_genders = {
+        agents[i].get("demographics", {}).get("gender", "")
+        for i in selected_indices
+    }
+    all_genders = {a.get("demographics", {}).get("gender", "") for a in agents}
+    missing_genders = all_genders - selected_genders
+
+    for gender in missing_genders:
+        if not gender:
+            continue
+        for i, a in enumerate(agents):
+            if (
+                i not in selected_set
+                and a.get("demographics", {}).get("gender") == gender
+            ):
+                selected_indices.append(i)
+                selected_set.add(i)
+                break
+
     return selected_indices
+
+
+# Keep the old name as an alias for backward compatibility
+_ensure_diversity = _ensure_demographic_quotas
 
 
 async def select_agents(
@@ -134,8 +227,8 @@ async def select_agents(
     # 層化抽出
     selected_indices = _stratified_sample(agents, scores, target_count)
 
-    # 多様性保証
-    selected_indices = _ensure_diversity(agents, selected_indices)
+    # 人口統計的多様性保証（地域・年齢帯・性別）
+    selected_indices = _ensure_demographic_quotas(agents, selected_indices)
 
     # 重複除去
     seen = set()

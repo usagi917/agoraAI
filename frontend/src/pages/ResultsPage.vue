@@ -27,12 +27,15 @@ import {
   type DecisionBrief,
   getTranscript,
   type TranscriptEntry,
+  getPropagation,
+  type PropagationData,
 } from '../api/client'
 import { useForceGraph } from '../composables/useForceGraph'
 import DecisionBriefComponent from '../components/DecisionBrief.vue'
 import ProbabilityChart from '../components/ProbabilityChart.vue'
 import ScenarioCompare from '../components/ScenarioCompare.vue'
 import AgreementHeatmap from '../components/AgreementHeatmap.vue'
+import PropagationDashboard from '../components/PropagationDashboard.vue'
 import {
   getDefaultResultsSecondaryTab,
   getResultsPrimaryView,
@@ -58,6 +61,7 @@ const transitionTargetRound = ref<number | null>(null)
 const transitionProgress = ref(0)
 const isPlaying = ref(false)
 const colonies = ref<ColonyResponse[]>([])
+const propagationData = ref<PropagationData | null>(null)
 const transcriptEntries = ref<TranscriptEntry[]>([])
 const transcriptLoading = ref(false)
 const transcriptPhaseFilter = ref<string>('')
@@ -445,6 +449,13 @@ onMounted(async () => {
     if (layoutContext.value.hasTranscript) {
       loadTranscript()
     }
+
+    // Propagation data 取得 (society/unified modes)
+    getPropagation(simId).then((res) => {
+      if (res?.phase_data) {
+        propagationData.value = res.phase_data as PropagationData
+      }
+    }).catch(() => { /* no propagation data */ })
 
     // 最新グラフ表示
     if (showGraphViews.value && graphHistory.length > 0) {
@@ -949,6 +960,9 @@ function renderMarkdown(content: string): string {
                     <p class="society-backtest-outcome">{{ historicalCase.outcome.summary || historicalCase.outcome.actual_scenario }}</p>
                   </div>
                 </div>
+              </div>
+              <div class="society-section">
+                <PropagationDashboard :api-data="propagationData" />
               </div>
               <div v-if="meetingReport" class="society-section">
                 <h4 class="society-section-title">Meeting Layer</h4>

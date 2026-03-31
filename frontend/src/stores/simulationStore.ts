@@ -67,6 +67,21 @@ export const useSimulationStore = defineStore('simulation', () => {
   const evaluationMetrics = ref<Record<string, number>>({})
   const societyActivationProgress = ref<{ completed: number; total: number }>({ completed: 0, total: 0 })
 
+  // Network Propagation 状態 (Swarm Intelligence)
+  const propagationTimesteps = ref<Array<{
+    timestep: number
+    opinion_distribution: Record<string, number>
+    entropy: number
+    cluster_count: number
+    max_delta: number
+  }>>([])
+  const propagationCompleted = ref(false)
+  const propagationClusters = ref<Array<{ label: number; size: number; centroid: number[] }>>([])
+  const echoChamberMetrics = ref<{ homophily_index: number; polarization_index: number }>({
+    homophily_index: 0,
+    polarization_index: 0,
+  })
+
   // Unified モード状態
   const unifiedPhase = ref<'idle' | 'society_pulse' | 'council' | 'synthesis' | 'completed'>('idle')
   const unifiedPhaseIndex = ref(0)
@@ -200,6 +215,10 @@ export const useSimulationStore = defineStore('simulation', () => {
     opinionDistribution.value = {}
     evaluationMetrics.value = {}
     societyActivationProgress.value = { completed: 0, total: 0 }
+    propagationTimesteps.value = []
+    propagationCompleted.value = false
+    propagationClusters.value = []
+    echoChamberMetrics.value = { homophily_index: 0, polarization_index: 0 }
     unifiedPhase.value = 'idle'
     unifiedPhaseIndex.value = 0
     unifiedPhaseTotal.value = 3
@@ -339,6 +358,29 @@ export const useSimulationStore = defineStore('simulation', () => {
     opinionDistribution.value = dist
   }
 
+  function addPropagationTimestep(ts: {
+    timestep: number
+    opinion_distribution: Record<string, number>
+    entropy: number
+    cluster_count: number
+    max_delta: number
+  }) {
+    propagationTimesteps.value.push(ts)
+  }
+
+  function setPropagationCompleted(data: {
+    converged: boolean
+    cluster_count: number
+    clusters?: Array<{ label: number; size: number; centroid: number[] }>
+    echo_chamber?: { homophily_index: number; polarization_index: number }
+    opinionDistribution?: Record<string, number>
+  }) {
+    propagationCompleted.value = true
+    if (data.clusters) propagationClusters.value = data.clusters
+    if (data.echo_chamber) echoChamberMetrics.value = data.echo_chamber
+    if (data.opinionDistribution) opinionDistribution.value = data.opinionDistribution
+  }
+
   function setEvaluationMetrics(metrics: Record<string, number>) {
     evaluationMetrics.value = metrics
   }
@@ -432,6 +474,12 @@ export const useSimulationStore = defineStore('simulation', () => {
     societyActivationProgress,
     setSocietyPhase,
     setOpinionDistribution,
+    addPropagationTimestep,
+    setPropagationCompleted,
+    propagationTimesteps,
+    propagationCompleted,
+    propagationClusters,
+    echoChamberMetrics,
     setEvaluationMetrics,
     setSocietyActivationProgress,
     metaPhase,

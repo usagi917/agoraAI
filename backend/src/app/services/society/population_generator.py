@@ -86,6 +86,59 @@ SPEECH_STYLES = [
 ]
 
 
+def _derive_speech_style(big_five: dict, demographics: dict) -> str:
+    """Big Five特性と属性から話し方スタイルを導出する。
+
+    ランダムではなく、性格特性の組み合わせから最も自然なスタイルを選ぶ。
+    """
+    o = big_five.get("O", 0.5)
+    c = big_five.get("C", 0.5)
+    e = big_five.get("E", 0.5)
+    a = big_five.get("A", 0.5)
+    n = big_five.get("N", 0.5)
+    age = demographics.get("age", 40)
+
+    # スコアリング方式: 各スタイルへの適合度を計算
+    scores: dict[str, float] = {}
+
+    # 率直で簡潔: 外向的 + 低協調性 + 低神経症
+    scores["率直で簡潔"] = e * 0.4 + (1 - a) * 0.3 + (1 - n) * 0.2 + c * 0.1
+
+    # 感情的で熱心: 高神経症 or 高外向性 + 低誠実性
+    scores["感情的で熱心"] = n * 0.3 + e * 0.3 + (1 - c) * 0.2 + o * 0.2
+
+    # 分析的で論理的: 高誠実性 + 高開放性 + 低神経症
+    scores["分析的で論理的"] = c * 0.4 + o * 0.2 + (1 - n) * 0.2 + (1 - e) * 0.2
+
+    # 控えめで消極的: 低外向性 + 高協調性 + 高神経症
+    scores["控えめで消極的"] = (1 - e) * 0.4 + a * 0.3 + n * 0.2 + (1 - o) * 0.1
+
+    # 攻撃的で主張が強い: 低協調性 + 高外向性 + 低神経症
+    scores["攻撃的で主張が強い"] = (1 - a) * 0.4 + e * 0.3 + (1 - n) * 0.2 + o * 0.1
+
+    # 共感的で聞き上手: 高協調性 + 低外向性
+    scores["共感的で聞き上手"] = a * 0.5 + (1 - e) * 0.2 + n * 0.15 + o * 0.15
+
+    # 皮肉っぽい: 高開放性 + 低協調性 + 高神経症
+    scores["皮肉っぽい"] = o * 0.3 + (1 - a) * 0.3 + n * 0.2 + e * 0.2
+
+    # 楽観的: 低神経症 + 高外向性 + 高協調性
+    scores["楽観的"] = (1 - n) * 0.4 + e * 0.3 + a * 0.2 + o * 0.1
+
+    # 丁寧で慎重: 高誠実性 + 高協調性 + 低外向性、年配に多い
+    age_bonus = min(0.15, max(0, (age - 50) * 0.005))
+    scores["丁寧で慎重"] = c * 0.3 + a * 0.3 + (1 - e) * 0.2 + (1 - o) * 0.1 + age_bonus
+
+    # ユーモアを交える: 高開放性 + 高外向性 + 低神経症
+    scores["ユーモアを交える"] = o * 0.3 + e * 0.3 + (1 - n) * 0.2 + a * 0.2
+
+    # 上位2つからランダム選択（完全決定論にしない）
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    top_styles = [s for s, _ in ranked[:3]]
+    top_weights = [w for _, w in ranked[:3]]
+    return random.choices(top_styles, weights=top_weights, k=1)[0]
+
+
 def _sample_categorical(categories: list[str], weights: list[float]) -> str:
     return random.choices(categories, weights=weights, k=1)[0]
 
@@ -358,7 +411,7 @@ def generate_agent_profile(
         "information_source": random.choice(INFORMATION_SOURCES),
         "local_context": f"{demographics['region']}在住の{demographics['occupation']}",
         "hidden_motivation": _generate_hidden_motivation(demographics, life_event, values),
-        "speech_style": random.choice(SPEECH_STYLES),
+        "speech_style": _derive_speech_style(big_five, demographics),
         "shock_sensitivity": _generate_shock_sensitivity(),
         "llm_backend": _assign_llm_backend(index, total, mix_config),
         "memory_summary": _generate_memory_summary(demographics, life_event),

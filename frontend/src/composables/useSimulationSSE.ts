@@ -96,6 +96,10 @@ export function useSimulationSSE(simulationId: string) {
       'society_activation_completed',
       'society_evaluation_completed',
       'society_completed',
+      // Network Propagation (Swarm Intelligence)
+      'network_propagation_started',
+      'propagation_timestep',
+      'network_propagation_completed',
       // Society ソーシャルグラフ
       'society_social_graph_ready',
       // Unified モード イベント
@@ -643,6 +647,42 @@ export function useSimulationSSE(simulationId: string) {
       case 'society_evaluation_completed':
         store.setEvaluationMetrics(payload.metrics || {})
         activity.addEntry('event', '▣', '評価完了', {
+          track: 'phase',
+          status: 'completed',
+        })
+        break
+
+      case 'network_propagation_started':
+        activity.addEntry('phase', '◎', `ネットワーク伝播開始 (${payload.agent_count}人, ${payload.edge_count}辺)`, {
+          track: 'phase',
+          status: 'running',
+        })
+        break
+
+      case 'propagation_timestep':
+        store.addPropagationTimestep({
+          timestep: payload.timestep,
+          opinion_distribution: payload.opinion_distribution,
+          entropy: payload.entropy,
+          cluster_count: payload.cluster_count,
+          max_delta: payload.max_delta,
+        })
+        break
+
+      case 'network_propagation_completed':
+        store.setPropagationCompleted({
+          converged: payload.converged,
+          cluster_count: payload.cluster_count,
+          clusters: payload.clusters,
+          echo_chamber: payload.echo_chamber,
+          opinionDistribution: payload.aggregation?.stance_distribution,
+        })
+        // Update graph node colors with propagated stances
+        if (payload.stance_updates?.length) {
+          societyGraphStore.updateStancesFromPropagation(payload.stance_updates)
+        }
+        activity.addEntry('event', '◎', `伝播完了 (${payload.total_timesteps}ステップ, ${payload.converged ? '収束' : '未収束'})`, {
+          detail: `${payload.cluster_count}クラスタ, ${payload.stance_updates?.length || 0}件のスタンス変化`,
           track: 'phase',
           status: 'completed',
         })

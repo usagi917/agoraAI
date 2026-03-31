@@ -2,17 +2,7 @@
 
 from collections import Counter
 
-
-def _age_bracket(age: int) -> str:
-    if age < 30:
-        return "18-29"
-    if age < 40:
-        return "30-39"
-    if age < 50:
-        return "40-49"
-    if age < 60:
-        return "50-59"
-    return "60+"
+from src.app.services.society.age_utils import age_bracket_5 as _age_bracket
 
 
 def _compute_stance_by_group(
