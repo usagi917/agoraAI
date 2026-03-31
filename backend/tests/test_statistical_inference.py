@@ -223,6 +223,20 @@ class TestComputePoststratificationWeights:
             })
         return agents
 
+    def _make_agents_without_age_bracket(self, age_regions):
+        """production 形式に合わせて age_bracket を持たない agents を生成"""
+        return [
+            {
+                "demographics": {
+                    "age": age,
+                    "region": region,
+                    "gender": "male",
+                    "income_bracket": "middle",
+                }
+            }
+            for age, region in age_regions
+        ]
+
     def _make_responses(self, n):
         return [{"stance": "中立", "confidence": 0.5} for _ in range(n)]
 
@@ -269,6 +283,29 @@ class TestComputePoststratificationWeights:
 
         # 関東が過剰代表 → 関東の平均ウェイトは他より小さいはず
         assert avg_kantou < avg_other
+
+    def test_poststratification_derives_age_bracket_from_age(self):
+        """age_bracket が無くても age から年齢帯補正が効くこと。"""
+        agents = self._make_agents_without_age_bracket(
+            [(25, "関東")] * 6 + [(35, "関西")] * 2 + [(55, "中部")] * 2
+        )
+        responses = self._make_responses(10)
+        target = self._target_marginals()
+
+        weights = compute_poststratification_weights(agents, responses, target, cap=5.0)
+
+        young_weights = [
+            weights[i] for i, a in enumerate(agents)
+            if a["demographics"]["age"] < 30
+        ]
+        older_weights = [
+            weights[i] for i, a in enumerate(agents)
+            if a["demographics"]["age"] >= 30
+        ]
+
+        assert len(young_weights) == 6
+        assert len(older_weights) == 4
+        assert sum(young_weights) / len(young_weights) < sum(older_weights) / len(older_weights)
 
     def test_poststratification_weight_cap(self):
         """cap=5.0 のとき、いかなるウェイトも 5.0 を超えない"""

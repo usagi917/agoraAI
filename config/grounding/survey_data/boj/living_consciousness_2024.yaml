@@ -1,0 +1,79 @@
+surveys:
+  - theme: "景況感"
+    question: "1年前と比べて景気は良くなったと思いますか"
+    source: "日本銀行「生活意識に関するアンケート調査」2024年"
+    survey_date: "2024-03"
+    sample_size: 2182
+    method: "郵送法"
+    theme_category: "economy"
+    relevance_keywords:
+      - "景気"
+      - "景況感"
+      - "経済"
+      - "好況"
+      - "不況"
+    stance_distribution:
+      賛成: 0.08
+      条件付き賛成: 0.15
+      中立: 0.25
+      条件付き反対: 0.30
+      反対: 0.22
+
+  - theme: "物価上昇"
+    question: "物価上昇は生活に影響を与えていますか"
+    source: "日本銀行「生活意識に関するアンケート調査」2024年"
+    survey_date: "2024-03"
+    sample_size: 2182
+    method: "郵送法"
+    theme_category: "economy"
+    relevance_keywords:
+      - "物価"
+      - "インフレ"
+      - "物価上昇"
+      - "生活費"
+      - "値上げ"
+    stance_distribution:
+      賛成: 0.45
+      条件付き賛成: 0.28
+      中立: 0.12
+      条件付き反対: 0.10
+      反対: 0.05
+
+  - theme: "収入の見通し"
+    question: "今後1年間で収入は増えると思いますか"
+    source: "日本銀行「生活意識に関するアンケート調査」2024年"
+    survey_date: "2024-03"
+    sample_size: 2182
+    method: "郵送法"
+    theme_category: "economy"
+    relevance_keywords:
+      - "収入"
+      - "賃金"
+      - "給料"
+      - "所得"
+    stance_distribution:
+      賛成: 0.10
+      条件付き賛成: 0.18
+      中立: 0.32
+      条件付き反対: 0.22
+      反対: 0.18
+
+  - theme: "金利政策"
+    question: "現在の金融緩和政策を支持しますか"
+    source: "日本銀行「生活意識に関するアンケート調査」2024年"
+    survey_date: "2024-03"
+    sample_size: 2182
+    method: "郵送法"
+    theme_category: "economy"
+    relevance_keywords:
+      - "金利"
+      - "金融政策"
+      - "金融緩和"
+      - "日銀"
+      - "利上げ"
+    stance_distribution:
+      賛成: 0.15
+      条件付き賛成: 0.20
+      中立: 0.35
+      条件付き反対: 0.18
+      反対: 0.12

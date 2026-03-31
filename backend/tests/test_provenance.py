@@ -308,3 +308,74 @@ class TestProvenanceQualityMetrics:
             effective_sample_size=45.0,
         )
         assert result["quality_metrics"] == {}
+
+
+# ---------------------------------------------------------------------------
+# survey_comparison integration (Phase 6)
+# ---------------------------------------------------------------------------
+
+
+class TestProvenanceSurveyComparison:
+    def test_build_provenance_with_survey_comparison(self):
+        """survey_comparison パラメータが provenance 出力に反映される"""
+        comparison = {
+            "kl_divergence": 0.12,
+            "emd": 0.35,
+            "best_match_source": "内閣府「外交に関する世論調査」2024年",
+            "matched_surveys": [
+                {"source": "内閣府「外交に関する世論調査」2024年", "survey_date": "2024-01"}
+            ],
+        }
+        result = build_provenance(
+            population_size=1000,
+            selected_count=100,
+            effective_sample_size=85.0,
+            survey_comparison=comparison,
+        )
+        assert "survey_validation" in result
+        assert result["survey_validation"]["kl_divergence"] == 0.12
+        assert result["survey_validation"]["emd"] == 0.35
+        # data_sources に調査情報が追加されている
+        source_names = [s["name"] for s in result["data_sources"]]
+        assert any("内閣府" in name for name in source_names)
+
+    def test_build_provenance_survey_deviation_warning(self):
+        """KL > 0.3 で limitations に乖離警告が追加"""
+        comparison = {
+            "kl_divergence": 0.5,
+            "emd": 1.0,
+            "best_match_source": "test",
+            "matched_surveys": [],
+        }
+        result = build_provenance(
+            population_size=1000,
+            selected_count=100,
+            effective_sample_size=85.0,
+            survey_comparison=comparison,
+        )
+        assert any("乖離" in lim for lim in result["limitations"])
+
+    def test_build_provenance_survey_low_deviation_note(self):
+        """KL <= 0.15 で methodology に整合性注記が追加"""
+        comparison = {
+            "kl_divergence": 0.10,
+            "emd": 0.2,
+            "best_match_source": "test",
+            "matched_surveys": [],
+        }
+        result = build_provenance(
+            population_size=1000,
+            selected_count=100,
+            effective_sample_size=85.0,
+            survey_comparison=comparison,
+        )
+        assert "survey_validation_note" in result["methodology"]
+
+    def test_build_provenance_without_survey_comparison(self):
+        """survey_comparison=None のとき survey_validation セクションなし"""
+        result = build_provenance(
+            population_size=1000,
+            selected_count=100,
+            effective_sample_size=85.0,
+        )
+        assert "survey_validation" not in result

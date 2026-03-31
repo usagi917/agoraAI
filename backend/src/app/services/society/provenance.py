@@ -69,6 +69,7 @@ def build_provenance(
     quality_metrics: Optional[dict] = None,
     seed: Optional[int] = None,
     provider_bias_detected: bool = False,
+    survey_comparison: Optional[dict] = None,
 ) -> dict:
     """シミュレーション結果のプロベナンス（方法論メタデータ）を構築する。
 
@@ -82,6 +83,7 @@ def build_provenance(
         quality_metrics: 外部から計算された品質メトリクス辞書
         seed: 乱数シード（再現性のために記録）
         provider_bias_detected: LLMプロバイダ間でスタンス分布の有意差が検出されたか
+        survey_comparison: 世論調査との比較結果辞書（kl_divergence, emd, best_match_source, matched_surveys）
 
     Returns:
         以下のキーを持つ辞書:
@@ -162,7 +164,8 @@ def build_provenance(
         "deterministic": False,
     }
 
-    return {
+    # --- survey_comparison (optional) ---
+    result: dict = {
         "methodology": methodology,
         "data_sources": data_sources,
         "parameters": parameters,
@@ -170,3 +173,38 @@ def build_provenance(
         "limitations": limitations,
         "reproducibility": reproducibility,
     }
+
+    if survey_comparison is not None:
+        kl = survey_comparison.get("kl_divergence", 0.0)
+        emd = survey_comparison.get("emd", 0.0)
+        best_source = survey_comparison.get("best_match_source", "")
+
+        result["survey_validation"] = {
+            "kl_divergence": kl,
+            "emd": emd,
+            "matched_survey_source": best_source,
+        }
+
+        # data_sources に比較した調査の情報を追加
+        for survey in survey_comparison.get("matched_surveys", []):
+            source_name = survey.get("source", best_source)
+            data_sources.append({
+                "name": source_name,
+                "used_for": "simulation output validation",
+            })
+
+        # KL > 0.3: 乖離警告
+        if kl > 0.3:
+            limitations.append(
+                "シミュレーション出力と実世論調査の間に大きな乖離が検出された"
+                f"（KL-divergence: {kl:.3f}）"
+            )
+
+        # KL <= 0.15: 整合性注記
+        if kl <= 0.15:
+            methodology["survey_validation_note"] = (
+                "実世論調査との整合性が確認された"
+                f"（KL-divergence: {kl:.3f}）"
+            )
+
+    return result

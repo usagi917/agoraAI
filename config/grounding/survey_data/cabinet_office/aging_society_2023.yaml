@@ -1,0 +1,40 @@
+surveys:
+  - theme: "高齢社会対策"
+    question: "高齢社会対策は十分だと思いますか"
+    source: "内閣府「高齢社会に関する世論調査」2023年"
+    survey_date: "2023-09"
+    sample_size: 3000
+    method: "郵送法"
+    theme_category: "social"
+    relevance_keywords:
+      - "高齢社会"
+      - "高齢者"
+      - "介護"
+      - "年金"
+      - "老後"
+    stance_distribution:
+      賛成: 0.08
+      条件付き賛成: 0.18
+      中立: 0.22
+      条件付き反対: 0.30
+      反対: 0.22
+
+  - theme: "老後の生活設計"
+    question: "老後の生活に経済的な不安を感じますか"
+    source: "内閣府「高齢社会に関する世論調査」2023年"
+    survey_date: "2023-09"
+    sample_size: 3000
+    method: "郵送法"
+    theme_category: "economy"
+    relevance_keywords:
+      - "老後"
+      - "生活設計"
+      - "経済不安"
+      - "年金"
+      - "貯蓄"
+    stance_distribution:
+      賛成: 0.35
+      条件付き賛成: 0.28
+      中立: 0.15
+      条件付き反対: 0.13
+      反対: 0.09

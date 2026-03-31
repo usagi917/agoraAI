@@ -1,0 +1,57 @@
+surveys:
+  - theme: "自衛隊の役割"
+    question: "自衛隊が存在することは日本の安全に役立っていると思いますか"
+    source: "内閣府「自衛隊・防衛問題に関する世論調査」2024年"
+    survey_date: "2024-01"
+    sample_size: 2761
+    method: "個別面接聴取"
+    theme_category: "security"
+    relevance_keywords:
+      - "自衛隊"
+      - "防衛"
+      - "安全保障"
+      - "国防"
+    stance_distribution:
+      賛成: 0.45
+      条件付き賛成: 0.28
+      中立: 0.12
+      条件付き反対: 0.09
+      反対: 0.06
+
+  - theme: "防衛費増額"
+    question: "防衛費を増やすことに賛成ですか"
+    source: "内閣府「自衛隊・防衛問題に関する世論調査」2024年"
+    survey_date: "2024-01"
+    sample_size: 2761
+    method: "個別面接聴取"
+    theme_category: "security"
+    relevance_keywords:
+      - "防衛費"
+      - "軍事費"
+      - "予算"
+      - "防衛力強化"
+    stance_distribution:
+      賛成: 0.22
+      条件付き賛成: 0.25
+      中立: 0.20
+      条件付き反対: 0.18
+      反対: 0.15
+
+  - theme: "日米安全保障"
+    question: "日米安全保障条約は日本の安全に役立っていると思いますか"
+    source: "内閣府「自衛隊・防衛問題に関する世論調査」2024年"
+    survey_date: "2024-01"
+    sample_size: 2761
+    method: "個別面接聴取"
+    theme_category: "security"
+    relevance_keywords:
+      - "日米安保"
+      - "安全保障条約"
+      - "同盟"
+      - "アメリカ"
+    stance_distribution:
+      賛成: 0.40
+      条件付き賛成: 0.27
+      中立: 0.15
+      条件付き反対: 0.10
+      反対: 0.08

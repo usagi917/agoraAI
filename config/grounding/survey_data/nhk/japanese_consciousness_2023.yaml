@@ -1,0 +1,76 @@
+surveys:
+  - theme: "生活満足度"
+    question: "今の生活に満足していますか"
+    source: "NHK放送文化研究所「日本人の意識」調査 2023年"
+    survey_date: "2023-06"
+    sample_size: 3600
+    method: "配付回収法"
+    theme_category: "social"
+    relevance_keywords:
+      - "生活満足"
+      - "暮らし"
+      - "幸福度"
+      - "生活"
+    stance_distribution:
+      賛成: 0.28
+      条件付き賛成: 0.32
+      中立: 0.18
+      条件付き反対: 0.14
+      反対: 0.08
+
+  - theme: "政治への信頼"
+    question: "政治家は国民の声を聞いていると思いますか"
+    source: "NHK放送文化研究所「日本人の意識」調査 2023年"
+    survey_date: "2023-06"
+    sample_size: 3600
+    method: "配付回収法"
+    theme_category: "politics"
+    relevance_keywords:
+      - "政治信頼"
+      - "政治家"
+      - "政治不信"
+      - "民主主義"
+    stance_distribution:
+      賛成: 0.05
+      条件付き賛成: 0.12
+      中立: 0.20
+      条件付き反対: 0.30
+      反対: 0.33
+
+  - theme: "男女平等"
+    question: "日本社会は男女平等だと思いますか"
+    source: "NHK放送文化研究所「日本人の意識」調査 2023年"
+    survey_date: "2023-06"
+    sample_size: 3600
+    method: "配付回収法"
+    theme_category: "social"
+    relevance_keywords:
+      - "男女平等"
+      - "ジェンダー"
+      - "女性活躍"
+      - "平等"
+    stance_distribution:
+      賛成: 0.10
+      条件付き賛成: 0.15
+      中立: 0.20
+      条件付き反対: 0.28
+      反対: 0.27
+
+  - theme: "伝統と変化"
+    question: "日本の伝統は大切にすべきだと思いますか"
+    source: "NHK放送文化研究所「日本人の意識」調査 2023年"
+    survey_date: "2023-06"
+    sample_size: 3600
+    method: "配付回収法"
+    theme_category: "social"
+    relevance_keywords:
+      - "伝統"
+      - "文化"
+      - "保守"
+      - "変化"
+    stance_distribution:
+      賛成: 0.40
+      条件付き賛成: 0.28
+      中立: 0.17
+      条件付き反対: 0.10
+      反対: 0.05

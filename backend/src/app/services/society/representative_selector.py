@@ -46,9 +46,16 @@ def _cluster_by_stance(
     """スタンス別にエージェントをクラスタリングする。"""
     clusters: dict[str, list[tuple[dict, dict]]] = defaultdict(list)
     for agent, resp in zip(agents, responses):
-        stance = resp.get("stance", "中立")
+        stance = _resolved_stance(resp)
         clusters[stance].append((agent, resp))
     return clusters
+
+
+def _resolved_stance(resp: dict | None) -> str:
+    """伝播後スタンスがあればそれを優先して使う。"""
+    if not resp:
+        return "中立"
+    return resp.get("propagated_stance") or resp.get("stance") or "中立"
 
 
 async def _select_expert_types(theme: str, stance_dist: dict, max_experts: int) -> list[str]:
@@ -172,7 +179,7 @@ async def select_representatives(
                     "response": resp,
                     "role": "citizen_representative",
                     "expertise": "",
-                    "stance": stance,
+                    "stance": _resolved_stance(resp),
                 })
                 citizen_count += 1
             if citizen_count >= max_citizen_reps:
@@ -189,7 +196,7 @@ async def select_representatives(
                 "response": resp,
                 "role": "citizen_representative",
                 "expertise": "",
-                "stance": "中立",
+                "stance": _resolved_stance(resp),
             })
             citizen_count += 1
 
@@ -205,7 +212,7 @@ async def select_representatives(
                 "response": resp,
                 "role": "citizen_representative",
                 "expertise": "",
-                "stance": resp.get("stance", "中立"),
+                "stance": _resolved_stance(resp),
             })
             citizen_count += 1
 
@@ -237,7 +244,7 @@ async def select_representatives(
             "response": candidate_resp,
             "role": "citizen_representative",
             "expertise": "",
-            "stance": candidate_resp.get("stance", "中立"),
+            "stance": _resolved_stance(candidate_resp),
         }
         current = _current_citizens()
         if len(current) < max_citizen_reps:
@@ -253,13 +260,29 @@ async def select_representatives(
             participants[idx] = new_entry
         selected_agent_ids.add(candidate_agent.get("id"))
 
-    # --- 年齢帯: 最低3帯 ---
-    current_brackets = {
-        _age_bracket(p["agent_profile"]["demographics"]["age"])
-        for p in _current_citizens()
-        if p["agent_profile"].get("demographics", {}).get("age") is not None
-    }
-    if len(current_brackets) < 3:
+    def _current_age_brackets() -> set[str]:
+        return {
+            _age_bracket(p["agent_profile"]["demographics"]["age"])
+            for p in _current_citizens()
+            if p["agent_profile"].get("demographics", {}).get("age") is not None
+        }
+
+    def _current_regions() -> set[str]:
+        return {
+            p["agent_profile"]["demographics"]["region"]
+            for p in _current_citizens()
+            if p["agent_profile"].get("demographics", {}).get("region")
+        }
+
+    def _current_genders() -> set[str]:
+        return {
+            p["agent_profile"]["demographics"]["gender"]
+            for p in _current_citizens()
+            if p["agent_profile"].get("demographics", {}).get("gender")
+        }
+
+    def _ensure_age_brackets() -> None:
+        current_brackets = _current_age_brackets()
         missing_brackets = {"18-29", "30-49", "50-69", "70+"} - current_brackets
         for bracket in sorted(missing_brackets):
             candidates = [
@@ -270,67 +293,83 @@ async def select_representatives(
             ]
             if candidates:
                 _swap_or_add(candidates[0][0], candidates[0][1])
-                current_brackets.add(bracket)
-            else:
-                logger.warning(
-                    "Diversity fallback: no candidate for age bracket %s", bracket
-                )
-        if len(current_brackets) < 3:
-            logger.warning(
-                "Cannot satisfy >=3 age brackets; population lacks diversity. Got: %s",
-                current_brackets,
-            )
 
-    # --- 地域: 最低3地域 ---
-    current_regions = {
-        p["agent_profile"]["demographics"]["region"]
-        for p in _current_citizens()
-        if p["agent_profile"].get("demographics", {}).get("region")
-    }
-    if len(current_regions) < 3:
-        needed = 3 - len(current_regions)
+    def _ensure_regions() -> None:
+        current_regions = _current_regions()
         region_candidates = [
             (a, r) for a, r in remaining_pool
             if a.get("id") not in selected_agent_ids
             and a.get("demographics", {}).get("region") not in current_regions
         ]
-        added = 0
         for a, r in region_candidates:
-            if added >= needed:
+            current_regions = _current_regions()
+            if len(current_regions) >= 3:
                 break
             region = a["demographics"]["region"]
             if region not in current_regions:
                 _swap_or_add(a, r)
-                current_regions.add(region)
-                added += 1
-        if len(current_regions) < 3:
-            logger.warning(
-                "Cannot satisfy >=3 regions; population lacks diversity. Got: %s",
-                current_regions,
-            )
+                current_regions = _current_regions()
 
-    # --- 性別: 男女両方 ---
-    current_genders = {
-        p["agent_profile"]["demographics"]["gender"]
-        for p in _current_citizens()
-        if p["agent_profile"].get("demographics", {}).get("gender")
-    }
-    for gender in sorted({"male", "female"} - current_genders):
-        gender_candidates = [
-            (a, r) for a, r in remaining_pool
-            if a.get("id") not in selected_agent_ids
-            and a.get("demographics", {}).get("gender") == gender
-        ]
-        if gender_candidates:
-            _swap_or_add(gender_candidates[0][0], gender_candidates[0][1])
-        else:
-            logger.warning("Diversity fallback: no candidate for gender %s", gender)
+    def _ensure_genders() -> None:
+        current_genders = _current_genders()
+        for gender in sorted({"male", "female"} - current_genders):
+            gender_candidates = [
+                (a, r) for a, r in remaining_pool
+                if a.get("id") not in selected_agent_ids
+                and a.get("demographics", {}).get("gender") == gender
+            ]
+            if gender_candidates:
+                _swap_or_add(gender_candidates[0][0], gender_candidates[0][1])
+                current_genders = _current_genders()
+
+    # --- 多様性制約を安定するまで再適用 ---
+    seen_selections: set[tuple[str, ...]] = set()
+    for _ in range(max(1, max_citizen_reps)):
+        selection_snapshot = tuple(sorted(aid for aid in selected_agent_ids if aid))
+        if selection_snapshot in seen_selections:
+            break
+        seen_selections.add(selection_snapshot)
+
+        before_state = (
+            frozenset(_current_age_brackets()),
+            frozenset(_current_regions()),
+            frozenset(_current_genders()),
+        )
+        _ensure_age_brackets()
+        _ensure_regions()
+        _ensure_genders()
+        after_state = (
+            frozenset(_current_age_brackets()),
+            frozenset(_current_regions()),
+            frozenset(_current_genders()),
+        )
+        if after_state == before_state:
+            break
+
+    current_brackets = _current_age_brackets()
+    if len(current_brackets) < 3:
+        logger.warning(
+            "Cannot satisfy >=3 age brackets; population lacks diversity. Got: %s",
+            current_brackets,
+        )
+
+    current_regions = _current_regions()
+    if len(current_regions) < 3:
+        logger.warning(
+            "Cannot satisfy >=3 regions; population lacks diversity. Got: %s",
+            current_regions,
+        )
+
+    current_genders = _current_genders()
+    missing_genders = {"male", "female"} - current_genders
+    for gender in sorted(missing_genders):
+        logger.warning("Diversity fallback: no candidate for gender %s", gender)
 
     # === 専門家の追加 ===
     # LLMベースでテーマに最適な専門家を選出
     stance_dist = {}
     for r in responses:
-        s = r.get("stance", "中立")
+        s = _resolved_stance(r)
         stance_dist[s] = stance_dist.get(s, 0) + 1
     total_resp = len(responses) or 1
     stance_dist = {k: v / total_resp for k, v in stance_dist.items()}

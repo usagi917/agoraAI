@@ -83,6 +83,7 @@ def _should_trigger_reflection(
 @dataclass
 class TimestepRecord:
     timestep: int
+    opinions: list[list[float]]
     opinion_distribution: dict[str, float]
     entropy: float
     cluster_count: int
@@ -320,6 +321,7 @@ async def run_network_propagation(
 
         record = TimestepRecord(
             timestep=t,
+            opinions=[list(row) for row in result.updated_opinions],
             opinion_distribution=dist,
             entropy=entropy,
             cluster_count=len(clusters),

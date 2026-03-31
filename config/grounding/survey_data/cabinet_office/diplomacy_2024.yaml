@@ -1,0 +1,57 @@
+surveys:
+  - theme: "外交問題への関心"
+    question: "あなたは外交問題に関心がありますか"
+    source: "内閣府「外交に関する世論調査」2024年"
+    survey_date: "2024-01"
+    sample_size: 2827
+    method: "個別面接聴取"
+    theme_category: "politics"
+    relevance_keywords:
+      - "外交"
+      - "国際関係"
+      - "外交問題"
+      - "国際情勢"
+    stance_distribution:
+      賛成: 0.35
+      条件付き賛成: 0.30
+      中立: 0.15
+      条件付き反対: 0.12
+      反対: 0.08
+
+  - theme: "日米関係"
+    question: "日米関係は良好だと思いますか"
+    source: "内閣府「外交に関する世論調査」2024年"
+    survey_date: "2024-01"
+    sample_size: 2827
+    method: "個別面接聴取"
+    theme_category: "politics"
+    relevance_keywords:
+      - "日米関係"
+      - "アメリカ"
+      - "同盟"
+      - "外交"
+    stance_distribution:
+      賛成: 0.40
+      条件付き賛成: 0.25
+      中立: 0.15
+      条件付き反対: 0.12
+      反対: 0.08
+
+  - theme: "日中関係"
+    question: "日中関係は今後発展していくと思いますか"
+    source: "内閣府「外交に関する世論調査」2024年"
+    survey_date: "2024-01"
+    sample_size: 2827
+    method: "個別面接聴取"
+    theme_category: "politics"
+    relevance_keywords:
+      - "日中関係"
+      - "中国"
+      - "外交"
+      - "東アジア"
+    stance_distribution:
+      賛成: 0.10
+      条件付き賛成: 0.18
+      中立: 0.25
+      条件付き反対: 0.27
+      反対: 0.20

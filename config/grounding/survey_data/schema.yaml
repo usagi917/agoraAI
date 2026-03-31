@@ -1,0 +1,45 @@
+# 世論調査データスキーマ定義
+# 各YAMLファイルは surveys リストを含み、各要素は以下のフィールドを持つ
+
+required_fields:
+  - theme           # テーマ名 (例: "外交問題")
+  - question        # 質問文
+  - source          # 出典 (例: "内閣府「外交に関する世論調査」2024年")
+  - survey_date     # 調査実施年月 (例: "2024-01")
+  - sample_size     # 有効回答数
+  - method          # 調査方法 (例: "個別面接聴取", "郵送法")
+  - stance_distribution  # 5段階スタンス分布 (合計 = 1.0)
+  - theme_category  # テーマカテゴリ (economy | politics | social | security | environment)
+  - relevance_keywords   # 関連キーワードリスト
+
+stance_labels:
+  - "賛成"
+  - "条件付き賛成"
+  - "中立"
+  - "条件付き反対"
+  - "反対"
+
+# stance_distribution の制約:
+#   - 全5段階のキーを含むこと
+#   - 各値は 0.0 以上 1.0 以下
+#   - 合計が 1.0 (許容誤差 ±0.01)
+
+example:
+  surveys:
+    - theme: "外交問題"
+      question: "日本の外交は正しい方向に進んでいると思いますか"
+      source: "内閣府「外交に関する世論調査」2024年"
+      survey_date: "2024-01"
+      sample_size: 3000
+      method: "個別面接聴取"
+      theme_category: "politics"
+      relevance_keywords:
+        - "外交"
+        - "国際関係"
+        - "日米関係"
+      stance_distribution:
+        賛成: 0.25
+        条件付き賛成: 0.20
+        中立: 0.30
+        条件付き反対: 0.15
+        反対: 0.10

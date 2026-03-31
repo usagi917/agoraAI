@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 
+from src.app.config import settings
 from src.app.database import async_session
 from src.app.models.population import Population
 from src.app.models.agent_profile import AgentProfile
@@ -53,6 +54,35 @@ from src.app.services.society.output_validator import explain_activation_meeting
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
+
+_CATEGORY_KEYWORDS: dict[str, list[str]] = {
+    "economy": ["経済", "景気", "物価", "金利", "賃金", "雇用", "収入", "GDP", "インフレ", "デフレ", "財政", "税"],
+    "politics": ["政治", "選挙", "外交", "政党", "国会", "法案", "政策", "内閣", "議会"],
+    "security": ["防衛", "安全保障", "自衛隊", "軍事", "安保", "テロ", "有事"],
+    "environment": ["環境", "エネルギー", "原発", "再生可能", "脱炭素", "気候", "温暖化"],
+    "social": ["社会", "福祉", "教育", "医療", "介護", "少子化", "高齢", "年金", "生活"],
+}
+
+
+def _estimate_theme_category(theme: str, grounding_facts: list[dict] | None = None) -> str:
+    """テーマ文やグラウンディングファクトからテーマカテゴリを推定する。"""
+    # grounding_facts にカテゴリ情報があればそれを優先
+    if grounding_facts:
+        for fact in grounding_facts:
+            cat = fact.get("theme_category") or fact.get("category")
+            if cat and cat in _CATEGORY_KEYWORDS:
+                return cat
+
+    # テーマ文からキーワードマッチでカテゴリを推定
+    best_category = "social"
+    best_count = 0
+    for category, keywords in _CATEGORY_KEYWORDS.items():
+        count = sum(1 for kw in keywords if kw in theme)
+        if count > best_count:
+            best_count = count
+            best_category = category
+
+    return best_category
 
 
 def _build_activation_phase_data(
@@ -291,6 +321,7 @@ async def run_society(simulation_id: str) -> None:
             })
 
             # === Phase 2.7: Grounding ===
+            grounding_facts = []
             try:
                 grounding_facts = load_grounding_facts(theme)
                 agent_facts = distribute_facts_to_agents(selected_agents, grounding_facts)
@@ -456,7 +487,7 @@ async def run_society(simulation_id: str) -> None:
                 for ts_record in propagation_result.timestep_history:
                     emergence_tracker.record_timestep({
                         "timestep": ts_record.timestep,
-                        "opinions": propagation_result.final_opinions if ts_record.timestep == propagation_result.total_timesteps - 1 else [[0.5]] * len(selected_agents),
+                        "opinions": ts_record.opinions,
                         "agent_ids": selected_agent_ids,
                     })
 
@@ -574,7 +605,40 @@ async def run_society(simulation_id: str) -> None:
                 "metrics": eval_data,
             })
 
-            # === Phase 4.5: Demographic Analysis ===
+            # === Phase 4.5: Validation Registration ===
+            survey_comparison = None
+            try:
+                from src.app.services.society.validation_pipeline import register_result, auto_compare
+                survey_data_dir = settings.config_dir / "grounding" / "survey_data"
+                stance_dist = activation_result["aggregation"].get("stance_distribution", {})
+                # テーマカテゴリを推定（grounding_facts からカテゴリを取得、なければテーマから推定）
+                theme_category = _estimate_theme_category(theme, grounding_facts)
+                validation_record = await register_result(
+                    session,
+                    simulation_id=simulation_id,
+                    theme=theme,
+                    theme_category=theme_category,
+                    distribution=stance_dist,
+                )
+                survey_comparison = await auto_compare(
+                    session, validation_record, str(survey_data_dir)
+                )
+                if survey_comparison:
+                    await sse_manager.publish(simulation_id, "validation_comparison_completed", {
+                        "kl_divergence": survey_comparison.get("kl_divergence"),
+                        "emd": survey_comparison.get("emd"),
+                        "best_match_source": survey_comparison.get("best_match_source"),
+                        "matched_survey_count": len(survey_comparison.get("matched_surveys", [])),
+                    })
+                logger.info("Validation registration completed for simulation %s", simulation_id)
+            except (FileNotFoundError, ImportError) as exc:
+                logger.error("Validation registration failed (system error): %s", exc)
+            except (ValueError, KeyError) as exc:
+                logger.warning("Validation registration failed (data issue): %s", exc)
+            except Exception as exc:
+                logger.warning("Validation registration failed, continuing: %s", exc, exc_info=True)
+
+            # === Phase 4.6: Demographic Analysis ===
             demographic_analysis = analyze_demographics(
                 selected_agents, activation_result["responses"],
             )
@@ -716,6 +780,7 @@ async def run_society(simulation_id: str) -> None:
                 },
                 quality_metrics=quality_metrics,
                 seed=sim.seed,
+                survey_comparison=survey_comparison,
             )
 
             # Augment provenance with network propagation data
