@@ -36,6 +36,7 @@ vi.mock('../../composables/useForceGraph', async () => {
       setFullGraph: vi.fn(),
       applyDiff: vi.fn(),
       resetCamera: vi.fn(),
+      getInternalNodes: vi.fn(() => []),
     }),
   }
 })
