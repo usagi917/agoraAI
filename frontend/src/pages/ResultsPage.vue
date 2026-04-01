@@ -517,6 +517,60 @@ async function handleRerun() {
   }
 }
 
+const pdfGenerating = ref(false)
+
+async function handlePdfDownload() {
+  pdfGenerating.value = true
+  try {
+    const { default: html2canvas } = await import('html2canvas')
+    const { default: jsPDF } = await import('jspdf')
+
+    const el = document.querySelector('.results-page') as HTMLElement
+    if (!el) return
+
+    const canvas = await html2canvas(el, {
+      backgroundColor: '#0a0a0f',
+      scale: 2,
+      useCORS: true,
+    })
+
+    const imgData = canvas.toDataURL('image/png')
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+    })
+
+    const pageWidth = pdf.internal.pageSize.getWidth()
+    const pageHeight = pdf.internal.pageSize.getHeight()
+    const imgWidth = pageWidth - 20
+    const imgHeight = (canvas.height * imgWidth) / canvas.width
+
+    let yOffset = 10
+    let remainingHeight = imgHeight
+
+    // First page
+    pdf.addImage(imgData, 'PNG', 10, yOffset, imgWidth, imgHeight)
+    remainingHeight -= (pageHeight - 20)
+
+    // Additional pages if needed
+    while (remainingHeight > 0) {
+      pdf.addPage()
+      yOffset -= (pageHeight - 20)
+      pdf.addImage(imgData, 'PNG', 10, yOffset, imgWidth, imgHeight)
+      remainingHeight -= (pageHeight - 20)
+    }
+
+    const filename = `agora-ai-report-${simId.slice(0, 8)}.pdf`
+    pdf.save(filename)
+  } catch (e) {
+    console.error('PDF generation failed:', e)
+    alert('PDF生成に失敗しました。ブラウザの Cmd+P (印刷) もお試しください。')
+  } finally {
+    pdfGenerating.value = false
+  }
+}
+
 function setCopyState(state: 'idle' | 'success' | 'error') {
   copyState.value = state
 
@@ -609,7 +663,10 @@ function renderMarkdown(content: string): string {
             {{ sim.template_name || 'プロンプト実行' }} · {{ sim.execution_profile }}
           </span>
         </div>
-        <div class="header-actions">
+        <div class="header-actions no-print">
+          <button class="btn btn-secondary btn-sm" @click="handlePdfDownload" :disabled="pdfGenerating">
+            {{ pdfGenerating ? 'PDF生成中...' : 'PDF保存' }}
+          </button>
           <button class="btn btn-ghost" @click="handleRerun">再実行</button>
           <router-link :to="`/sim/${simId}`" class="btn btn-ghost">実行画面</router-link>
         </div>
