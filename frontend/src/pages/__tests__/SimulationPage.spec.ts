@@ -47,6 +47,12 @@ vi.mock('../../composables/useAgentStatusRing', () => ({
   useAgentStatusRing: () => statusRingMocks,
 }))
 
+const webglMock = vi.hoisted(() => ({
+  isWebGLSupported: vi.fn().mockReturnValue(true),
+}))
+
+vi.mock('../../composables/useWebGLDetect', () => webglMock)
+
 vi.mock('../../composables/useForceGraph', async () => {
   const { ref } = await import('vue')
   return {
@@ -88,6 +94,7 @@ describe('SimulationPage', () => {
           LiveSocietyGraph: { template: '<div>live-society-graph</div>' },
           ColonyGrid: { template: '<div>colony-grid</div>' },
           ActivityFeed: { template: '<div>activity-feed</div>' },
+          ForceGraph2D: { template: '<div data-testid="graph-2d-fallback">2d-graph</div>' },
         },
       },
     })
@@ -166,6 +173,39 @@ describe('SimulationPage', () => {
     expect(wrapper.get('[data-testid="simulation-primary-view"]').text()).toContain('Society Live')
     expect(wrapper.text()).toContain('Society')
     expect(wrapper.text()).toContain('Colonies')
+  })
+
+  it('shows 2D SVG fallback when WebGL is not supported', async () => {
+    webglMock.isWebGLSupported.mockReturnValue(false)
+
+    apiMocks.getSimulation.mockResolvedValue({
+      id: 'sim-live-1',
+      project_id: null,
+      mode: 'single',
+      prompt_text: '市場分析',
+      template_name: 'business_analysis',
+      execution_profile: 'standard',
+      colony_count: 0,
+      deep_colony_count: 0,
+      status: 'running',
+      error_message: '',
+      pipeline_stage: 'pending',
+      stage_progress: {},
+      run_id: 'run-1',
+      swarm_id: null,
+      metadata: {},
+      created_at: '2026-03-24T00:00:00Z',
+      started_at: '2026-03-24T00:00:10Z',
+      completed_at: null,
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="graph-2d-fallback"]').exists()).toBe(true)
+    expect(wrapper.find('.graph-canvas-host').exists()).toBe(false)
+
+    webglMock.isWebGLSupported.mockReturnValue(true)
   })
 
   it('starts overlay animation loops and disposes them on unmount', async () => {

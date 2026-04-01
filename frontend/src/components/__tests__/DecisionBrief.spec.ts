@@ -170,4 +170,49 @@ describe('DecisionBrief', () => {
     })
     expect(wrapper.get('[data-testid="recommendation-badge"]').classes()).toContain('recommendation-conditional')
   })
+
+  // --- B1: Card layout tests (TDD Red phase) ---
+
+  it('renders a confidence gauge bar with correct width', () => {
+    const wrapper = mount(DecisionBrief, {
+      props: { brief: makeBrief({ agreement_score: 0.82 }) },
+    })
+    const gauge = wrapper.get('[data-testid="confidence-gauge"]')
+    const fill = gauge.get('[data-testid="confidence-gauge-fill"]')
+    expect(fill.attributes('style')).toContain('width: 82%')
+  })
+
+  it('renders confidence gauge at 0% when score is 0', () => {
+    const wrapper = mount(DecisionBrief, {
+      props: { brief: makeBrief({ agreement_score: 0 }) },
+    })
+    const fill = wrapper.get('[data-testid="confidence-gauge-fill"]')
+    expect(fill.attributes('style')).toContain('width: 0%')
+  })
+
+  it('does not render confidence gauge when score is absent', () => {
+    const wrapper = mount(DecisionBrief, {
+      props: { brief: makeBrief({ agreement_score: undefined }) },
+    })
+    expect(wrapper.find('[data-testid="confidence-gauge"]').exists()).toBe(false)
+  })
+
+  it('renders detail sections as cards with data-testid', () => {
+    const wrapper = mount(DecisionBrief, {
+      props: { brief: makeBrief() },
+    })
+    expect(wrapper.find('[data-testid="section-key-reasons"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="section-guardrails"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="section-deal-breakers"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="section-critical-unknowns"]').exists()).toBe(true)
+  })
+
+  it('renders the hero card with summary and recommendation', () => {
+    const wrapper = mount(DecisionBrief, {
+      props: { brief: makeBrief() },
+    })
+    const hero = wrapper.get('[data-testid="brief-hero-card"]')
+    expect(hero.text()).toContain('Go')
+    expect(hero.text()).toContain('市場参入を進めるが')
+  })
 })

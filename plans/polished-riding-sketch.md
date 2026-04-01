@@ -1,156 +1,132 @@
-# Engineering Review: Full-Stack Design Refresh
+# Design Refresh — 残りタスク実装プラン
 
 ## Context
-agoraAI のUI/UXを非技術者向けに全面リフレッシュする計画のエンジニアリングレビュー。
-デザインドキュメント: `~/.gstack/projects/usagi917-agoraAI/you-fix/simulation-numerical-stability-and-dedup-20260331-design-20260401-133454.md`
-実装ブランチ: 新規 `feat/design-refresh` を切る（現ブランチとは独立）
 
-## Step 0: Scope — ACCEPTED (フェーズ分割)
+agoraAI デザインリフレッシュの初期フェーズ(Phase 1-4)が完了。5コミットで基盤が整った。
+このプランは残りのタスクを優先度順に整理し、実装可能な単位に落とし込む。
 
-5フェーズ → 6フェーズに修正（Phase 3分割）。各フェーズ独立マージ可能。
+ブランチ: `feat/design-refresh`
 
-## What Already Exists
+## 完了済み (5 commits)
 
-| 領域 | 既存コード | 再利用 |
-|-----|----------|-------|
-| デザイントークン | `frontend/src/style.css:1-36` | ✓ 拡張 |
-| SSEインフラ | `backend/src/app/sse/manager.py` (136イベント対応) | ✓ 追加のみ |
-| 3Dグラフ | `frontend/src/composables/useForceGraph.ts` (3d-force-graph + Three.js) | ✓ カスタム拡張 |
-| SSEハンドラ | `frontend/src/composables/useSimulationSSE.ts` (888行) | ⚠️ 要分割 |
-| ストア群 | `frontend/src/stores/` (9ストア) | ✓ 拡張 |
-| テスト | frontend 6テスト, backend 72テスト | ✓ 追加 |
+| Commit | 内容 |
+|--------|------|
+| `9dd20e0` | Phase 1: デザイントークン(type scale, spacing, ボタンバリアント, print styles) |
+| `bc377a1` | Phase 2: LaunchPad日本語化、空状態、仕組み折りたたみ |
+| `7323cba` | Phase 3a-BE: 5 Theater SSEイベント + 34テスト |
+| `804d8aa` | Phase 3a-FE: theaterStore, useTheaterSSE, DebateCards, タブ統合 |
+| `5e13533` | Phase 4: html2canvas+jsPDF PDFダウンロードボタン |
 
-## 修正済みフェーズ順序
+## 残りタスク — 実装プラン
 
-Codex指摘を反映: 技術リスクを先行退治 + Phase 3を分割。
+### Batch A: 3Dアニメーション (高優先度)
+
+#### A1. シェーダーパルスアニメーション
+- **ファイル:** `frontend/src/composables/useForceGraph.ts`
+- **やること:** `nodeThreeObject` コールバック内で SphereGeometry を共有化。ShaderMaterial に `u_pulse` uniform を追加し、theaterStore の `latestClaim` 変化時にパルス発火
+- **既存コード:** `useForceGraph.ts:80-120` の nodeThreeObject、`theaterStore.ts` の claims reactive
+- **テスト:** 手動確認(ブラウザでシミュレーション実行)
+
+#### A2. カメラフォーカス優先度キュー
+- **ファイル:** `frontend/src/composables/useForceGraph.ts`
+- **やること:** Theater イベント受信時にカメラを対象ノードへ 500ms ease-out で遷移。優先度: decision_locked > alliance_formed > stance_shifted > claim_made。同時発火時は最高優先度のみ
+- **既存コード:** `useForceGraph.ts` の graph インスタンスの `cameraPosition()` メソッド
+- **テスト:** 手動確認
+
+### Batch B: Results 画面改善 (高優先度)
+
+#### B1. Decision Brief カード型レイアウト
+- **ファイル:** `frontend/src/components/DecisionBrief.vue`
+- **やること:** 既存の Decision Brief 表示をカード型に再構成。1文結論 + 信頼度ゲージ(上部) → 詳細セクション(下部)。新デザイントークン(--text-*, --space-*)適用
+- **既存コード:** `DecisionBrief.vue` の既存テンプレート、`ResultsPage.vue` の unifiedReport computed
+- **テスト:** `ResultsPage.spec.ts` 拡張
+
+#### B2. @media print レポート最適化
+- **ファイル:** `frontend/src/pages/ResultsPage.vue`, `frontend/src/components/DecisionBrief.vue`
+- **やること:** Results ページ固有の print スタイル追加。`.no-print` でナビ/ボタン非表示。Decision Brief を A4 に収まるレイアウトに。グラフは Canvas→PNG スナップショット
+- **既存コード:** `style.css` の `@media print` 基盤(Phase 1で追加済み)
+- **テスト:** ブラウザ Cmd+P で印刷プレビュー確認
+
+### Batch C: UX改善 (中優先度)
+
+#### C1. ブラウザ通知 (Notification API)
+- **ファイル:** `frontend/src/composables/useSimulationSSE.ts`
+- **やること:** `simulation_completed` イベント受信時に `Notification.requestPermission()` → `new Notification('分析完了', ...)` 発火。SimulationPage の onMounted で権限リクエスト
+- **テスト:** `useSimulationSSE.spec.ts` でモック検証
+
+#### C2. SSE再接続後の最新状態リカバリ
+- **ファイル:** `frontend/src/composables/useSimulationSSE.ts`
+- **やること:** EventSource の onerror で自動再接続(最大3回、指数バックオフ)。再接続成功後に `GET /api/simulations/{id}` で最新状態を取得しストアに反映
+- **既存コード:** `useSimulationSSE.ts:40-60` の EventSource 生成部分
+- **テスト:** `useSimulationSSE.spec.ts` でモック検証
+
+#### C3. テンプレートカード差別化 (AI slop防止)
+- **ファイル:** `frontend/src/pages/LaunchPadPage.vue`
+- **やること:** 4テンプレートカードに個別のアクセントカラーを設定。市場分析=青、製品受容=緑、政策影響=紫、シナリオ比較=オレンジ。カード上部に色付きバーを追加
+- **テスト:** 目視確認 + 既存 LaunchPadPage.spec.ts がパスすること
+
+#### C4. prefers-reduced-motion 対応
+- **ファイル:** `frontend/src/style.css`
+- **やること:** `@media (prefers-reduced-motion: reduce)` でアニメーション duration を 0.01ms に。pulse-dot, breathe, shimmer, slide-in-right を対象
+- **テスト:** ブラウザの開発者ツールで reduced-motion を有効にして確認
+
+### Batch D: 低優先度 / 価値検証後
+
+#### D1. LaunchPad 実行履歴「実行中」バッジ
+- **ファイル:** `frontend/src/pages/LaunchPadPage.vue`
+- **やること:** status=running のシミュレーションに pulse-dot アニメーション付きバッジ
+
+#### D2. プリセットカード Standard ハイライト
+- **ファイル:** `frontend/src/pages/LaunchPadPage.vue`
+- **やること:** Standard プリセットに「おすすめ」バッジ + 若干大きめのカードサイズ
+
+#### D3. WebGL非対応 2D SVGフォールバック
+- **ファイル:** `frontend/src/pages/SimulationPage.vue`
+- **やること:** WebGLRenderingContext 未対応時に D3.js force layout で 2D 表示
+
+#### D4. DESIGN.md 作成
+- **ファイル:** `DESIGN.md` (新規)
+- **やること:** style.css のトークン値を正式ドキュメント化
+
+#### D5. Phase 3b: イベント永続化 + リプレイ
+- **ファイル:** backend models, API, frontend timeline
+- **条件:** 非技術者ユーザーテスト後にのみ着手
+
+#### D6. Phase 5: Population ビジュアル
+- **ファイル:** `frontend/src/pages/PopulationPage.vue`
+- **条件:** Batch A-C 完了後
+
+### 最重要: ユーザーテスト
+- **条件:** Batch A-B 完了後
+- **やること:** 非技術者1人にアプリを見せて反応を記録
+- **目的:** 改善前のベースライン取得、Phase 3b (リプレイ) の必要性判断
+
+## 実装順序
 
 ```
-IMPLEMENTATION ORDER
-═══════════════════════════════════════
-
-Phase 1: デザイントークン + 基盤
-  ├── style.css にtype scale追加 (--text-xs ~ --text-3xl)
-  ├── ボタンバリアント (secondary, ghost, danger)
-  ├── Card, Badge, ProgressBar コンポーネント統一
-  └── @media print スタイル検証（PDF戦略のスパイク）
-
-Phase 2: LaunchPad リデザイン
-  ├── ヒーロービジュアル（3秒で「何ができるか」伝える）
-  ├── 質問テンプレート → カード型UI
-  ├── プリセット → ビジュアル比較
-  └── 実行履歴サムネイル
-
-Phase 3a: ライブ Theater UI（ライブのみ、永続化なし）
-  ├── useTheaterSSE.ts 新設（5イベント処理）
-  ├── 3Dグラフ: 共有ジオメトリ + シェーダーパルス
-  ├── カメラフォーカス（優先度キュー）
-  ├── デベートカード（右パネル）
-  └── Backend: 5 SSEイベント発火ロジック追加
-
-Phase 3b: イベント永続化 + リプレイ（価値検証後）
-  ├── simulation_events テーブル + マイグレーション
-  ├── GET /api/simulations/{id}/events
-  ├── クライアントサイド タイムライン再生
-  └── ※ Phase 3a の価値確認後にのみ着手
-
-Phase 4: Results + PDF
-  ├── Decision Brief カード型レイアウト
-  ├── シナリオ比較（単一実行内フェーズ間）
-  ├── @media print 最適化レポートページ
-  └── html2canvas+jsPDF ワンクリックPDFダウンロード
-
-Phase 5: Population + 仕上げ（低優先度）
-  └── スキップしてもMVP成立
+Batch A (3Dアニメ)  ─→ Batch B (Results) ─→ ユーザーテスト
+                                             ↓
+Batch C (UX改善)   ─→ (並列可)            判断: D5やるか？
+                                             ↓
+                                          Batch D (低優先)
 ```
 
-## Architecture Decisions
+### 並列化
 
-### 1. SSEハンドラ分割 [P2]
-888行の `useSimulationSSE.ts` に直接追加せず、`useTheaterSSE.ts` を新設。
-`useCognitiveSSE.ts` が既にこのパターンを示している。
+- **Lane A:** A1 → A2 (useForceGraph.ts, sequential)
+- **Lane B:** B1 → B2 (DecisionBrief + ResultsPage, sequential)
+- **Lane C:** C1 + C2 (useSimulationSSE.ts, sequential) | C3 + C4 (独立、並列可)
 
-### 2. 3Dグラフ最適化 [P1] — InstancedMesh却下
-`3d-force-graph` の `nodeThreeObject` と矛盾するため、代わりに:
-- SphereGeometry 共有（1インスタンスを全ノードで参照）
-- ShaderMaterial の uniform でパルスアニメーション制御
-- LOD: カメラ距離50unit+でラベル非表示
-- FPS 25fps以下でアニメーション自動ダウングレード
-
-### 3. alliance_formed 検出 [P2]
-- 閾値ベースグルーピング（O(n log n)）
-- 連合サイズ上限: エージェント数の50%
-- stance差分0.15以内で同一連合判定
-
-### 4. PDF戦略 [P1] — 簡素化
-~~Paged.js + html2canvas + Puppeteer~~ →
-- `@media print` CSS でHTMLレポートを印刷最適化（ゼロ依存）
-- `html2canvas` + `jsPDF` でワンクリックPDFダウンロードボタン
-- CJK問題なし（ブラウザが処理）、追加依存最小限
-
-### 5. リプレイ後回し [P1] — Codex推奨
-Phase 3aでライブTheaterの価値を検証してから永続化を判断。
-未検証機能にバックエンド複雑度を先行投資しない。
-
-## Test Plan
-
-各Phaseで追加するテスト:
-
-| Phase | テストファイル | 内容 |
-|-------|-------------|------|
-| 1 | `style.spec.ts` | CSS変数の存在チェック |
-| 2 | `LaunchPadPage.spec.ts` 拡張 | ヒーロー表示、カードテンプレート |
-| 3a | `useTheaterSSE.spec.ts` 新規 | 5イベントの処理、デベートカード更新 |
-| 3a | `test_theater_events.py` 新規 | stance_shifted検出、alliance_formed境界値 |
-| 4 | `ResultsPage.spec.ts` 拡張 | Decision Brief表示、PDFダウンロードボタン |
-
-## Failure Modes
-
-| 障害 | 対策 |
-|-----|------|
-| SSE切断中のTheaterイベント | 再接続後に最新状態をGETで取得 |
-| alliance_formed 全員同stance | サイズ上限50%で巨大連合を防止 |
-| html2canvas CSSレンダリング差異 | @media printを主軸にし、html2canvasは補助 |
-| タイムライン0件 | 「イベントなし」プレースホルダー表示 |
-
-## NOT in Scope
-
-- モバイルファースト対応、i18n、Storybook、ダーク/ライト切替
-- イベント永続化・リプレイ（Phase 3b、価値検証後）
-- デモデプロイ（Phase 4完了後に検討）
-- Pinia ストア統合（段階的に）
-
-## Worktree Parallelization
-
-- **Lane A**: Phase 1 → Phase 2 → Phase 3a-FE → Phase 4 (frontend, sequential)
-- **Lane B**: Phase 3a-BE (backend SSEイベント発火, independent)
-
-Launch A + B in parallel. Phase 4 は両方完了後。
-**Conflict flag**: Phase 3a の FE/BE は `useTheaterSSE.ts` のイベント型定義を共有。
-→ イベントスキーマ(TypeScript型)を先に合意してから並行開始。
+Lane A と Lane B は完全に独立。同時に worktree で並列実行可能。
+Lane C は A/B 完了後でも並列実行中でも可。
 
 ## Verification
 
-各Phase完了時:
-1. `cd frontend && pnpm dev` でローカル確認
-2. `cd frontend && pnpm test` でVitest実行
-3. `cd backend && uv run pytest` でバックエンドテスト
-4. Phase 3a: ブラウザでシミュレーション実行、ライブアニメーション確認
-5. Phase 4: Cmd+P で印刷プレビュー、PDFダウンロードボタン確認
-
-## Completion Summary
-
-- Step 0: Scope Challenge — scope accepted with phase split
-- Architecture Review: 5 issues found, all resolved
-- Code Quality Review: 2 issues found (type scale, button variants)
-- Test Review: diagram produced, 15 gaps identified
-- Performance Review: 1 issue found (animation priority queue)
-- NOT in scope: written
-- What already exists: written
-- TODOS.md updates: 0 items (no TODOS.md exists, not creating one)
-- Failure modes: 1 critical gap flagged (alliance_formed edge case)
-- Outside voice: ran (codex), 3 recommendations accepted (Phase 3 split, PDF simplification, replay deferral)
-- Parallelization: 2 lanes, 1 parallel / 1 sequential
-- Lake Score: 3/3 recommendations chose complete option
+各Batch完了時:
+1. `cd frontend && pnpm vitest run` — 全テストパス
+2. `cd backend && uv run pytest tests/test_theater_events.py` — Theater テストパス
+3. `pnpm dev` でブラウザ確認
+4. Batch B後: Cmd+P で印刷プレビュー
 
 ## Design Review Additions (plan-design-review)
 

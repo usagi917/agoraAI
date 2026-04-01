@@ -11,6 +11,38 @@ import {
 } from './forceGraphMotion'
 import { startThinkingAnimation, type ThinkingVisualMode } from './useThinkingParticles'
 
+// Shared geometries (reused across all nodes to reduce GC pressure)
+const sharedSphereCore = new THREE.SphereGeometry(1, 24, 24)
+const sharedSphereGlow = new THREE.SphereGeometry(1, 16, 16)
+const sharedOctaCore = new THREE.OctahedronGeometry(1, 1)
+const sharedOctaGlow = new THREE.OctahedronGeometry(1, 0)
+
+// Pulse shader for agent nodes
+const PULSE_VERTEX = /* glsl */ `
+uniform float u_pulse;
+varying vec3 vNormal;
+void main() {
+  vec3 pos = position * (1.0 + u_pulse * 0.3);
+  vNormal = normalMatrix * normal;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+}
+`
+
+const PULSE_FRAGMENT = /* glsl */ `
+uniform vec3 u_color;
+uniform float u_pulse;
+uniform float u_emissiveIntensity;
+uniform float u_opacity;
+varying vec3 vNormal;
+void main() {
+  float diffuse = max(dot(vNormal, normalize(vec3(0.3, 0.5, 1.0))), 0.0);
+  vec3 base = u_color * (0.3 + 0.7 * diffuse);
+  vec3 emissive = u_color * u_emissiveIntensity;
+  vec3 pulse = u_color * u_pulse * 2.0;
+  gl_FragColor = vec4(base + emissive + pulse, u_opacity);
+}
+`
+
 const TYPE_COLORS: Record<string, string> = {
   organization: '#4FC3F7',
   person: '#FFB74D',
@@ -363,11 +395,18 @@ function applyNodeThreeObjectVisuals(node: InternalNode, object?: THREE.Object3D
   const core = group.getObjectByName('core') as THREE.Mesh | undefined
   if (core) {
     core.scale.setScalar(size * 0.6)
-    const material = core.material as THREE.MeshStandardMaterial
-    material.color.copy(color)
-    material.emissive.copy(color)
-    material.emissiveIntensity = 0.8 + node.importance_score * 0.6
-    material.opacity = 0.95 * opacity
+    if (core.material instanceof THREE.ShaderMaterial) {
+      const u = core.material.uniforms
+      u.u_color.value.copy(color)
+      u.u_emissiveIntensity.value = 0.8 + node.importance_score * 0.6
+      u.u_opacity.value = 0.95 * opacity
+    } else {
+      const material = core.material as THREE.MeshStandardMaterial
+      material.color.copy(color)
+      material.emissive.copy(color)
+      material.emissiveIntensity = 0.8 + node.importance_score * 0.6
+      material.opacity = 0.95 * opacity
+    }
   }
 
   const innerGlow = group.getObjectByName('innerGlow') as THREE.Mesh | undefined
@@ -436,6 +475,18 @@ export function useForceGraph(
   let bloomPassRef: UnrealBloomPass | null = null
   const bloomEnabled = ref(true)
   const activeSpeakerIds = new Set<string>()
+  const pulseMap = new Map<string, number>()
+  const PULSE_DECAY = 0.03
+
+  // Camera focus priority queue
+  const CAMERA_PRIORITY: Record<string, number> = {
+    decision_locked: 4,
+    alliance_formed: 3,
+    stance_shifted: 2,
+    claim_made: 1,
+  }
+  let pendingFocus: { nodeId: string; priority: number } | null = null
+  let cameraFocusTimer: ReturnType<typeof setTimeout> | null = null
 
   function restartThinkingAnimation() {
     if (!sceneRef || internalNodes.length > 0) return
@@ -491,23 +542,32 @@ export function useForceGraph(
     motionRoot.name = 'motionRoot'
     group.add(motionRoot)
 
-    // KG nodes use OctahedronGeometry, agent nodes use SphereGeometry
+    // Shared geometry lookup
     const isKG = node.id.startsWith('kg-')
-    const coreGeometry = isKG
-      ? new THREE.OctahedronGeometry(1, 1)
-      : new THREE.SphereGeometry(1, 24, 24)
-    const glowGeometry = isKG
-      ? new THREE.OctahedronGeometry(1, 0)
-      : new THREE.SphereGeometry(1, 16, 16)
+    const coreGeometry = isKG ? sharedOctaCore : sharedSphereCore
+    const glowGeometry = isKG ? sharedOctaGlow : sharedSphereGlow
 
-    const core = new THREE.Mesh(
-      coreGeometry,
-      new THREE.MeshStandardMaterial({
-        transparent: true,
-        roughness: isKG ? 0.15 : 0.3,
-        metalness: isKG ? 0.3 : 0.1,
-      }),
-    )
+    // Agent nodes use ShaderMaterial with pulse uniform; KG nodes keep MeshStandardMaterial
+    const isAgent = node.type === 'agent'
+    const coreMaterial = isAgent
+      ? new THREE.ShaderMaterial({
+          transparent: true,
+          vertexShader: PULSE_VERTEX,
+          fragmentShader: PULSE_FRAGMENT,
+          uniforms: {
+            u_color: { value: new THREE.Color(node.color) },
+            u_pulse: { value: 0.0 },
+            u_emissiveIntensity: { value: 0.8 + node.importance_score * 0.6 },
+            u_opacity: { value: 0.95 },
+          },
+        })
+      : new THREE.MeshStandardMaterial({
+          transparent: true,
+          roughness: 0.15,
+          metalness: 0.3,
+        })
+
+    const core = new THREE.Mesh(coreGeometry, coreMaterial)
     core.name = 'core'
     motionRoot.add(core)
 
@@ -839,6 +899,26 @@ export function useForceGraph(
           const halo = group.getObjectByName('halo') as THREE.Mesh | undefined
           if (halo) {
             halo.scale.setScalar(size * 2.8 * (1.0 + 0.05 * Math.sin(time * 1.2 + phase + 1)))
+          }
+        }
+
+        // Pulse decay for ShaderMaterial nodes
+        for (const [nodeId, value] of pulseMap.entries()) {
+          const node = internalNodes.find(n => n.id === nodeId)
+          if (!node) { pulseMap.delete(nodeId); continue }
+          const group = node.__threeObj as THREE.Group | undefined
+          const core = group?.getObjectByName('core') as THREE.Mesh | undefined
+          if (core?.material instanceof THREE.ShaderMaterial) {
+            core.material.uniforms.u_pulse.value = value
+          }
+          const next = value - PULSE_DECAY
+          if (next <= 0) {
+            pulseMap.delete(nodeId)
+            if (core?.material instanceof THREE.ShaderMaterial) {
+              core.material.uniforms.u_pulse.value = 0
+            }
+          } else {
+            pulseMap.set(nodeId, next)
           }
         }
       })
@@ -1480,6 +1560,10 @@ export function useForceGraph(
   }
 
   onUnmounted(() => {
+    if (cameraFocusTimer) {
+      clearTimeout(cameraFocusTimer)
+      cameraFocusTimer = null
+    }
     if (breathingInterval) {
       clearInterval(breathingInterval)
       breathingInterval = null
@@ -1511,6 +1595,32 @@ export function useForceGraph(
     for (const id of ids) activeSpeakerIds.add(id)
   }
 
+  function pulseNode(nodeId: string) {
+    pulseMap.set(nodeId, 1.0)
+  }
+
+  function focusOnNode(nodeId: string, eventType: string) {
+    const priority = CAMERA_PRIORITY[eventType] ?? 0
+    if (pendingFocus && pendingFocus.priority > priority) return
+    pendingFocus = { nodeId, priority }
+
+    if (cameraFocusTimer) clearTimeout(cameraFocusTimer)
+    cameraFocusTimer = setTimeout(() => {
+      if (!graph.value || !pendingFocus) return
+      const node = internalNodes.find(n => n.id === pendingFocus!.nodeId)
+      if (!node) { pendingFocus = null; return }
+      const focus = getRenderedPosition(node)
+      const distance = 120
+      const distRatio = 1 + distance / Math.max(Math.hypot(focus.x, focus.y, focus.z), 1)
+      graph.value.cameraPosition(
+        { x: focus.x * distRatio, y: focus.y * distRatio, z: focus.z * distRatio },
+        focus as any,
+        500,
+      )
+      pendingFocus = null
+    }, 50)
+  }
+
   function toggleBloom(enabled?: boolean) {
     const value = enabled ?? !bloomEnabled.value
     bloomEnabled.value = value
@@ -1537,6 +1647,8 @@ export function useForceGraph(
     onLinkHover,
     onLinkClick,
     getInternalNodes,
+    pulseNode,
+    focusOnNode,
     toggleBloom,
     bloomEnabled,
     setActiveSpeakers,

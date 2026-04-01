@@ -43,6 +43,7 @@ const questionTemplates = [
     icon: '📊',
     title: 'この市場に参入すべきか？',
     desc: '市場環境・競合・参入障壁を社会反応から分析',
+    accentColor: '#3b82f6',
     steps: [
       { key: 'industry', label: '業界・市場', placeholder: '例: EV バッテリー市場、日本のペットフード市場' },
       { key: 'strengths', label: '自社の強み・制約', placeholder: '例: 独自の固体電池技術を保有、量産体制は未整備' },
@@ -54,6 +55,7 @@ const questionTemplates = [
     icon: '📦',
     title: 'この製品は受け入れられるか？',
     desc: '消費者・ステークホルダーの受容性を予測',
+    accentColor: '#22c55e',
     steps: [
       { key: 'product', label: '製品・サービスの概要', placeholder: '例: AIチャットボットによる健康相談サービス' },
       { key: 'target', label: 'ターゲット層', placeholder: '例: 30-50代の健康意識が高い都市部の会社員' },
@@ -65,6 +67,7 @@ const questionTemplates = [
     icon: '📜',
     title: 'この政策を導入したらどうなるか？',
     desc: '政策影響・世論支持・ステークホルダー反応を予測',
+    accentColor: '#a855f7',
     steps: [
       { key: 'policy', label: '政策の概要', placeholder: '例: 週休3日制の義務化' },
       { key: 'region', label: '対象地域・層', placeholder: '例: 日本全国、従業員50人以上の企業' },
@@ -76,6 +79,7 @@ const questionTemplates = [
     icon: '🔄',
     title: 'AとBどちらが良いか？',
     desc: '2つの選択肢を社会反応ベースで比較',
+    accentColor: '#f97316',
     steps: [
       { key: 'optionA', label: '選択肢A', placeholder: '例: 新工場を国内に建設' },
       { key: 'optionB', label: '選択肢B', placeholder: '例: 東南アジアの既存工場を拡張' },
@@ -216,6 +220,15 @@ function getStatusColor(status: string) {
   }
 }
 
+function getStatusLabel(status: string) {
+  switch (status) {
+    case 'completed': return '完了'
+    case 'running': return '実行中'
+    case 'failed': return '失敗'
+    default: return '待機中'
+  }
+}
+
 function getPipelineStageLabel(stage: string) {
   switch (stage) {
     case 'single': return 'Stage 1'
@@ -258,9 +271,11 @@ function getPipelineStageLabel(stage: string) {
           :key="qt.id"
           class="question-card"
           :class="{ selected: selectedQuestionTemplate === qt.id }"
+          :style="{ '--card-accent': qt.accentColor }"
           :data-testid="`question-${qt.id}`"
           @click="selectQuestionTemplate(qt.id)"
         >
+          <span class="question-card-bar" />
           <span class="question-icon">{{ qt.icon }}</span>
           <span class="question-title">{{ qt.title }}</span>
         </button>
@@ -317,10 +332,11 @@ function getPipelineStageLabel(stage: string) {
             v-for="p in presets"
             :key="p.id"
             class="preset-card"
-            :class="{ selected: selectedPreset === p.id }"
+            :class="{ selected: selectedPreset === p.id, recommended: p.id === 'standard' }"
             :data-testid="`preset-${p.id}`"
             @click="selectedPreset = p.id"
           >
+            <span v-if="p.id === 'standard'" class="preset-recommended">おすすめ</span>
             <span class="preset-label">{{ p.label }}</span>
             <span class="preset-desc">{{ p.desc }}</span>
             <span class="preset-meta">{{ p.time }} · {{ p.phases }} phase{{ p.phases > 1 ? 's' : '' }}</span>
@@ -387,7 +403,7 @@ function getPipelineStageLabel(stage: string) {
             </div>
           </div>
           <div class="history-right">
-            <span class="status-badge" :class="getStatusColor(sim.status)">{{ sim.status }}</span>
+            <span class="status-badge" :class="getStatusColor(sim.status)">{{ getStatusLabel(sim.status) }}</span>
             <span class="history-date">{{ new Date(sim.created_at).toLocaleString('ja-JP') }}</span>
           </div>
         </router-link>
@@ -607,20 +623,33 @@ function getPipelineStageLabel(stage: string) {
 }
 
 .question-card {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 0.75rem;
   padding: var(--panel-padding);
+  padding-top: calc(var(--panel-padding) + 4px);
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   cursor: pointer;
   transition: border-color 0.25s, box-shadow 0.25s;
   text-align: left;
+  overflow: hidden;
+}
+
+.question-card-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--card-accent, var(--accent));
+  border-radius: var(--radius) var(--radius) 0 0;
 }
 
 .question-card:hover { border-color: rgba(255,255,255,0.12); }
-.question-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: rgba(99, 102, 241, 0.06); }
+.question-card.selected { border-color: var(--card-accent, var(--accent)); box-shadow: 0 0 0 1px var(--card-accent, var(--accent)); background: rgba(255, 255, 255, 0.03); }
 
 .question-icon { font-size: 1.1rem; flex-shrink: 0; }
 
@@ -773,6 +802,25 @@ function getPipelineStageLabel(stage: string) {
   font-size: 0.6rem;
   color: var(--text-muted, #71717a);
   margin-top: auto;
+}
+
+.preset-card.recommended {
+  border-color: rgba(99, 102, 241, 0.3);
+  background: rgba(99, 102, 241, 0.06);
+  position: relative;
+}
+
+.preset-recommended {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: #a5b4fc;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 999px;
+  padding: 0.08rem 0.45rem;
+  letter-spacing: 0.04em;
+  align-self: flex-start;
 }
 
 /* Launch */

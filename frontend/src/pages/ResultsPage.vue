@@ -1719,4 +1719,32 @@ function renderMarkdown(content: string): string {
 .transcript-stance { font-size: 0.68rem; padding: 0.1rem 0.35rem; border-radius: 4px; border: 1px solid var(--border); color: var(--text-secondary); }
 .transcript-text { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6; white-space: pre-line; }
 .transcript-address { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem; }
+
+/* Print styles — Results page specific */
+@media print {
+  .result-header { break-after: avoid; }
+  .header-actions,
+  .tab-bar,
+  .followup-section,
+  .quality-meta { display: none !important; }
+
+  .results-page { padding: 0; max-width: 100%; }
+
+  .decision-brief { break-inside: avoid; }
+  .brief-section { break-inside: avoid; page-break-inside: avoid; }
+  .reason-card,
+  .detail-card,
+  .option-card,
+  .horizon-card { break-inside: avoid; }
+
+  .graph-container,
+  .canvas-wrapper { display: none !important; }
+
+  .evidence-panel { break-before: page; }
+  .evidence-card { break-inside: avoid; }
+
+  .stakeholder-bar-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .confidence-gauge-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .recommendation-badge { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+}
 </style>

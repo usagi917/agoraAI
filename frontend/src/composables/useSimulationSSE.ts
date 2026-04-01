@@ -14,6 +14,12 @@ function getSimulationStreamUrl(simulationId: string) {
   return `${base}/simulations/${simulationId}/stream`
 }
 
+function sendCompletionNotification() {
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    new Notification('分析完了', { body: 'シミュレーションが完了しました。結果を確認してください。' })
+  }
+}
+
 export function useSimulationSSE(simulationId: string) {
   const store = useSimulationStore()
   const graphStore = useGraphStore()
@@ -24,6 +30,9 @@ export function useSimulationSSE(simulationId: string) {
   const { handleCognitiveEvent } = useCognitiveSSE()
   const { handleTheaterEvent } = useTheaterSSE()
   let source: EventSource | null = null
+  let reconnectAttempts = 0
+  const MAX_RECONNECTS = 3
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   function start() {
     const e2eEvents = (window as Window & {
@@ -149,8 +158,18 @@ export function useSimulationSSE(simulationId: string) {
     }
 
     source.onerror = () => {
-      if (store.status !== 'completed' && store.status !== 'failed') {
-        store.setStatus('disconnected')
+      if (store.status === 'completed' || store.status === 'failed') return
+      store.setStatus('disconnected')
+
+      if (reconnectAttempts < MAX_RECONNECTS) {
+        const delay = Math.pow(2, reconnectAttempts) * 1000
+        reconnectAttempts++
+        source?.close()
+        source = null
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null
+          start()
+        }, delay)
       }
     }
   }
@@ -817,6 +836,7 @@ export function useSimulationSSE(simulationId: string) {
         store.setPhase('completed')
         store.setReportReady(true)
         store.setReportError('')
+        sendCompletionNotification()
         close()
         break
 
@@ -882,6 +902,10 @@ export function useSimulationSSE(simulationId: string) {
   }
 
   function close() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
     source?.close()
     source = null
   }
