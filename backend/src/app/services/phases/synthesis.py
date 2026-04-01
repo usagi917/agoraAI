@@ -13,6 +13,7 @@ from src.app.services.phases.council_deliberation import CouncilResult
 from src.app.services.decision_briefing import render_decision_brief_markdown
 from src.app.services.react_reporter import react_generate_decision_brief
 from src.app.services.society.conversation_highlights import extract_conversation_highlights
+from src.app.services.theater_events import emit_decision_from_synthesis
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -600,6 +601,12 @@ async def run_synthesis(
             "devil_advocate_summary": council.devil_advocate_summary,
         },
     }
+
+    # Emit decision_locked theater event
+    try:
+        await emit_decision_from_synthesis(simulation_id, decision_brief, agreement_score)
+    except Exception as e:
+        logger.warning("decision_locked theater event failed: %s", e)
 
     await sse_manager.publish(simulation_id, "report_completed", {
         "report_length": len(content),
