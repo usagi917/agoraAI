@@ -144,6 +144,12 @@ export function useSimulationSSE(simulationId: string) {
       'conversation_turn_advanced',
       'conversation_concluded',
       'debate_result',
+      // Theater イベント
+      'claim_made',
+      'stance_shifted',
+      'alliance_formed',
+      'market_moved',
+      'decision_locked',
     ]
 
     for (const type of eventTypes) {
@@ -175,6 +181,7 @@ export function useSimulationSSE(simulationId: string) {
   }
 
   function handleEvent(eventType: string, payload: Record<string, any>) {
+    reconnectAttempts = 0
     switch (eventType) {
       // === Meta Simulation イベント ===
       case 'meta_started':
@@ -680,12 +687,16 @@ export function useSimulationSSE(simulationId: string) {
         if (payload.aggregation?.stance_distribution) {
           store.setOpinionDistribution(payload.aggregation.stance_distribution)
         }
-        vizStore.addSystemEvent('✓', '活性化完了', `平均信頼度: ${(payload.aggregation?.average_confidence * 100)?.toFixed(1)}%`)
-        activity.addEntry('event', '◎', '活性化完了', {
-          detail: `平均信頼度: ${(payload.aggregation?.average_confidence * 100)?.toFixed(1)}%`,
-          track: 'phase',
-          status: 'completed',
-        })
+        {
+          const avgConf = payload.aggregation?.average_confidence
+          const avgConfStr = avgConf != null ? `${(avgConf * 100).toFixed(1)}%` : '?'
+          vizStore.addSystemEvent('✓', '活性化完了', `平均信頼度: ${avgConfStr}`)
+          activity.addEntry('event', '◎', '活性化完了', {
+            detail: `平均信頼度: ${avgConfStr}`,
+            track: 'phase',
+            status: 'completed',
+          })
+        }
         break
 
       case 'society_evaluation_completed':

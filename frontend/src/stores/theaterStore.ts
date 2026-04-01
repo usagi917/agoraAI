@@ -38,6 +38,8 @@ export const useTheaterStore = defineStore('theater', () => {
   const decision = ref<TheaterDecision | null>(null)
 
   const MAX_CLAIMS = 50
+  const MAX_SHIFTS = 50
+  const MAX_ALLIANCES = 20
 
   const latestClaim = computed(() => claims.value[claims.value.length - 1] ?? null)
   const latestShift = computed(() => stanceShifts.value[stanceShifts.value.length - 1] ?? null)
@@ -52,6 +54,16 @@ export const useTheaterStore = defineStore('theater', () => {
 
   function addStanceShift(shift: Omit<TheaterStanceShift, 'timestamp'>) {
     stanceShifts.value.push({ ...shift, timestamp: Date.now() })
+    if (stanceShifts.value.length > MAX_SHIFTS) {
+      stanceShifts.value = stanceShifts.value.slice(-MAX_SHIFTS)
+    }
+  }
+
+  function addAlliance(alliance: Omit<TheaterAlliance, 'timestamp'>) {
+    alliances.value.push({ ...alliance, timestamp: Date.now() })
+    if (alliances.value.length > MAX_ALLIANCES) {
+      alliances.value = alliances.value.slice(-MAX_ALLIANCES)
+    }
   }
 
   function setAlliances(newAlliances: Omit<TheaterAlliance, 'timestamp'>[]) {
@@ -79,6 +91,7 @@ export const useTheaterStore = defineStore('theater', () => {
     latestAlliance,
     addClaim,
     addStanceShift,
+    addAlliance,
     setAlliances,
     setDecision,
     reset,

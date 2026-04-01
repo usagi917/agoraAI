@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import {
   listPopulations,
   getPopulationDetail,
@@ -117,14 +117,6 @@ const ageDist = computed(() =>
 
 const parentOccupationDist = computed(() =>
   parentPop.value?.sample_agents ? computeDistribution(parentPop.value.sample_agents, 'occupation') : [],
-)
-
-const parentRegionDist = computed(() =>
-  parentPop.value?.sample_agents ? computeDistribution(parentPop.value.sample_agents, 'region') : [],
-)
-
-const parentAgeDist = computed(() =>
-  parentPop.value?.sample_agents ? computeAgeDistribution(parentPop.value.sample_agents) : [],
 )
 
 const hasForkDiff = computed(() => !!selectedPop.value?.parent_id && !!parentPop.value)

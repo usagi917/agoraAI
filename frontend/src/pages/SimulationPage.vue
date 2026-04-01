@@ -676,6 +676,7 @@ onUnmounted(() => {
   activityStore.clear()
   societyGraphStore.reset()
   vizStore.reset()
+  theaterStore.reset()
   agentStatusRing.stopAnimationLoop()
   stopCommunicationPulseLoop()
   commPulse.dispose()
