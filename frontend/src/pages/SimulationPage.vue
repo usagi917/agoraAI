@@ -35,6 +35,7 @@ import ThinkingPanel from '../components/ThinkingPanel.vue'
 import AgentActivityTicker from '../components/AgentActivityTicker.vue'
 import LiveDialogueStream from '../components/LiveDialogueStream.vue'
 import DigitalWorkspaceBackground from '../components/DigitalWorkspaceBackground.vue'
+import DebateCards from '../components/DebateCards.vue'
 import {
   getDefaultLiveSecondaryTab,
   getLivePrimaryView,
@@ -971,6 +972,10 @@ function goToResults() {
             <p class="prompt-text">Round {{ societyGraphStore.currentRound }} / 活性化 {{ societyGraphStore.activationCompleted }}/{{ societyGraphStore.activationTotal }}</p>
             <p class="prompt-text">{{ stageLabel }}</p>
           </div>
+        </div>
+
+        <div v-if="activeSecondaryTab === 'debate'" class="panel-card">
+          <DebateCards />
         </div>
 
         <div v-if="activeSecondaryTab === 'activity'" class="panel-card">

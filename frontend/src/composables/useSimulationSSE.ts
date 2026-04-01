@@ -7,6 +7,7 @@ import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
 import { useAgentVisualizationStore } from '../stores/agentVisualizationStore'
 import { useCognitiveSSE } from './useCognitiveSSE'
+import { useTheaterSSE } from './useTheaterSSE'
 
 function getSimulationStreamUrl(simulationId: string) {
   const base = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '')
@@ -21,6 +22,7 @@ export function useSimulationSSE(simulationId: string) {
   const societyGraphStore = useSocietyGraphStore()
   const vizStore = useAgentVisualizationStore()
   const { handleCognitiveEvent } = useCognitiveSSE()
+  const { handleTheaterEvent } = useTheaterSSE()
   let source: EventSource | null = null
 
   function start() {
@@ -824,10 +826,12 @@ export function useSimulationSSE(simulationId: string) {
         close()
         break
 
-      // === 認知シミュレーション イベント ===
+      // === Theater + 認知シミュレーション イベント ===
       default:
-        // 認知関連イベントは専用ハンドラーに委譲
-        handleCognitiveEvent(eventType, payload)
+        // Theater イベントを先に試行、該当しなければ認知ハンドラーに委譲
+        if (!handleTheaterEvent(eventType, payload)) {
+          handleCognitiveEvent(eventType, payload)
+        }
         if (eventType === 'graphrag_started') {
           store.setPhase('graphrag')
           activity.addEntry('phase', '◈', 'GraphRAG 構築開始', {

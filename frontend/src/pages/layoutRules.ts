@@ -1,7 +1,7 @@
 export type ResultsPrimaryView = 'report' | 'scenarios' | 'decision_brief'
 export type ResultsSecondaryTab = 'pm' | 'society' | 'evidence' | 'transcript'
 export type LivePrimaryView = 'graph' | 'society'
-export type LiveSecondaryTab = 'progress' | 'activity' | 'society' | 'colonies' | 'thinking' | 'dialogue'
+export type LiveSecondaryTab = 'progress' | 'debate' | 'activity' | 'society' | 'colonies' | 'thinking' | 'dialogue'
 
 export interface ResultsLayoutContext {
   mode?: string | null
@@ -103,6 +103,9 @@ export function getLivePrimaryView(context: LiveLayoutContext): LivePrimaryView 
 
 export function getLiveSecondaryTabs(context: LiveLayoutContext): LiveSecondaryTab[] {
   const tabs: LiveSecondaryTab[] = ['progress']
+
+  // Debate cards always available (theater events)
+  tabs.push('debate')
 
   if (SOCIETY_MODES.has(context.mode || '')) {
     tabs.push('society')

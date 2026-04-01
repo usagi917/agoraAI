@@ -86,7 +86,7 @@ describe('layoutRules', () => {
         mode: 'society_first',
         hasColonies: true,
         hasActivity: true,
-      })).toEqual(['progress', 'society', 'activity', 'colonies', 'dialogue'])
+      })).toEqual(['progress', 'debate', 'society', 'activity', 'colonies', 'dialogue'])
       expect(getDefaultLiveSecondaryTab({
         mode: 'society_first',
         hasColonies: true,
@@ -104,7 +104,7 @@ describe('layoutRules', () => {
         mode: 'single',
         hasColonies: false,
         hasActivity: true,
-      })).toEqual(['progress', 'activity'])
+      })).toEqual(['progress', 'debate', 'activity'])
       expect(getDefaultLiveSecondaryTab({
         mode: 'single',
         hasColonies: false,
