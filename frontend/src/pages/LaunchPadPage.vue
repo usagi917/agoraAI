@@ -232,52 +232,8 @@ function getPipelineStageLabel(stage: string) {
   <div class="launchpad-page">
     <!-- Hero -->
     <section class="hero">
-      <div class="hero-eyebrow">Swarm Intelligence Engine</div>
-      <h2 class="hero-title">Unified<br />Simulation Lab</h2>
-      <p class="hero-desc">1つの質問から社会の脈動を測定し、10人の評議会が議論し、意思決定に直結する Decision Brief を生成します。</p>
-
-      <!-- 3-Phase Visual Workflow -->
-      <div class="phase-workflow">
-        <div class="phase-card">
-          <div class="phase-number">01</div>
-          <div class="phase-icon">◇</div>
-          <h4 class="phase-name">Society Pulse</h4>
-          <p class="phase-detail">1,000人のAIエージェントから<br />意見を収集・分析</p>
-          <div class="phase-tags">
-            <span class="phase-tag">人口生成</span>
-            <span class="phase-tag">KGエンリッチ</span>
-            <span class="phase-tag">ペルソナ生成</span>
-          </div>
-        </div>
-        <div class="phase-connector">
-          <svg width="32" height="16" viewBox="0 0 32 16"><path d="M0 8h28l-6-6M22 14l6-6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" /></svg>
-        </div>
-        <div class="phase-card">
-          <div class="phase-number">02</div>
-          <div class="phase-icon">◉</div>
-          <h4 class="phase-name">Council</h4>
-          <p class="phase-detail">10人の代表者が名前付きで<br />3ラウンドの議論</p>
-          <div class="phase-tags">
-            <span class="phase-tag">反証役</span>
-            <span class="phase-tag">KG進化</span>
-            <span class="phase-tag">信念変化</span>
-          </div>
-        </div>
-        <div class="phase-connector">
-          <svg width="32" height="16" viewBox="0 0 32 16"><path d="M0 8h28l-6-6M22 14l6-6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" /></svg>
-        </div>
-        <div class="phase-card">
-          <div class="phase-number">03</div>
-          <div class="phase-icon">◈</div>
-          <h4 class="phase-name">Synthesis</h4>
-          <p class="phase-detail">ReACTパターンで<br />Decision Brief を生成</p>
-          <div class="phase-tags">
-            <span class="phase-tag">クロス検証</span>
-            <span class="phase-tag">エビデンス</span>
-            <span class="phase-tag">時間軸予測</span>
-          </div>
-        </div>
-      </div>
+      <h2 class="hero-title">ひとつの問いから、<br />社会の反応を予測する</h2>
+      <p class="hero-desc">AIエージェント1,000人が議論し、代表評議会が検証し、あなたの意思決定を支える Decision Brief を生成します。</p>
     </section>
 
     <section v-if="bootstrapError || (runtimeHealth && !runtimeHealth.live_simulation_available)" class="runtime-notice" :class="{ warning: runtimeHealth && !runtimeHealth.live_simulation_available, error: bootstrapError }">
@@ -389,13 +345,27 @@ function getPipelineStageLabel(stage: string) {
       </p>
     </section>
 
+    <!-- How It Works (collapsed) -->
+    <details class="how-it-works">
+      <summary class="how-it-works-summary">仕組みを見る</summary>
+      <div class="phase-workflow">
+        <div class="phase-step"><span class="phase-num">01</span><strong>Society Pulse</strong> — 1,000人のAIエージェントから意見を収集</div>
+        <div class="phase-step"><span class="phase-num">02</span><strong>Council</strong> — 10人の代表者が3ラウンドの議論</div>
+        <div class="phase-step"><span class="phase-num">03</span><strong>Synthesis</strong> — エビデンス付きのDecision Briefを生成</div>
+      </div>
+    </details>
+
     <!-- History -->
-    <section v-if="recentSimulations.length > 0" class="section">
+    <section class="section">
       <div class="section-header">
         <h3 class="section-title">実行履歴</h3>
-        <span class="section-badge">{{ recentSimulations.length }} 件</span>
+        <span v-if="recentSimulations.length > 0" class="section-badge">{{ recentSimulations.length }} 件</span>
       </div>
-      <div class="history-list">
+      <div v-if="recentSimulations.length === 0" class="empty-state">
+        <p class="empty-state-text">まだ分析がありません</p>
+        <p class="empty-state-hint">上のテンプレートを選んで、最初の質問を投げてみましょう</p>
+      </div>
+      <div v-else class="history-list">
         <router-link
           v-for="sim in recentSimulations"
           :key="sim.id"
@@ -435,57 +405,14 @@ function getPipelineStageLabel(stage: string) {
 
 .hero {
   text-align: center;
-  padding: clamp(2rem, 5vw, 3.5rem) 0 1rem;
-  position: relative;
-  overflow: hidden;
-}
-
-/* Swarm particle background */
-.hero::before {
-  content: '';
-  position: absolute;
-  inset: -40% -20%;
-  background:
-    radial-gradient(1.5px 1.5px at 20% 30%, rgba(99, 102, 241, 0.4) 50%, transparent 100%),
-    radial-gradient(1px 1px at 60% 20%, rgba(139, 92, 246, 0.3) 50%, transparent 100%),
-    radial-gradient(1.5px 1.5px at 80% 60%, rgba(59, 130, 246, 0.35) 50%, transparent 100%),
-    radial-gradient(1px 1px at 40% 80%, rgba(99, 102, 241, 0.25) 50%, transparent 100%),
-    radial-gradient(1px 1px at 10% 70%, rgba(139, 92, 246, 0.2) 50%, transparent 100%),
-    radial-gradient(1.5px 1.5px at 90% 40%, rgba(59, 130, 246, 0.3) 50%, transparent 100%);
-  background-size: 200px 200px, 300px 300px, 250px 250px, 350px 350px, 180px 180px, 280px 280px;
-  animation: swarmDrift 25s linear infinite;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0.7;
-}
-
-@keyframes swarmDrift {
-  0% { transform: translate(0, 0) rotate(0deg); }
-  25% { transform: translate(15px, -10px) rotate(2deg); }
-  50% { transform: translate(-5px, 15px) rotate(-1deg); }
-  75% { transform: translate(-15px, -5px) rotate(1deg); }
-  100% { transform: translate(0, 0) rotate(0deg); }
-}
-
-.hero > * { position: relative; z-index: 1; }
-
-.hero-eyebrow {
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6, #3b82f6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  margin-bottom: 0.6rem;
+  padding: clamp(2.5rem, 5vw, 4rem) 0 var(--space-6);
 }
 
 .hero-title {
-  font-size: clamp(2.2rem, 5vw, 3.2rem);
+  font-size: var(--text-3xl);
   font-weight: 800;
-  letter-spacing: -0.04em;
-  line-height: 1.05;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
   background: linear-gradient(180deg, #fff 30%, rgba(255,255,255,0.7) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -500,102 +427,60 @@ function getPipelineStageLabel(stage: string) {
   line-height: 1.65;
 }
 
-/* 3-Phase Workflow */
+/* How It Works (collapsible) */
+.how-it-works {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+
+.how-it-works-summary {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.how-it-works-summary::-webkit-details-marker { display: none; }
+.how-it-works-summary::before { content: '+ '; font-family: var(--font-mono); }
+.how-it-works[open] .how-it-works-summary::before { content: '- '; }
+
 .phase-workflow {
   display: flex;
-  align-items: stretch;
-  justify-content: center;
-  gap: 0;
-  margin-top: 2.5rem;
-  padding: 0 1rem;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--space-4) var(--space-4);
 }
 
-.phase-card {
-  flex: 1;
-  max-width: 14rem;
-  background: linear-gradient(165deg, rgba(99, 102, 241, 0.06) 0%, rgba(15, 15, 30, 0.8) 100%);
-  border: 1px solid rgba(99, 102, 241, 0.15);
-  border-radius: 12px;
-  padding: 1.5rem 1rem 1.25rem;
-  text-align: center;
-  position: relative;
-  transition: border-color 0.3s, box-shadow 0.3s, transform 0.3s;
-}
-
-.phase-card:hover {
-  border-color: rgba(99, 102, 241, 0.5);
-  box-shadow: 0 4px 30px rgba(99, 102, 241, 0.12), 0 0 60px rgba(99, 102, 241, 0.05);
-  transform: translateY(-2px);
-}
-
-.phase-card:nth-child(1):hover { box-shadow: 0 4px 30px rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.5); }
-.phase-card:nth-child(3):hover { box-shadow: 0 4px 30px rgba(139, 92, 246, 0.15); border-color: rgba(139, 92, 246, 0.5); }
-.phase-card:nth-child(5):hover { box-shadow: 0 4px 30px rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.5); }
-
-.phase-number {
-  position: absolute;
-  top: 0.65rem;
-  left: 0.8rem;
-  font-size: 0.58rem;
-  font-weight: 800;
-  color: rgba(255,255,255,0.2);
-  font-family: var(--font-mono);
-  letter-spacing: 0.05em;
-}
-
-.phase-icon {
-  font-size: 1.8rem;
-  margin-bottom: 0.6rem;
-  filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.4));
-}
-
-.phase-card:nth-child(1) .phase-icon { color: #3b82f6; filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.5)); }
-.phase-card:nth-child(3) .phase-icon { color: #8b5cf6; filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.5)); }
-.phase-card:nth-child(5) .phase-icon { color: #6366f1; filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.5)); }
-
-.phase-name {
-  font-size: 0.92rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin-bottom: 0.4rem;
-}
-
-.phase-detail {
-  font-size: 0.72rem;
+.phase-step {
+  font-size: var(--text-sm);
   color: var(--text-secondary);
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
-.phase-tags {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.3rem;
-  margin-top: 0.75rem;
+.phase-num {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--accent);
+  margin-right: var(--space-2);
 }
 
-.phase-tag {
-  font-size: 0.58rem;
-  padding: 0.18rem 0.45rem;
-  border-radius: 5px;
-  background: rgba(99, 102, 241, 0.1);
-  color: rgba(165, 168, 255, 0.9);
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  border: 1px solid rgba(99, 102, 241, 0.12);
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: var(--space-8) var(--space-4);
 }
 
-.phase-connector {
-  display: flex;
-  align-items: center;
-  padding: 0 0.4rem;
-  color: rgba(99, 102, 241, 0.35);
-  animation: connectorPulse 2s ease-in-out infinite;
+.empty-state-text {
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
 }
 
-@keyframes connectorPulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+.empty-state-hint {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 
 .runtime-notice {
