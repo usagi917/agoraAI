@@ -38,7 +38,6 @@ services:
       - ./config:/app/config
       - ./templates:/app/templates
       - ./data:/app/data
-      - ./sample_results:/app/sample_results
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-gpt-4o}

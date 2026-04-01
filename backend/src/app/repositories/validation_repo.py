@@ -1,16 +1,14 @@
 """Validation リポジトリ"""
 
-import math
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.database import utcnow_naive
 from src.app.models.validation_record import ValidationRecord
-
-# --- 精度指標のユーティリティ（service 層に依存しないよう自己完結） ---
-
-STANCE_ORDER = ["賛成", "条件付き賛成", "中立", "条件付き反対", "反対"]
+from src.app.utils.distribution_metrics import (
+    kl_divergence_symmetric,
+    earth_movers_distance,
+)
 
 
 def _brier_score_distributions(predicted: dict[str, float], actual: dict[str, float]) -> float:
@@ -23,36 +21,6 @@ def _brier_score_distributions(predicted: dict[str, float], actual: dict[str, fl
         (predicted.get(k, 0.0) - actual.get(k, 0.0)) ** 2
         for k in all_keys
     )
-
-
-def _kl_divergence_symmetric(
-    p: dict[str, float],
-    q: dict[str, float],
-    smoothing: float = 1e-6,
-) -> float:
-    """対称KL-divergence: (KL(p||q) + KL(q||p)) / 2。"""
-    all_keys = set(p.keys()) | set(q.keys())
-    p_smooth = {k: p.get(k, 0.0) + smoothing for k in all_keys}
-    q_smooth = {k: q.get(k, 0.0) + smoothing for k in all_keys}
-    p_total = sum(p_smooth.values())
-    q_total = sum(q_smooth.values())
-    p_norm = {k: v / p_total for k, v in p_smooth.items()}
-    q_norm = {k: v / q_total for k, v in q_smooth.items()}
-    kl_pq = sum(p_norm[k] * math.log(p_norm[k] / q_norm[k]) for k in all_keys)
-    kl_qp = sum(q_norm[k] * math.log(q_norm[k] / p_norm[k]) for k in all_keys)
-    return (kl_pq + kl_qp) / 2.0
-
-
-def _earth_movers_distance(p: dict[str, float], q: dict[str, float]) -> float:
-    """序数距離を考慮したEarth Mover's Distance。"""
-    p_vals = [p.get(s, 0.0) for s in STANCE_ORDER]
-    q_vals = [q.get(s, 0.0) for s in STANCE_ORDER]
-    emd = 0.0
-    cumulative = 0.0
-    for i in range(len(STANCE_ORDER)):
-        cumulative += p_vals[i] - q_vals[i]
-        emd += abs(cumulative)
-    return emd
 
 
 class ValidationRepository:
@@ -123,8 +91,8 @@ class ValidationRepository:
         # 精度指標を自動算出
         sim_dist = record.simulated_distribution
         record.brier_score = _brier_score_distributions(sim_dist, actual_distribution)
-        record.kl_divergence = _kl_divergence_symmetric(sim_dist, actual_distribution)
-        record.emd = _earth_movers_distance(sim_dist, actual_distribution)
+        record.kl_divergence = kl_divergence_symmetric(sim_dist, actual_distribution)
+        record.emd = earth_movers_distance(sim_dist, actual_distribution)
         record.validated_at = utcnow_naive()
 
         await self.session.commit()

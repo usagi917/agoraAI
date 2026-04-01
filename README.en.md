@@ -6,68 +6,46 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](backend/pyproject.toml)
 [![Node.js 20+](https://img.shields.io/badge/node-20%2B-339933.svg)](frontend/package.json)
 
-> A multi-agent analysis app that runs social reaction simulation, council debate, and Decision Brief generation in one UI. The `frontend` is built with Vue 3 + Vite, and the `backend` is built with FastAPI + async SQLAlchemy.
+> A multi-agent analysis app that takes a single question through social reaction simulation, representative council debate, and Decision Brief generation. The `frontend` is built with Vue 3 + Vite, and the `backend` is built around FastAPI and async SQLAlchemy.
 
-## Quick Start
+## Overview
 
-```bash
-cp .env.example .env
-# Set OPENAI_API_KEY if you want live execution
-docker compose up --build
-```
+- Start from one of four guided question templates or a free-form prompt on the LaunchPad.
+- Switch between five presets: `quick`, `standard`, `deep`, `research`, and `baseline`.
+- Attach `.txt`, `.md`, and `.pdf` files to a project and run evidence-aware analysis on top of them.
+- Follow progress live over SSE with activity feed, social response views, conversations, and graph updates.
+- Review Decision Briefs, scenario comparison, propagation analysis, transcripts, reruns, and follow-up questions on the results page.
+- Generate, inspect, and fork synthetic populations from `/populations`.
 
-- App: http://localhost:3000
-- API docs: http://localhost:8000/docs
-- Health check: http://localhost:8000/health
+## Screens And Workflow
 
-The app still boots without `OPENAI_API_KEY`. Live execution is disabled, but you can still browse sample results and inspect the UI.
+| Route | Purpose | Main contents |
+| --- | --- | --- |
+| `/` | LaunchPad | question templates, free-form prompt, file upload, preset selection, run history |
+| `/sim/:id` | Live Simulation | SSE progress, activity feed, social response views, conversations, live graph |
+| `/sim/:id/results` | Results | Decision Brief, scenario comparison, propagation, transcript, follow-up |
+| `/populations` | Populations | generation, listing, detail view, forking |
 
-## What It Does
+The main execution flow has three stages:
 
-- Starts analysis from four guided question flows:
-  - market entry
-  - product acceptance
-  - policy impact
-  - option comparison
-- Accepts `.txt`, `.md`, and `.pdf` uploads alongside free-form prompts and stores them per project.
-- Runs five execution presets:
-  - `quick`
-  - `standard`
-  - `deep`
-  - `research`
-  - `baseline`
-- Streams live progress through SSE with activity feed, social response views, and a 3D graph.
-- Shows Decision Briefs, scenario comparison, agreement heatmaps, propagation analysis, transcripts, reruns, and follow-up questions on the results page.
-- Generates, browses, and forks population datasets.
-- Exposes sample runs that work without an API key.
+1. `Society Pulse`
+Build a large synthetic population from config and aggregate reactions from selected agents.
+2. `Council`
+Pick citizen representatives and experts, then run a structured multi-round debate.
+3. `Synthesis`
+Combine social signals, debate output, and quality metadata into a Decision Brief and comparable scenarios.
 
-## Execution Pipeline
+### Presets
 
-| Preset | Backend phases | Purpose |
+| Preset | Main phases | When to use it |
 | --- | --- | --- |
 | `quick` | `society_pulse -> synthesis` | Fast first-pass judgment |
 | `standard` | `society_pulse -> council -> synthesis` | Default analysis flow |
-| `deep` | `society_pulse -> multi_perspective -> council -> pm_analysis -> synthesis` | Deeper analysis with PM review |
+| `deep` | `society_pulse -> multi_perspective -> council -> pm_analysis -> synthesis` | Deeper analysis including PM review |
 | `research` | `society_pulse -> issue_mining -> multi_perspective -> intervention -> synthesis` | Issue mining and intervention comparison |
-| `baseline` | dedicated baseline execution | Single-LLM baseline |
+| `baseline` | single-LLM baseline execution | Comparison and validation |
 
 Legacy mode names are normalized internally. For example, `unified -> standard`, `society_first -> research`, and `single -> quick`.
-
-The current implementation works like this:
-
-- Society Pulse builds a large synthetic population from config, selects 100 agents, and runs activation plus evaluation.
-- Council selects up to 6 citizen representatives and 4 experts, then runs a 3-round debate.
-- Synthesis combines social responses and council output into a Decision Brief.
-
-## Screens
-
-| Route | Screen | Main contents |
-| --- | --- | --- |
-| `/` | LaunchPad | template selection, guided wizard, prompt input, file upload, recent runs |
-| `/sim/:id` | Live Simulation | SSE progress, Simulation Progress, Colony / Society views, 3D graph |
-| `/sim/:id/results` | Results | Decision Brief, scenario comparison, propagation analysis, transcript, follow-ups |
-| `/sample/:id` | Sample Result | sample result viewer |
-| `/populations` | Populations | population generation, listing, forking |
 
 ## Architecture
 
@@ -81,17 +59,18 @@ flowchart TB
 
     subgraph Backend["Backend"]
         API["FastAPI REST + SSE"]
-        ORCH["Simulation dispatcher / unified orchestrator"]
+        ORCH["Simulation dispatcher / orchestrators"]
         SOC["Society services"]
-        LLM["Multi-LLM routing"]
+        LLM["Task router + multi-provider adapters"]
         DB["Async SQLAlchemy"]
     end
 
     subgraph Data["Data / Infra"]
         SQLITE["SQLite (local default)"]
         POSTGRES["PostgreSQL (Compose)"]
-        REDIS["Redis (Compose)"]
-        CFG["config/*.yaml + templates/ja/*.yaml"]
+        REDIS["Redis (optional / Compose)"]
+        CFG["config/*.yaml"]
+        TMPL["templates/ja/*.yaml"]
     end
 
     UI --> API
@@ -105,17 +84,36 @@ flowchart TB
     DB --> POSTGRES
     ORCH --> CFG
     API -. optional .-> REDIS
+    API --> TMPL
 ```
 
 Notes:
 
-- The production `frontend` container is served by Nginx and proxies `/api` plus SSE to `backend:8000`.
-- On startup, the `backend` seeds templates from `templates/ja/*.yaml`.
-- SQLite is the default local database. Docker Compose uses PostgreSQL.
+- The Docker `frontend` is served by Nginx and proxies `/api` to `backend:8000`.
+- The `backend` seeds templates from `templates/ja/*.yaml` on startup.
+- Local minimal development assumes SQLite. Docker Compose uses PostgreSQL and Redis.
 
-## API Quick Start
+## Quick Start
 
-### 1. Create a simulation from a prompt
+### Start with Docker Compose
+
+```bash
+cp .env.example .env
+# If the provider stays openai, set OPENAI_API_KEY
+docker compose up --build
+```
+
+- App: `http://localhost:3000`
+- API docs: `http://localhost:8000/docs`
+- Health check: `http://localhost:8000/health`
+
+Notes:
+
+- The default provider in `config/models.yaml` is `openai`. In that state, new simulations require `OPENAI_API_KEY`.
+- `GOOGLE_API_KEY` and `ANTHROPIC_API_KEY` are needed only when you actually enable those providers via `config/llm_providers.yaml`.
+- The app still boots without API keys, but new live executions are disabled.
+
+### Minimal API example
 
 ```bash
 curl -X POST http://localhost:8000/simulations \
@@ -129,80 +127,19 @@ curl -X POST http://localhost:8000/simulations \
   }'
 ```
 
-### 2. Stream progress over SSE
-
 ```bash
 curl -N http://localhost:8000/simulations/SIM_ID/stream
 ```
-
-### 3. Fetch the final report
 
 ```bash
 curl http://localhost:8000/simulations/SIM_ID/report
 ```
 
-### Key endpoints
-
-```text
-GET  /health
-GET  /templates
-
-POST /projects
-GET  /projects/{project_id}
-POST /projects/{project_id}/documents
-GET  /projects/{project_id}/documents
-
-POST /simulations
-GET  /simulations
-GET  /simulations/samples
-GET  /simulations/samples/{sample_id}
-GET  /simulations/{sim_id}
-GET  /simulations/{sim_id}/stream
-GET  /simulations/{sim_id}/graph
-GET  /simulations/{sim_id}/graph/history
-GET  /simulations/{sim_id}/report
-GET  /simulations/{sim_id}/timeline
-POST /simulations/{sim_id}/followups
-POST /simulations/{sim_id}/rerun
-GET  /simulations/{sim_id}/backtest
-POST /simulations/{sim_id}/backtest
-
-GET  /society/populations
-POST /society/populations/generate
-GET  /society/populations/{pop_id}
-POST /society/populations/{pop_id}/fork
-GET  /society/simulations/{sim_id}/activation
-GET  /society/simulations/{sim_id}/meeting
-GET  /society/simulations/{sim_id}/evaluation
-GET  /society/simulations/{sim_id}/narrative
-GET  /society/simulations/{sim_id}/demographics
-GET  /society/simulations/{sim_id}/propagation
-GET  /society/simulations/{sim_id}/social-graph
-GET  /society/simulations/{sim_id}/agents
-GET  /society/simulations/{sim_id}/agents/{agent_id}
-GET  /society/simulations/{sim_id}/transcript
-GET  /society/simulations/{sim_id}/conversations
-
-GET  /runs
-POST /runs
-GET  /runs/{run_id}
-GET  /runs/{run_id}/stream
-GET  /runs/{run_id}/report
-GET  /runs/{run_id}/timeline
-GET  /runs/{run_id}/events
-GET  /runs/{run_id}/graph
-POST /runs/{run_id}/followups
-POST /runs/{run_id}/rerun
-
-GET  /admin/costs
-GET  /admin/quality-metrics
-```
-
 ## Local Development
 
-### Minimal setup
+### 1. Backend
 
-`.env.example` points to SQLite by default, so you can boot the backend without extra infrastructure.
+`.env.example` points to SQLite, so you can boot the backend without extra infrastructure.
 
 ```bash
 cp .env.example .env
@@ -212,7 +149,9 @@ uv sync --extra dev
 uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-In another terminal:
+### 2. Frontend
+
+Run this in another terminal:
 
 ```bash
 cd frontend
@@ -220,112 +159,129 @@ pnpm install
 pnpm dev
 ```
 
-- Frontend dev server: http://localhost:5173
+- Frontend dev server: `http://localhost:5173`
 - Vite proxies `/api` to `http://localhost:8000`
+- Only set `VITE_API_BASE_URL` when you want to override that default
 
-### With PostgreSQL and Redis
+### 3. With PostgreSQL And Redis
 
 ```bash
 docker compose up -d postgres redis
 ```
 
-To match the Docker stack more closely, set `.env` like this:
+To match the Docker stack more closely, use:
 
 ```bash
 DATABASE_URL=postgresql+asyncpg://agentai:agentai@localhost:5432/agentai
 REDIS_URL=redis://localhost:6379/0
 ```
 
-## Tests
-
-```bash
-# backend
-cd backend
-uv run pytest -q
-
-# frontend unit
-cd frontend
-pnpm build
-pnpm test:unit
-
-# frontend e2e
-pnpm exec playwright install --with-deps chromium
-pnpm test:e2e
-```
-
-CI runs backend tests, frontend build, frontend unit tests, and Playwright E2E.
-
 ## Configuration
 
-### Main environment variables
+### Important environment variables
 
 | Variable | Purpose |
 | --- | --- |
-| `OPENAI_API_KEY` | live execution with the OpenAI provider |
-| `GOOGLE_API_KEY` | Gemini provider |
-| `ANTHROPIC_API_KEY` | Anthropic provider |
-| `LLM_MODEL` | base model setting; task-specific overrides live in `config/models.yaml` |
-| `DATABASE_URL` | database connection; `.env.example` uses SQLite, Compose uses PostgreSQL |
-| `REDIS_URL` | Redis connection; enabled in Compose |
-| `BACKEND_HOST` / `BACKEND_PORT` | FastAPI bind settings |
-| `VITE_API_BASE_URL` | frontend API base URL |
-| `COGNITIVE_MODE` | `legacy` or `advanced` |
-| `MAX_ACTIVE_AGENTS` | max cognitive agents |
-| `MAX_CONCURRENT_AGENTS` | concurrent cognitive cycles |
-| `MAX_CONCURRENT_COLONIES` | concurrent multi-perspective / colony jobs |
-| `LLM_CACHE_TTL` | cache TTL in seconds |
+| `OPENAI_API_KEY` | Execution key for the default `openai` provider |
+| `GOOGLE_API_KEY` | Key for Gemini through the OpenAI-compatible endpoint |
+| `ANTHROPIC_API_KEY` | Key for the Anthropic provider |
+| `LLM_MODEL` | Default model; task-level overrides live in `config/models.yaml` |
+| `DATABASE_URL` | SQLite locally, PostgreSQL in Compose |
+| `REDIS_URL` | Needed only when Redis is enabled |
+| `COGNITIVE_MODE` | Switch between `legacy` and `advanced` cognitive modes |
+| `MAX_ACTIVE_AGENTS` | Upper bound for managed cognitive agents |
+| `MAX_CONCURRENT_AGENTS` | Upper bound for concurrent cognitive cycles |
+| `MAX_CONCURRENT_COLONIES` | Upper bound for concurrently running colonies |
 
-### Main config files
+### Config files you will likely touch
 
 | File | Purpose |
 | --- | --- |
-| `config/models.yaml` | provider and task-level model selection |
-| `config/llm_providers.yaml` | OpenAI / Gemini / Anthropic definitions and fallback order |
-| `config/population_mix.yaml` | population size, attribute distributions, per-layer provider weights |
-| `config/cognitive.yaml` | cognition, communication, and scheduling settings |
-| `config/graphrag.yaml` | knowledge graph extraction config |
-| `templates/ja/*.yaml` | analysis templates used by LaunchPad |
+| `config/models.yaml` | default provider, default model, task-specific model routing |
+| `config/llm_providers.yaml` | Society-side provider definitions, env key names, fallback order |
+| `config/cognitive.yaml` | BDI / ToM / scheduling / rate limiting details |
+| `config/swarm_profiles.yaml` | colony counts, round counts, and profile tuning |
+| `templates/ja/*.yaml` | LaunchPad templates seeded into the database on startup |
 
-### Templates
+## API Summary
 
-On startup, YAML files under `templates/ja` are loaded as templates. The current repo includes:
+### Core workflow
 
-- `business_analysis`
-- `market_entry`
-- `policy_impact`
-- `policy_simulation`
-- `scenario_exploration`
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | service status and live execution availability |
+| `GET` | `/templates` | list available templates |
+| `POST` | `/projects` | create a project for attached documents |
+| `POST` | `/projects/{project_id}/documents` | upload `.txt` / `.md` / `.pdf` documents |
+| `POST` | `/simulations` | create a new simulation |
+| `GET` | `/simulations/{sim_id}` | fetch status and metadata |
+| `GET` | `/simulations/{sim_id}/stream` | SSE progress stream |
+| `GET` | `/simulations/{sim_id}/timeline` | timeline of events |
+| `GET` | `/simulations/{sim_id}/graph` | latest graph snapshot |
+| `GET` | `/simulations/{sim_id}/graph/history` | graph history by round |
+| `GET` | `/simulations/{sim_id}/report` | final report |
+| `POST` | `/simulations/{sim_id}/followups` | ask follow-up questions against the result |
+| `POST` | `/simulations/{sim_id}/rerun` | rerun with the same conditions |
 
-There are also helper templates under `templates/ja/pm_board` and `templates/ja/experts`.
+### Society and operational endpoints
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/society/populations` | list populations |
+| `POST` | `/society/populations/generate` | generate a population |
+| `GET` | `/society/populations/{pop_id}` | population details |
+| `POST` | `/society/populations/{pop_id}/fork` | fork a population |
+| `GET` | `/society/simulations/{sim_id}/activation` | activation output |
+| `GET` | `/society/simulations/{sim_id}/meeting` | meeting output |
+| `GET` | `/society/simulations/{sim_id}/evaluation` | evaluation metrics |
+| `GET` | `/society/simulations/{sim_id}/propagation` | propagation data |
+| `GET` | `/society/simulations/{sim_id}/transcript` | transcript data |
+| `GET` | `/admin/costs` | token and cost aggregation |
+| `GET` | `/admin/quality-metrics` | quality and fallback aggregation |
+
+Notes:
+
+- `/runs/*` is the older single-run API and remains for backward compatibility.
+- `/simulations/{sim_id}/backtest` is a compatibility endpoint for `society_first` style flows.
+
+## Testing
+
+CI runs the following:
+
+```bash
+cd backend
+uv sync --extra dev
+uv run pytest -q
+```
+
+```bash
+cd frontend
+pnpm install --frozen-lockfile
+pnpm build
+pnpm test:unit
+pnpm exec playwright install --with-deps chromium
+pnpm test:e2e
+```
 
 ## Repository Layout
 
 ```text
 .
-├── backend/
-│   ├── src/app/api/routes/      # FastAPI routes
-│   ├── src/app/services/        # orchestration, society, cognition, GraphRAG
-│   ├── src/app/llm/             # LLM clients and adapters
-│   ├── tests/                   # pytest
-│   └── pyproject.toml
-├── frontend/
-│   ├── src/pages/               # LaunchPad / Simulation / Results / Sample / Populations
-│   ├── src/components/          # UI components
-│   ├── src/stores/              # Pinia stores
-│   ├── tests/e2e/               # Playwright
-│   └── package.json
-├── config/                      # YAML configuration
-├── templates/                   # analysis templates
-├── sample_results/              # sample runs without API keys
-├── docker-compose.yml
-├── README.md
-└── README.en.md
+├── backend/            # FastAPI app, async SQLAlchemy, tests, Dockerfile
+├── frontend/           # Vue 3 + Vite app, Playwright/Vitest, Dockerfile
+├── config/             # LLM / cognitive / grounding / swarm profiles
+├── templates/          # templates seeded at startup
+├── data/               # local DB and runtime data
+├── docker-compose.yml  # frontend + backend + postgres + redis
+├── README.md           # Japanese README
+└── README.en.md        # English README
 ```
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+- See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution workflow and development expectations.
+- See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for the project code of conduct.
 
 ## License
 
-[AGPL-3.0](LICENSE)
+AGPL-3.0. See [LICENSE](LICENSE) for details.

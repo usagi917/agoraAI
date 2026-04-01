@@ -6,68 +6,46 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](backend/pyproject.toml)
 [![Node.js 20+](https://img.shields.io/badge/node-20%2B-339933.svg)](frontend/package.json)
 
-> 社会反応シミュレーション、評議会ディベート、Decision Brief 生成を 1 つの UI で回せるマルチエージェント分析アプリです。`frontend` は Vue 3 + Vite、`backend` は FastAPI + async SQLAlchemy で構成されています。
+> 1つの問いから、社会反応シミュレーション、代表評議会ディベート、Decision Brief 生成までを一気通貫で回せるマルチエージェント分析アプリです。`frontend` は Vue 3 + Vite、`backend` は FastAPI + async SQLAlchemy を中心に構成されています。
 
-## Quick Start
+## 概要
 
-```bash
-cp .env.example .env
-# 必要なら OPENAI_API_KEY を設定
-docker compose up --build
-```
+- LaunchPad から4種類の質問テンプレート、または自由入力のプロンプトで分析を開始できます。
+- `quick` / `standard` / `deep` / `research` / `baseline` の5つのプリセットで、速度と深さを切り替えられます。
+- `.txt` / `.md` / `.pdf` をプロジェクトに添付し、エビデンス付きの分析フローに載せられます。
+- ライブ画面では SSE で進捗を配信し、Activity Feed、社会反応、会話、グラフの変化を追跡できます。
+- 結果画面では Decision Brief、シナリオ比較、伝播分析、Transcript、再実行、フォローアップ質問を扱えます。
+- `/populations` では人口生成、一覧確認、世代 fork ができます。
 
-- App: http://localhost:3000
-- API docs: http://localhost:8000/docs
-- Health check: http://localhost:8000/health
+## 画面と実行フロー
 
-`OPENAI_API_KEY` が未設定でもアプリは起動します。ライブ実行は無効になりますが、サンプル結果の閲覧や画面確認は可能です。
-
-## できること
-
-- 4 種類の質問ウィザードから分析を開始できます。
-  - 市場参入
-  - 製品受容性
-  - 政策影響
-  - 選択肢比較
-- フリーテキストに加えて `.txt` / `.md` / `.pdf` をアップロードし、プロジェクト単位で分析できます。
-- 5 つのプリセットを実行できます。
-  - `quick`
-  - `standard`
-  - `deep`
-  - `research`
-  - `baseline`
-- ライブ画面で SSE 進捗、Activity Feed、社会反応の分布、3D グラフを追跡できます。
-- 結果画面で Decision Brief、シナリオ比較、Agreement Heatmap、Propagation Dashboard、Transcript、再実行、Follow-up 質問を扱えます。
-- 人口データを生成・閲覧・fork できます。
-- サンプル結果を API キーなしで閲覧できます。
-
-## 実行パイプライン
-
-| Preset | Backend phases | 用途 |
+| Route | 役割 | 主な内容 |
 | --- | --- | --- |
-| `quick` | `society_pulse -> synthesis` | 高速な一次判断 |
+| `/` | LaunchPad | 質問テンプレート、自由入力、ファイル添付、プリセット選択、実行履歴 |
+| `/sim/:id` | Live Simulation | SSE 進捗、Activity Feed、社会反応、会話、ライブグラフ |
+| `/sim/:id/results` | Results | Decision Brief、シナリオ比較、Propagation、Transcript、Follow-up |
+| `/populations` | Populations | 人口生成、人口一覧、詳細表示、fork |
+
+実行時の大まかな流れは次の3段です。
+
+1. `Society Pulse`
+人口設定に基づいて大規模な合成人口を生成し、選抜されたエージェント群の反応を集約します。
+2. `Council`
+市民代表と専門家を選び、複数ラウンドの構造化議論を行います。
+3. `Synthesis`
+社会反応、議論、品質情報をまとめて Decision Brief と比較可能なシナリオを生成します。
+
+### プリセット
+
+| Preset | 主なフェーズ | 用途 |
+| --- | --- | --- |
+| `quick` | `society_pulse -> synthesis` | 一次判断を高速に得たいとき |
 | `standard` | `society_pulse -> council -> synthesis` | 既定の分析フロー |
-| `deep` | `society_pulse -> multi_perspective -> council -> pm_analysis -> synthesis` | 多視点と PM 分析を含む深掘り |
-| `research` | `society_pulse -> issue_mining -> multi_perspective -> intervention -> synthesis` | 論点抽出と介入比較 |
-| `baseline` | 専用ベースライン実行 | 単一 LLM 比較 |
+| `deep` | `society_pulse -> multi_perspective -> council -> pm_analysis -> synthesis` | 多視点と PM 分析まで含めて深掘りしたいとき |
+| `research` | `society_pulse -> issue_mining -> multi_perspective -> intervention -> synthesis` | 論点抽出と介入比較を重視したいとき |
+| `baseline` | 単一 LLM のベースライン実行 | 比較・検証用 |
 
-旧モード名は内部でプリセットへ正規化されます。たとえば `unified -> standard`、`society_first -> research`、`single -> quick` です。
-
-実装上の主な流れは次のとおりです。
-
-- Society Pulse は設定ファイルに基づく大規模人口を生成し、100 人を選抜して活性化・評価します。
-- Council は最大 6 人の市民代表と 4 人の専門家を選び、3 ラウンドの議論を行います。
-- Synthesis は社会反応と評議会結果を統合して Decision Brief を生成します。
-
-## 画面構成
-
-| Route | 画面 | 主な内容 |
-| --- | --- | --- |
-| `/` | LaunchPad | テンプレート選択、質問ウィザード、プロンプト入力、ファイルアップロード、最近の実行 |
-| `/sim/:id` | Live Simulation | SSE 進捗、Simulation Progress、Colony / Society 状態、3D グラフ |
-| `/sim/:id/results` | Results | Decision Brief、シナリオ比較、伝播分析、Transcript、Follow-up |
-| `/sample/:id` | Sample Result | サンプル結果の閲覧 |
-| `/populations` | Populations | 人口生成、一覧、fork |
+旧モード名は内部で正規化されます。たとえば `unified -> standard`、`society_first -> research`、`single -> quick` です。
 
 ## アーキテクチャ
 
@@ -81,17 +59,18 @@ flowchart TB
 
     subgraph Backend["Backend"]
         API["FastAPI REST + SSE"]
-        ORCH["Simulation dispatcher / unified orchestrator"]
+        ORCH["Simulation dispatcher / orchestrators"]
         SOC["Society services"]
-        LLM["Multi-LLM routing"]
+        LLM["Task router + multi-provider adapters"]
         DB["Async SQLAlchemy"]
     end
 
     subgraph Data["Data / Infra"]
         SQLITE["SQLite (local default)"]
         POSTGRES["PostgreSQL (Compose)"]
-        REDIS["Redis (Compose)"]
-        CFG["config/*.yaml + templates/ja/*.yaml"]
+        REDIS["Redis (optional / Compose)"]
+        CFG["config/*.yaml"]
+        TMPL["templates/ja/*.yaml"]
     end
 
     UI --> API
@@ -105,17 +84,36 @@ flowchart TB
     DB --> POSTGRES
     ORCH --> CFG
     API -. optional .-> REDIS
+    API --> TMPL
 ```
 
 補足:
 
-- `frontend` の本番コンテナは Nginx で配信され、`/api` と SSE を `backend:8000` へプロキシします。
+- Docker の `frontend` は Nginx で配信され、`/api` を `backend:8000` にプロキシします。
 - `backend` 起動時に `templates/ja/*.yaml` を読み込み、テンプレートを DB に seed します。
-- ローカル既定 DB は SQLite です。Docker Compose では PostgreSQL を使います。
+- ローカル最小構成は SQLite 前提、Docker Compose は PostgreSQL + Redis 前提です。
 
-## API Quick Start
+## Quick Start
 
-### 1. プロンプトだけでシミュレーションを作成
+### Docker Compose で起動
+
+```bash
+cp .env.example .env
+# provider が openai のままなら OPENAI_API_KEY を設定
+docker compose up --build
+```
+
+- App: `http://localhost:3000`
+- API docs: `http://localhost:8000/docs`
+- Health check: `http://localhost:8000/health`
+
+注意:
+
+- `config/models.yaml` の既定 provider は `openai` です。この状態で新規シミュレーションを実行するには `OPENAI_API_KEY` が必要です。
+- `GOOGLE_API_KEY` と `ANTHROPIC_API_KEY` は、`config/llm_providers.yaml` 側で対象 provider を使うときに必要です。
+- API キー未設定でもアプリ自体は起動しますが、新規ライブ実行は無効になります。
+
+### 最小 API 例
 
 ```bash
 curl -X POST http://localhost:8000/simulations \
@@ -129,80 +127,19 @@ curl -X POST http://localhost:8000/simulations \
   }'
 ```
 
-### 2. SSE で進捗を見る
-
 ```bash
 curl -N http://localhost:8000/simulations/SIM_ID/stream
 ```
-
-### 3. 結果レポートを取得
 
 ```bash
 curl http://localhost:8000/simulations/SIM_ID/report
 ```
 
-### 主要エンドポイント
-
-```text
-GET  /health
-GET  /templates
-
-POST /projects
-GET  /projects/{project_id}
-POST /projects/{project_id}/documents
-GET  /projects/{project_id}/documents
-
-POST /simulations
-GET  /simulations
-GET  /simulations/samples
-GET  /simulations/samples/{sample_id}
-GET  /simulations/{sim_id}
-GET  /simulations/{sim_id}/stream
-GET  /simulations/{sim_id}/graph
-GET  /simulations/{sim_id}/graph/history
-GET  /simulations/{sim_id}/report
-GET  /simulations/{sim_id}/timeline
-POST /simulations/{sim_id}/followups
-POST /simulations/{sim_id}/rerun
-GET  /simulations/{sim_id}/backtest
-POST /simulations/{sim_id}/backtest
-
-GET  /society/populations
-POST /society/populations/generate
-GET  /society/populations/{pop_id}
-POST /society/populations/{pop_id}/fork
-GET  /society/simulations/{sim_id}/activation
-GET  /society/simulations/{sim_id}/meeting
-GET  /society/simulations/{sim_id}/evaluation
-GET  /society/simulations/{sim_id}/narrative
-GET  /society/simulations/{sim_id}/demographics
-GET  /society/simulations/{sim_id}/propagation
-GET  /society/simulations/{sim_id}/social-graph
-GET  /society/simulations/{sim_id}/agents
-GET  /society/simulations/{sim_id}/agents/{agent_id}
-GET  /society/simulations/{sim_id}/transcript
-GET  /society/simulations/{sim_id}/conversations
-
-GET  /runs
-POST /runs
-GET  /runs/{run_id}
-GET  /runs/{run_id}/stream
-GET  /runs/{run_id}/report
-GET  /runs/{run_id}/timeline
-GET  /runs/{run_id}/events
-GET  /runs/{run_id}/graph
-POST /runs/{run_id}/followups
-POST /runs/{run_id}/rerun
-
-GET  /admin/costs
-GET  /admin/quality-metrics
-```
-
 ## ローカル開発
 
-### 最小構成で起動する
+### 1. バックエンド
 
-`.env.example` は SQLite を向くので、そのままでもバックエンドを起動できます。
+`.env.example` は SQLite を指しているので、追加インフラなしでバックエンドだけ起動できます。
 
 ```bash
 cp .env.example .env
@@ -212,7 +149,9 @@ uv sync --extra dev
 uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-別ターミナルで:
+### 2. フロントエンド
+
+別ターミナルで起動します。
 
 ```bash
 cd frontend
@@ -220,112 +159,129 @@ pnpm install
 pnpm dev
 ```
 
-- Frontend dev server: http://localhost:5173
-- Vite は `/api` を `http://localhost:8000` へプロキシします。
+- Frontend dev server: `http://localhost:5173`
+- Vite は `/api` を `http://localhost:8000` に proxy します。
+- `VITE_API_BASE_URL` を明示したい場合だけ `.env` で上書きしてください。
 
-### PostgreSQL / Redis ありで合わせる
+### 3. PostgreSQL / Redis を使う場合
 
 ```bash
 docker compose up -d postgres redis
 ```
 
-`.env` を次のようにすると Docker 構成に近い形でローカルバックエンドを動かせます。
+`.env` を Docker 構成に寄せるなら次の値を使います。
 
 ```bash
 DATABASE_URL=postgresql+asyncpg://agentai:agentai@localhost:5432/agentai
 REDIS_URL=redis://localhost:6379/0
 ```
 
+## 設定ポイント
+
+### 主要な環境変数
+
+| 変数 | 役割 |
+| --- | --- |
+| `OPENAI_API_KEY` | 既定 provider (`openai`) の実行キー |
+| `GOOGLE_API_KEY` | Gemini の OpenAI 互換 endpoint を使う場合のキー |
+| `ANTHROPIC_API_KEY` | Anthropic provider 用キー |
+| `LLM_MODEL` | デフォルトモデル。`config/models.yaml` でタスク別上書き可能 |
+| `DATABASE_URL` | ローカルは SQLite、Compose は PostgreSQL を想定 |
+| `REDIS_URL` | Redis 利用時のみ必要 |
+| `COGNITIVE_MODE` | `legacy` / `advanced` の認知モード切り替え |
+| `MAX_ACTIVE_AGENTS` | 同時に管理する認知エージェント上限 |
+| `MAX_CONCURRENT_AGENTS` | 認知サイクルの同時実行上限 |
+| `MAX_CONCURRENT_COLONIES` | Colony の同時実行上限 |
+
+### 実装上よく触る設定ファイル
+
+| ファイル | 内容 |
+| --- | --- |
+| `config/models.yaml` | 既定 provider、既定モデル、タスク別モデル割り当て |
+| `config/llm_providers.yaml` | Society 側の provider 定義、API キー参照名、fallback 順 |
+| `config/cognitive.yaml` | BDI / ToM / scheduling / rate limiting の詳細 |
+| `config/swarm_profiles.yaml` | Colony 数や round 数などの profile 設定 |
+| `templates/ja/*.yaml` | LaunchPad のテンプレート定義。起動時に DB へ seed |
+
+## API 概要
+
+### 基本フロー
+
+| Method | Endpoint | 役割 |
+| --- | --- | --- |
+| `GET` | `/health` | 稼働状態と live execution 可否の確認 |
+| `GET` | `/templates` | 利用可能なテンプレート一覧 |
+| `POST` | `/projects` | ドキュメント添付用のプロジェクト作成 |
+| `POST` | `/projects/{project_id}/documents` | `.txt` / `.md` / `.pdf` のアップロード |
+| `POST` | `/simulations` | 新規シミュレーション作成 |
+| `GET` | `/simulations/{sim_id}` | 状態・メタデータ取得 |
+| `GET` | `/simulations/{sim_id}/stream` | SSE 進捗ストリーム |
+| `GET` | `/simulations/{sim_id}/timeline` | タイムライン取得 |
+| `GET` | `/simulations/{sim_id}/graph` | 最新グラフ取得 |
+| `GET` | `/simulations/{sim_id}/graph/history` | ラウンドごとのグラフ履歴 |
+| `GET` | `/simulations/{sim_id}/report` | 最終レポート取得 |
+| `POST` | `/simulations/{sim_id}/followups` | 結果に対する follow-up 質問 |
+| `POST` | `/simulations/{sim_id}/rerun` | 同条件で再実行 |
+
+### Society / 運用系
+
+| Method | Endpoint | 役割 |
+| --- | --- | --- |
+| `GET` | `/society/populations` | 人口一覧 |
+| `POST` | `/society/populations/generate` | 人口生成 |
+| `GET` | `/society/populations/{pop_id}` | 人口詳細 |
+| `POST` | `/society/populations/{pop_id}/fork` | 人口 fork |
+| `GET` | `/society/simulations/{sim_id}/activation` | activation 結果 |
+| `GET` | `/society/simulations/{sim_id}/meeting` | meeting 結果 |
+| `GET` | `/society/simulations/{sim_id}/evaluation` | 評価メトリクス |
+| `GET` | `/society/simulations/{sim_id}/propagation` | 伝播データ |
+| `GET` | `/society/simulations/{sim_id}/transcript` | 発話 Transcript |
+| `GET` | `/admin/costs` | トークン・コスト集計 |
+| `GET` | `/admin/quality-metrics` | 品質・fallback 集計 |
+
+補足:
+
+- `/runs/*` は旧来の single-run API で、後方互換のため残っています。
+- `/simulations/{sim_id}/backtest` は `society_first` 系の互換 API です。
+
 ## テスト
 
-```bash
-# backend
-cd backend
-uv run pytest -q
+CI では以下を実行しています。
 
-# frontend unit
+```bash
+cd backend
+uv sync --extra dev
+uv run pytest -q
+```
+
+```bash
 cd frontend
+pnpm install --frozen-lockfile
 pnpm build
 pnpm test:unit
-
-# frontend e2e
 pnpm exec playwright install --with-deps chromium
 pnpm test:e2e
 ```
-
-CI では backend tests、frontend build、frontend unit tests、Playwright E2E を実行します。
-
-## 設定
-
-### 主な環境変数
-
-| Variable | 用途 |
-| --- | --- |
-| `OPENAI_API_KEY` | OpenAI provider を使うライブ実行用 |
-| `GOOGLE_API_KEY` | Gemini provider 用 |
-| `ANTHROPIC_API_KEY` | Anthropic provider 用 |
-| `LLM_MODEL` | ベースモデル指定。タスク別設定は `config/models.yaml` が優先 |
-| `DATABASE_URL` | DB 接続先。`.env.example` は SQLite、Compose は PostgreSQL |
-| `REDIS_URL` | Redis 接続先。Compose では有効 |
-| `BACKEND_HOST` / `BACKEND_PORT` | FastAPI bind 設定 |
-| `VITE_API_BASE_URL` | フロントエンドが使う API ベース URL |
-| `COGNITIVE_MODE` | `legacy` または `advanced` |
-| `MAX_ACTIVE_AGENTS` | 認知エージェントの最大数 |
-| `MAX_CONCURRENT_AGENTS` | 同時に認知サイクルを回す数 |
-| `MAX_CONCURRENT_COLONIES` | multi-perspective / colony 実行の同時数 |
-| `LLM_CACHE_TTL` | キャッシュ TTL 秒 |
-
-### 主要設定ファイル
-
-| File | 内容 |
-| --- | --- |
-| `config/models.yaml` | provider とタスク別モデル選択 |
-| `config/llm_providers.yaml` | OpenAI / Gemini / Anthropic の定義と fallback 順序 |
-| `config/population_mix.yaml` | 人口サイズ、属性分布、レイヤー別 provider 重み |
-| `config/cognitive.yaml` | 認知・通信・スケジューリング関連設定 |
-| `config/graphrag.yaml` | KG 抽出設定 |
-| `templates/ja/*.yaml` | LaunchPad で使う分析テンプレート |
-
-### テンプレート
-
-起動時に `templates/ja` 以下の YAML がテンプレートとして読み込まれます。現行リポジトリには次が含まれます。
-
-- `business_analysis`
-- `market_entry`
-- `policy_impact`
-- `policy_simulation`
-- `scenario_exploration`
-
-加えて `templates/ja/pm_board` と `templates/ja/experts` に補助テンプレートがあります。
 
 ## リポジトリ構成
 
 ```text
 .
-├── backend/
-│   ├── src/app/api/routes/      # FastAPI ルーター
-│   ├── src/app/services/        # オーケストレーション、society、cognition、GraphRAG
-│   ├── src/app/llm/             # LLM クライアントと adapter
-│   ├── tests/                   # pytest
-│   └── pyproject.toml
-├── frontend/
-│   ├── src/pages/               # LaunchPad / Simulation / Results / Sample / Populations
-│   ├── src/components/          # UI コンポーネント
-│   ├── src/stores/              # Pinia stores
-│   ├── tests/e2e/               # Playwright
-│   └── package.json
-├── config/                      # YAML 設定
-├── templates/                   # 分析テンプレート
-├── sample_results/              # API キー不要のサンプル結果
-├── docker-compose.yml
-├── README.md
-└── README.en.md
+├── backend/            # FastAPI app, async SQLAlchemy, tests, Dockerfile
+├── frontend/           # Vue 3 + Vite app, Playwright/Vitest, Dockerfile
+├── config/             # LLM / cognitive / grounding / swarm profiles
+├── templates/          # 起動時に seed されるテンプレート
+├── data/               # ローカル DB や実行データ
+├── docker-compose.yml  # frontend + backend + postgres + redis
+├── README.md           # 日本語 README
+└── README.en.md        # English README
 ```
 
 ## Contributing
 
-[CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
+- 開発フローや参加ルールは [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
+- 行動規範は [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) にあります。
 
 ## License
 
-[AGPL-3.0](LICENSE)
+AGPL-3.0. 詳細は [LICENSE](LICENSE) を参照してください。

@@ -112,17 +112,26 @@ const progressInfo = computed(() => {
         :class="{
           active: currentPhaseIndex === i,
           completed: currentPhaseIndex > i,
+          pending: currentPhaseIndex < i,
         }"
       >
+        <div class="segment-indicator">
+          <span v-if="currentPhaseIndex > i" class="check-icon">&#10003;</span>
+          <span v-else-if="currentPhaseIndex === i" class="active-dot" />
+          <span v-else class="pending-dot" />
+        </div>
         <span class="segment-label">{{ p.label }}</span>
+        <div v-if="currentPhaseIndex === i && progressInfo" class="segment-detail">
+          {{ progressInfo }}
+        </div>
       </div>
     </div>
     <div class="pipeline-track">
-      <div class="pipeline-fill" :style="{ width: `${progressPercent}%` }"></div>
+      <div class="pipeline-fill" :style="{ width: `${progressPercent}%` }" />
     </div>
     <div class="progress-meta">
       <span class="progress-status" :class="store.status">
-        <span class="status-dot"></span>
+        <span class="status-dot" />
         {{ store.status }}
       </span>
       <span v-if="progressInfo" class="progress-info">{{ progressInfo }}</span>
@@ -140,25 +149,92 @@ const progressInfo = computed(() => {
 
 .pipeline-segments {
   display: flex;
-  justify-content: space-between;
-  margin-bottom: 0.5rem;
+  gap: 0.25rem;
+  margin-bottom: 0.6rem;
 }
 
-.pipeline-segment { flex: 1; text-align: center; }
+.pipeline-segment {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.4rem 0.25rem;
+  border-radius: var(--radius-sm);
+  transition: all 0.4s ease;
+}
+
+.pipeline-segment.active {
+  flex: 2;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.pipeline-segment.completed {
+  background: rgba(34, 197, 94, 0.06);
+}
+
+.pipeline-segment.pending {
+  opacity: 0.5;
+}
+
+.segment-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+.check-icon {
+  font-size: 0.7rem;
+  color: var(--success);
+  font-weight: 700;
+}
+
+.active-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.pending-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.4;
+}
 
 .segment-label {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 500;
   color: var(--text-muted);
+  text-align: center;
   transition: color 0.3s;
+  line-height: 1.2;
 }
 
-.pipeline-segment.active .segment-label,
+.pipeline-segment.active .segment-label {
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .pipeline-segment.completed .segment-label {
-  color: var(--text-primary);
+  color: var(--success);
+  font-weight: 600;
 }
 
-.pipeline-segment.active .segment-label { font-weight: 600; }
+.segment-detail {
+  font-size: 0.62rem;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  opacity: 0.8;
+  animation: fade-in 0.4s ease-out;
+}
 
 .pipeline-track {
   height: 3px;
@@ -221,5 +297,10 @@ const progressInfo = computed(() => {
 @keyframes pulse-dot {
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.25); opacity: 0.65; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 0.8; transform: translateY(0); }
 }
 </style>

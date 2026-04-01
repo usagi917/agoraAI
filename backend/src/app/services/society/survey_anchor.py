@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import math
 import os
 import re
 from pathlib import Path
@@ -22,6 +21,10 @@ import logging
 import yaml
 
 from src.app.services.society.constants import STANCE_ORDER
+from src.app.utils.distribution_metrics import (
+    kl_divergence_symmetric,
+    earth_movers_distance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -158,51 +161,6 @@ def find_relevant_surveys(
 
     scored.sort(key=lambda x: x[0], reverse=True)
     return [s for _, s in scored[:top_k]]
-
-
-def kl_divergence_symmetric(
-    p: dict[str, float],
-    q: dict[str, float],
-    smoothing: float = 1e-6,
-) -> float:
-    """対称KL-divergence: (KL(p||q) + KL(q||p)) / 2。スムージング付き。"""
-    all_keys = set(p.keys()) | set(q.keys())
-
-    # スムージング適用
-    p_smooth = {k: p.get(k, 0.0) + smoothing for k in all_keys}
-    q_smooth = {k: q.get(k, 0.0) + smoothing for k in all_keys}
-
-    # 再正規化
-    p_total = sum(p_smooth.values())
-    q_total = sum(q_smooth.values())
-    p_norm = {k: v / p_total for k, v in p_smooth.items()}
-    q_norm = {k: v / q_total for k, v in q_smooth.items()}
-
-    kl_pq = sum(p_norm[k] * math.log(p_norm[k] / q_norm[k]) for k in all_keys)
-    kl_qp = sum(q_norm[k] * math.log(q_norm[k] / p_norm[k]) for k in all_keys)
-
-    return (kl_pq + kl_qp) / 2.0
-
-
-def earth_movers_distance(
-    p: dict[str, float],
-    q: dict[str, float],
-) -> float:
-    """序数距離を考慮したEarth Mover's Distance。
-
-    スタンスの序数: 賛成=0, 条件付き賛成=1, 中立=2, 条件付き反対=3, 反対=4
-    累積差分の絶対値の合計。
-    """
-    p_vals = [p.get(s, 0.0) for s in STANCE_ORDER]
-    q_vals = [q.get(s, 0.0) for s in STANCE_ORDER]
-
-    emd = 0.0
-    cumulative = 0.0
-    for i in range(len(STANCE_ORDER)):
-        cumulative += p_vals[i] - q_vals[i]
-        emd += abs(cumulative)
-
-    return emd
 
 
 def compare_with_surveys(

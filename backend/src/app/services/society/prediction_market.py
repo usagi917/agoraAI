@@ -42,9 +42,14 @@ class PredictionMarket:
         self._quantities[outcome] += confidence * weight
 
     def get_prices(self) -> dict[str, float]:
-        """Compute LMSR prices (softmax over quantities/b)."""
+        """Compute LMSR prices (softmax over quantities/b).
+
+        Uses log-sum-exp trick for numerical stability: subtract max(q)
+        before exponentiation to prevent overflow with large quantities.
+        """
         b = self._liquidity
-        exp_vals = {o: math.exp(q / b) for o, q in self._quantities.items()}
+        max_q = max(self._quantities.values())
+        exp_vals = {o: math.exp((q - max_q) / b) for o, q in self._quantities.items()}
         total = sum(exp_vals.values())
         return {o: v / total for o, v in exp_vals.items()}
 

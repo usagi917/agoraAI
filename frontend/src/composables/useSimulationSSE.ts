@@ -5,6 +5,7 @@ import { useActivityStore } from '../stores/activityStore'
 import { useSocietyStore } from '../stores/societyStore'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
+import { useAgentVisualizationStore } from '../stores/agentVisualizationStore'
 import { useCognitiveSSE } from './useCognitiveSSE'
 
 function getSimulationStreamUrl(simulationId: string) {
@@ -18,6 +19,7 @@ export function useSimulationSSE(simulationId: string) {
   const activity = useActivityStore()
   const societyStore = useSocietyStore()
   const societyGraphStore = useSocietyGraphStore()
+  const vizStore = useAgentVisualizationStore()
   const { handleCognitiveEvent } = useCognitiveSSE()
   let source: EventSource | null = null
 
@@ -124,6 +126,13 @@ export function useSimulationSSE(simulationId: string) {
       'tom_updated',
       'social_network_updated',
       'evaluation_completed',
+      // Phase 2: 思考・通信・討論イベント
+      'agent_thinking_started',
+      'agent_thinking_completed',
+      'conversation_started',
+      'conversation_turn_advanced',
+      'conversation_concluded',
+      'debate_result',
     ]
 
     for (const type of eventTypes) {
@@ -559,6 +568,7 @@ export function useSimulationSSE(simulationId: string) {
             synthesis: '統合分析を実行中',
           }
           const label = phaseLabels[payload.phase] || `Unified Phase: ${payload.phase}`
+          vizStore.addSystemEvent('◈', label, `Phase ${payload.index || 0}/${payload.total || 3}`)
           activity.addEntry('phase', '◈', label, {
             detail: `${payload.index || 0}/${payload.total || 3}`,
             track: 'phase',
@@ -568,6 +578,7 @@ export function useSimulationSSE(simulationId: string) {
         break
 
       case 'persona_generation_started':
+        vizStore.addSystemEvent('✦', 'ペルソナ生成開始', `${payload.agent_count || 0}人の詳細プロフィールを生成中`)
         activity.addEntry('event', '✦', `ペルソナ生成開始 (${payload.agent_count || 0}人)`, {
           track: 'agent',
           status: 'running',
@@ -589,6 +600,7 @@ export function useSimulationSSE(simulationId: string) {
         store.setStatus('running')
         store.setSocietyPhase('population')
         store.setPhase('society_population')
+        vizStore.addSystemEvent('▶', 'Society シミュレーション開始', 'デジタル社会の構築を開始します')
         activity.addEntry('phase', '▶', 'Society シミュレーション開始', {
           track: 'phase',
           status: 'running',
@@ -598,10 +610,13 @@ export function useSimulationSSE(simulationId: string) {
       case 'population_status':
         if (payload.status === 'ready') {
           store.setSocietyPhase('selection')
+          vizStore.addSystemEvent('◇', '人口生成完了', `${payload.agent_count}人のデジタル住民を生成`)
           activity.addEntry('event', '◇', `人口生成完了 (${payload.agent_count}人)`, {
             track: 'phase',
             status: 'completed',
           })
+        } else if (payload.status === 'generating') {
+          vizStore.addSystemEvent('◇', '人口生成中', `${payload.target_count || ''}人を生成中...`)
         }
         break
 
@@ -611,6 +626,7 @@ export function useSimulationSSE(simulationId: string) {
         if (payload.selected_agents) {
           societyGraphStore.setSelectedAgents(payload.selected_agents)
         }
+        vizStore.addSystemEvent('◎', 'エージェント選抜', `${payload.total_population}人から${payload.selected_count}人を選出`)
         activity.addEntry('event', '◎', `${payload.selected_count}人を選抜`, {
           detail: `${payload.total_population}人から${payload.selected_count}人を選出`,
           track: 'agent',
@@ -620,16 +636,22 @@ export function useSimulationSSE(simulationId: string) {
 
       case 'society_activation_started':
         store.setSocietyPhase('activation')
+        vizStore.addSystemEvent('⬡', '活性化レイヤー開始', `${payload.agent_count}人の意見収集を開始`)
         activity.addEntry('phase', '⬡', `活性化開始 (${payload.agent_count}人)`, {
           track: 'phase',
           status: 'running',
         })
         break
 
-      case 'society_activation_progress':
+      case 'society_activation_progress': {
         store.setSocietyActivationProgress(payload.completed, payload.total)
         societyGraphStore.updateActivationProgress(payload.completed, payload.total)
+        const pct = payload.total > 0 ? Math.round((payload.completed / payload.total) * 100) : 0
+        if (payload.completed === payload.total || pct % 10 === 0) {
+          vizStore.addSystemEvent('⬡', `活性化 ${pct}%`, `${payload.completed}/${payload.total} エージェント回答完了`)
+        }
         break
+      }
 
       case 'society_activation_completed':
         store.setSocietyPhase('evaluation')
@@ -637,6 +659,7 @@ export function useSimulationSSE(simulationId: string) {
         if (payload.aggregation?.stance_distribution) {
           store.setOpinionDistribution(payload.aggregation.stance_distribution)
         }
+        vizStore.addSystemEvent('✓', '活性化完了', `平均信頼度: ${(payload.aggregation?.average_confidence * 100)?.toFixed(1)}%`)
         activity.addEntry('event', '◎', '活性化完了', {
           detail: `平均信頼度: ${(payload.aggregation?.average_confidence * 100)?.toFixed(1)}%`,
           track: 'phase',
@@ -653,6 +676,7 @@ export function useSimulationSSE(simulationId: string) {
         break
 
       case 'network_propagation_started':
+        vizStore.addSystemEvent('◎', 'ネットワーク伝播開始', `${payload.agent_count}人のエージェント間で意見が伝播中`)
         activity.addEntry('phase', '◎', `ネットワーク伝播開始 (${payload.agent_count}人, ${payload.edge_count}辺)`, {
           track: 'phase',
           status: 'running',
@@ -691,6 +715,7 @@ export function useSimulationSSE(simulationId: string) {
       case 'meeting_started':
         store.setSocietyPhase('meeting')
         store.setPhase('society_meeting')
+        vizStore.addSystemEvent('◉', '評議会開始', `${payload.participant_count}人の参加者が${payload.num_rounds}ラウンドの議論を開始`)
         activity.addEntry('phase', '◉', `Meeting 開始 (${payload.participant_count}人, ${payload.num_rounds}R)`, {
           track: 'phase',
           status: 'running',
@@ -699,6 +724,11 @@ export function useSimulationSSE(simulationId: string) {
 
       case 'meeting_dialogue':
         societyGraphStore.appendMeetingDialogue(payload.round || 0, payload as any)
+        vizStore.addDialogueEvent({
+          participantName: payload.participant_name || '参加者',
+          argument: payload.argument || payload.position || '',
+          round: payload.round || 0,
+        })
         activity.addEntry('agent', '◌', `${payload.participant_name || '参加者'} 発言`, {
           detail: payload.round_name || payload.position || undefined,
           round: payload.round,
@@ -810,12 +840,37 @@ export function useSimulationSSE(simulationId: string) {
             track: 'graph',
             status: 'completed',
           })
+        } else if (eventType === 'agent_thinking_started') {
+          activity.addEntry('agent', '◐', `${payload.agent_name || ''} 思考中...`, {
+            agentName: payload.agent_name,
+            track: 'agent',
+            status: 'running',
+          })
+        } else if (eventType === 'agent_thinking_completed') {
+          const icon = payload.status === 'success' ? '◉' : '◌'
+          activity.addEntry('agent', icon, `${payload.agent_name || ''} → ${payload.chosen_action || '完了'}`, {
+            agentName: payload.agent_name,
+            track: 'agent',
+            status: payload.status === 'success' ? 'completed' : 'failed',
+          })
         } else if (eventType === 'agent_state_updated') {
           activity.addEntry('agent', '●', `${payload.agent_name || payload.agent_id} ${payload.action_taken || ''}`, {
             agentName: payload.agent_name || payload.agent_id,
             round: payload.round,
             track: 'agent',
             status: 'completed',
+          })
+        } else if (eventType === 'debate_result') {
+          const winner = payload.winner_agent_id ? `勝者: ${payload.winner_agent_id}` : '合意形成'
+          activity.addEntry('event', '⚡', `討論結果: ${winner}`, {
+            track: 'agent',
+            status: 'completed',
+            detail: payload.judge_reasoning,
+          })
+        } else if (eventType === 'conversation_started') {
+          activity.addEntry('event', '💬', `会話開始: ${payload.topic || ''}`, {
+            track: 'agent',
+            status: 'running',
           })
         }
         break

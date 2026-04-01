@@ -1,7 +1,7 @@
 export type ResultsPrimaryView = 'report' | 'scenarios' | 'decision_brief'
 export type ResultsSecondaryTab = 'pm' | 'society' | 'evidence' | 'transcript'
 export type LivePrimaryView = 'graph' | 'society'
-export type LiveSecondaryTab = 'progress' | 'activity' | 'society' | 'colonies'
+export type LiveSecondaryTab = 'progress' | 'activity' | 'society' | 'colonies' | 'thinking' | 'dialogue'
 
 export interface ResultsLayoutContext {
   mode?: string | null
@@ -17,6 +17,7 @@ export interface LiveLayoutContext {
   mode?: string | null
   hasColonies: boolean
   hasActivity: boolean
+  hasCognitiveData?: boolean
 }
 
 const SCENARIO_FIRST_MODES = new Set([
@@ -113,6 +114,14 @@ export function getLiveSecondaryTabs(context: LiveLayoutContext): LiveSecondaryT
 
   if (context.hasColonies) {
     tabs.push('colonies')
+  }
+
+  if (context.hasCognitiveData) {
+    tabs.push('thinking')
+  }
+
+  if (SOCIETY_MODES.has(context.mode || '') || context.hasCognitiveData) {
+    tabs.push('dialogue')
   }
 
   return tabs

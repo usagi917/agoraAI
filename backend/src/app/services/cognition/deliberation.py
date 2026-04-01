@@ -7,6 +7,7 @@ from src.app.llm.client import llm_client
 from src.app.llm.prompts import BDI_DELIBERATE_SYSTEM, BDI_DELIBERATE_USER
 from src.app.llm.validator import validate_bdi_deliberation
 from src.app.services.cost_tracker import record_usage
+from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class DeliberationEngine:
         self,
         session,
         run_id: str,
+        agent_id: str | None,
         agent_name: str,
         beliefs: list[dict],
         desires: list[dict],
@@ -31,6 +33,7 @@ class DeliberationEngine:
         incoming_messages: list[dict] | None = None,
     ) -> dict:
         """行動の熟慮・推論を行う。"""
+        stable_agent_id = agent_id or agent_name
         beliefs_str = json.dumps(beliefs[:20], ensure_ascii=False) if beliefs else "[]"
         desires_str = json.dumps(desires, ensure_ascii=False) if desires else "[]"
         intentions_str = json.dumps(intentions, ensure_ascii=False) if intentions else "[]"
@@ -58,6 +61,15 @@ class DeliberationEngine:
             incoming_messages=messages_str,
         )
 
+        try:
+            await sse_manager.publish(run_id, "agent_thinking_started", {
+                "agent_id": stable_agent_id,
+                "agent_name": agent_name,
+                "stage": "deliberation",
+            })
+        except Exception:
+            logger.warning("SSE publish failed for agent_thinking_started (agent=%s)", agent_name)
+
         result, usage = await llm_client.call_with_retry(
             task_name="bdi_deliberate",
             system_prompt=BDI_DELIBERATE_SYSTEM,
@@ -69,6 +81,16 @@ class DeliberationEngine:
         await record_usage(session, run_id, f"bdi_deliberate_{agent_name}", usage)
 
         if not isinstance(result, dict):
+            try:
+                await sse_manager.publish(run_id, "agent_thinking_completed", {
+                    "agent_id": stable_agent_id,
+                    "agent_name": agent_name,
+                    "chosen_action": "待機",
+                    "reasoning_chain": "推論失敗",
+                    "status": "failed",
+                })
+            except Exception:
+                logger.warning("SSE publish failed for agent_thinking_completed (agent=%s)", agent_name)
             return {
                 "reasoning_chain": "推論失敗",
                 "chosen_action": "待機",
@@ -76,6 +98,17 @@ class DeliberationEngine:
                 "commitment_strength": 0.5,
                 "belief_updates": [],
             }
+
+        try:
+            await sse_manager.publish(run_id, "agent_thinking_completed", {
+                "agent_id": stable_agent_id,
+                "agent_name": agent_name,
+                "chosen_action": result.get("chosen_action", ""),
+                "reasoning_chain": result.get("reasoning_chain", "")[:500],
+                "status": "success",
+            })
+        except Exception:
+            logger.warning("SSE publish failed for agent_thinking_completed (agent=%s)", agent_name)
 
         return result
 

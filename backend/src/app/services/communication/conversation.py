@@ -5,6 +5,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from src.app.services.communication.message_bus import AgentMessage, MessageBus
+from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +30,9 @@ class ConversationManager:
         self._channels: dict[str, ConversationChannel] = {}
         self.max_conversation_turns = max_conversation_turns
 
-    def initiate_conversation(
+    async def initiate_conversation(
         self,
+        run_id: str,
         initiator_id: str,
         participant_ids: list[str],
         topic: str,
@@ -49,6 +51,15 @@ class ConversationManager:
             "Conversation started: %s (type=%s, topic=%s, participants=%d)",
             channel.id[:8], channel_type, topic[:30], len(channel.participants),
         )
+
+        await sse_manager.publish_conversation_event(run_id, "started", {
+            "channel_id": channel.id,
+            "channel_type": channel_type,
+            "topic": topic,
+            "participant_count": len(channel.participants),
+            "initiator_id": initiator_id,
+        })
+
         return channel
 
     def get_channel(self, channel_id: str) -> ConversationChannel | None:
@@ -63,25 +74,41 @@ class ConversationManager:
             if agent_id in c.participants and c.state == "active"
         ]
 
-    def advance_turn(self, channel_id: str) -> bool:
+    async def advance_turn(self, run_id: str, channel_id: str) -> bool:
         """会話ターンを進める。max_turnsに達したらFalseを返す。"""
         channel = self._channels.get(channel_id)
         if not channel or channel.state != "active":
             return False
         channel.current_turn += 1
+
+        await sse_manager.publish_conversation_event(run_id, "turn_advanced", {
+            "channel_id": channel_id,
+            "current_turn": channel.current_turn,
+            "max_turns": channel.max_turns,
+        })
+
         if channel.current_turn >= channel.max_turns:
             channel.state = "concluded"
             logger.info("Conversation %s concluded (max turns)", channel_id[:8])
+            await sse_manager.publish_conversation_event(run_id, "concluded", {
+                "channel_id": channel_id,
+                "reason": "max_turns",
+            })
             return False
         return True
 
-    def conclude_channel(self, channel_id: str) -> None:
+    async def conclude_channel(self, run_id: str, channel_id: str) -> None:
         channel = self._channels.get(channel_id)
         if channel:
             channel.state = "concluded"
+            await sse_manager.publish_conversation_event(run_id, "concluded", {
+                "channel_id": channel_id,
+                "reason": "explicit",
+            })
 
-    def process_conversation_round(
+    async def process_conversation_round(
         self,
+        run_id: str,
         channel: ConversationChannel,
         messages: list[AgentMessage],
         message_bus: MessageBus,
@@ -90,7 +117,7 @@ class ConversationManager:
         for msg in messages:
             msg.channel_id = channel.id
             message_bus.send(msg)
-        self.advance_turn(channel.id)
+        await self.advance_turn(run_id, channel.id)
         return messages
 
     @property
