@@ -33,6 +33,23 @@
   --page-padding: clamp(1rem, 2vw + 0.5rem, 2rem);
   --section-gap: clamp(1rem, 1vw + 0.75rem, 2rem);
   --panel-padding: clamp(1rem, 0.6vw + 0.9rem, 1.5rem);
+  /* Type scale */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 2rem;
+  /* Spacing scale (8px grid) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
 }
 
 html {
@@ -136,6 +153,47 @@ canvas {
   transform: none;
 }
 
+.btn-secondary {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+.btn-secondary:hover {
+  border-color: var(--border-active);
+  background: var(--bg-surface);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.btn-ghost:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.btn-danger {
+  background: var(--danger);
+  color: white;
+}
+
+.btn-danger:hover {
+  background: #dc2626;
+  box-shadow: 0 2px 12px var(--danger-glow);
+}
+
+.btn-sm {
+  padding: 0.35rem 0.8rem;
+  font-size: var(--text-xs);
+}
+
+.btn-lg {
+  padding: 0.8rem 1.8rem;
+  font-size: var(--text-base);
+}
+
 /* Status badges */
 .status-badge {
   display: inline-flex;
@@ -210,5 +268,38 @@ canvas {
     --page-padding: 0.875rem;
     --section-gap: 0.875rem;
     --panel-padding: 0.9rem;
+  }
+}
+
+/* Print styles */
+@media print {
+  body {
+    background: white;
+    color: #1a1a1a;
+    font-size: 11pt;
+    line-height: 1.5;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .card {
+    border: 1px solid #ddd;
+    background: white;
+    break-inside: avoid;
+  }
+  .btn {
+    display: none !important;
+  }
+  a {
+    color: #1a1a1a;
+    text-decoration: underline;
+  }
+  :root {
+    --text-primary: #1a1a1a;
+    --text-secondary: #555;
+    --text-muted: #888;
+    --bg-primary: white;
+    --bg-card: white;
+    --border: #ddd;
   }
 }
