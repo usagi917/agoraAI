@@ -5,6 +5,7 @@ import {
   getHealth,
   getTemplates,
   listSimulations,
+  listPopulations,
   createProject,
   uploadDocument,
   createSimulation,
@@ -12,9 +13,11 @@ import {
   type TemplateResponse,
   type SimulationListItem,
 } from '../api/client'
+import { useScenarioPairStore } from '../stores/scenarioPairStore'
 import InputPanel from '../components/InputPanel.vue'
 
 const router = useRouter()
+const scenarioPairStore = useScenarioPairStore()
 
 const templates = ref<TemplateResponse[]>([])
 const selectedTemplate = ref('')
@@ -35,6 +38,53 @@ const recentSimulations = ref<SimulationListItem[]>([])
 const runtimeHealth = ref<HealthResponse | null>(null)
 const bootstrapError = ref('')
 // advanced options removed for simplicity
+
+// Scenario Comparison state
+const scenarioDecisionContext = ref('')
+const scenarioInterventionParams = ref(
+  JSON.stringify(
+    { policy_type: '住宅補助金', amount: '月3万円', target_population: '年収400万円以下', duration: '12ヶ月' },
+    null,
+    2,
+  ),
+)
+const scenarioPreset = ref('standard')
+const scenarioPopulationId = ref('')
+const scenarioIsLoading = ref(false)
+const scenarioError = ref('')
+const availablePopulations = ref<Array<{ id: string; agent_count: number; status: string }>>([])
+
+async function handleScenarioCompare() {
+  scenarioError.value = ''
+  if (!scenarioDecisionContext.value.trim()) {
+    scenarioError.value = '政策の説明を入力してください'
+    return
+  }
+  let parsedParams: Record<string, unknown>
+  try {
+    parsedParams = JSON.parse(scenarioInterventionParams.value)
+  } catch {
+    scenarioError.value = '介入パラメータのJSON形式が正しくありません'
+    return
+  }
+  if (!scenarioPopulationId.value) {
+    scenarioError.value = '母集団を選択してください'
+    return
+  }
+  scenarioIsLoading.value = true
+  try {
+    const pair = await scenarioPairStore.createScenarioPair({
+      population_id: scenarioPopulationId.value,
+      decision_context: scenarioDecisionContext.value.trim(),
+      intervention_params: parsedParams,
+    })
+    router.push(`/scenario/${pair.id}`)
+  } catch {
+    scenarioError.value = scenarioPairStore.error || 'シナリオ比較の作成に失敗しました'
+  } finally {
+    scenarioIsLoading.value = false
+  }
+}
 
 // Question Wizard state
 const questionTemplates = [
@@ -168,6 +218,16 @@ onMounted(async () => {
   } catch (error) {
     console.error('Bootstrap error:', error)
     bootstrapError.value = 'バックエンドへの接続に失敗しました。コンテナ起動直後は数秒待って再読み込みしてください。'
+  }
+  // Load populations for scenario comparison (non-blocking)
+  try {
+    const pops = await listPopulations()
+    availablePopulations.value = pops
+    if (pops.length > 0) {
+      scenarioPopulationId.value = pops[0].id
+    }
+  } catch {
+    // Populations may not be available yet — not critical
   }
 })
 
@@ -370,6 +430,86 @@ function getPipelineStageLabel(stage: string) {
         <div class="phase-step"><span class="phase-num">03</span><strong>Synthesis</strong> — エビデンス付きのDecision Briefを生成</div>
       </div>
     </details>
+
+    <!-- Scenario Comparison -->
+    <section class="section scenario-section" data-testid="scenario-comparison-section">
+      <div class="scenario-header">
+        <span class="scenario-accent-bar" />
+        <div>
+          <h3 class="scenario-title">シナリオ比較</h3>
+          <p class="scenario-desc">ベースラインと政策介入を比較し、影響を可視化します</p>
+        </div>
+      </div>
+
+      <div class="scenario-form">
+        <div class="scenario-field">
+          <label class="wizard-label" for="scenario-decision-context">政策の説明</label>
+          <input
+            id="scenario-decision-context"
+            v-model="scenarioDecisionContext"
+            class="wizard-input"
+            type="text"
+            placeholder="例: 住宅補助金制度の導入"
+            data-testid="scenario-decision-context"
+          />
+        </div>
+
+        <div class="scenario-field">
+          <label class="wizard-label" for="scenario-intervention-params">介入パラメータ (JSON)</label>
+          <textarea
+            id="scenario-intervention-params"
+            v-model="scenarioInterventionParams"
+            class="prompt-textarea scenario-textarea"
+            rows="5"
+            data-testid="scenario-intervention-params"
+          />
+        </div>
+
+        <div class="scenario-field" v-if="availablePopulations.length > 0">
+          <label class="wizard-label" for="scenario-population">母集団</label>
+          <select
+            id="scenario-population"
+            v-model="scenarioPopulationId"
+            class="wizard-input scenario-select"
+            data-testid="scenario-population"
+          >
+            <option v-for="pop in availablePopulations" :key="pop.id" :value="pop.id">
+              {{ pop.id.slice(0, 8) }}... ({{ pop.agent_count }}人)
+            </option>
+          </select>
+        </div>
+        <p v-else class="scenario-no-pop">母集団がありません。<router-link to="/populations">母集団を作成</router-link>してください。</p>
+
+        <div class="scenario-field">
+          <label class="wizard-label">分析モード</label>
+          <div class="preset-cards">
+            <button
+              v-for="p in presets"
+              :key="p.id"
+              class="preset-card"
+              :class="{ selected: scenarioPreset === p.id }"
+              @click="scenarioPreset = p.id"
+            >
+              <span class="preset-label">{{ p.label }}</span>
+              <span class="preset-desc">{{ p.desc }}</span>
+            </button>
+          </div>
+        </div>
+
+        <p v-if="scenarioError" class="scenario-error" data-testid="scenario-error">{{ scenarioError }}</p>
+
+        <button
+          class="btn btn-primary launch-button scenario-launch-btn"
+          :class="{ loading: scenarioIsLoading }"
+          :disabled="scenarioIsLoading"
+          data-testid="scenario-compare-button"
+          @click="handleScenarioCompare"
+        >
+          <span v-if="scenarioIsLoading" class="spinner"></span>
+          {{ scenarioIsLoading ? '作成中...' : 'シナリオ比較を開始' }}
+        </button>
+      </div>
+    </section>
 
     <!-- History -->
     <section class="section">
@@ -1089,5 +1229,92 @@ function getPipelineStageLabel(stage: string) {
     text-align: left;
     white-space: normal;
   }
+}
+
+/* === Scenario Comparison Section === */
+.scenario-section {
+  background: var(--bg-card);
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  border-radius: 14px;
+  padding: 1.75rem 1.5rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.scenario-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.scenario-accent-bar {
+  width: 4px;
+  min-height: 2.5rem;
+  background: var(--warning, #f59e0b);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.scenario-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.scenario-desc {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-top: 0.2rem;
+  line-height: 1.5;
+}
+
+.scenario-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.scenario-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.scenario-textarea {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.scenario-select {
+  appearance: auto;
+  cursor: pointer;
+}
+
+.scenario-no-pop {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.scenario-no-pop a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.scenario-error {
+  font-size: 0.78rem;
+  color: var(--danger, #ef4444);
+  padding: 0.4rem 0.6rem;
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: var(--radius-sm, 6px);
+}
+
+.scenario-launch-btn {
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+}
+
+.scenario-launch-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 20px rgba(245, 158, 11, 0.4), 0 0 40px rgba(249, 115, 22, 0.15);
 }
 </style>

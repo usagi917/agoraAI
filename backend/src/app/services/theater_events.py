@@ -180,7 +180,7 @@ async def detect_and_emit_alliances(
         return []
 
     total_agents = len(agent_stances)
-    max_coalition = total_agents // 2 if total_agents > 2 else total_agents
+    max_coalition = total_agents if total_agents <= 2 else max(2, total_agents // 2)
 
     # Sort by stance value
     sorted_agents = sorted(agent_stances.items(), key=lambda x: x[1][0])

@@ -102,21 +102,25 @@ describe('useSimulationSSE', () => {
 
       // First error → reconnect after 1s
       MockEventSource.instances[0].triggerError()
+      expect(MockEventSource.instances[0].closed).toBe(true)
       vi.advanceTimersByTime(1000)
       expect(MockEventSource.instances).toHaveLength(2)
 
       // Second error → reconnect after 2s
       MockEventSource.instances[1].triggerError()
+      expect(MockEventSource.instances[1].closed).toBe(true)
       vi.advanceTimersByTime(2000)
       expect(MockEventSource.instances).toHaveLength(3)
 
       // Third error → reconnect after 4s
       MockEventSource.instances[2].triggerError()
+      expect(MockEventSource.instances[2].closed).toBe(true)
       vi.advanceTimersByTime(4000)
       expect(MockEventSource.instances).toHaveLength(4)
 
       // Fourth error → no more reconnects
       MockEventSource.instances[3].triggerError()
+      expect(MockEventSource.instances[3].closed).toBe(true)
       vi.advanceTimersByTime(10000)
       expect(MockEventSource.instances).toHaveLength(4)
     })

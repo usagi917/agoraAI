@@ -215,6 +215,13 @@ class TestAllianceFormed:
         assert len(alliances[0]["agent_ids"]) == 2  # floor(5/2)
 
     @pytest.mark.asyncio
+    async def test_three_agents_keeps_two_member_alliance_minimum(self, mock_publish):
+        args = [_make_arg(0, "賛成"), _make_arg(1, "賛成"), _make_arg(2, "中立")]
+        alliances = await detect_and_emit_alliances("run-1", args)
+        assert len(alliances) == 1
+        assert len(alliances[0]["agent_ids"]) == 2
+
+    @pytest.mark.asyncio
     async def test_cap_at_50_percent_two_agents(self, mock_publish):
         """With exactly 2 agents same stance, max_coalition = 2 (special case)."""
         args = [_make_arg(0, "賛成"), _make_arg(1, "賛成")]

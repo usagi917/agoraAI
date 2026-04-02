@@ -61,6 +61,9 @@ class Simulation(Base):
     # 学術再現性
     seed: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
 
+    # Decision Laboratory
+    scenario_pair_id: Mapped[str | None] = mapped_column(String(36), default=None, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

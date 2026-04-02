@@ -166,12 +166,12 @@ export function useSimulationSSE(simulationId: string) {
     source.onerror = () => {
       if (store.status === 'completed' || store.status === 'failed') return
       store.setStatus('disconnected')
+      source?.close()
+      source = null
 
       if (reconnectAttempts < MAX_RECONNECTS) {
         const delay = Math.pow(2, reconnectAttempts) * 1000
         reconnectAttempts++
-        source?.close()
-        source = null
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null
           start()
