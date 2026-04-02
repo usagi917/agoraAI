@@ -33,6 +33,8 @@ async def test_initiate_conversation_publishes_started(mock_sse):
     assert data["channel_id"] == channel.id
     assert data["topic"] == "テスト議題"
     assert data["participant_count"] == 2
+    assert data["initiator_id"] == "agent_1"
+    assert set(data["participants"]) == {"agent_1", "agent_2"}
 
 
 @pytest.mark.asyncio
