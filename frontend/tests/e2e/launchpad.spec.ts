@@ -25,6 +25,13 @@ test('launches a simulation from the launchpad', async ({ page }) => {
       ],
     })
   })
+  await page.route('**/api/society/populations', async (route) => {
+    await route.fulfill({
+      json: [
+        { id: 'pop-e2e-1', agent_count: 1000, status: 'ready' },
+      ],
+    })
+  })
   await page.route('**/api/simulations', async (route) => {
     if (route.request().method() === 'GET') {
       await route.fulfill({ json: [] })
@@ -37,6 +44,7 @@ test('launches a simulation from the launchpad', async ({ page }) => {
 
   await page.goto('/')
   await page.getByLabel('分析プロンプト').fill('EV battery market analysis')
+  await expect(page.getByTestId('launch-button')).toBeEnabled()
   await page.getByTestId('launch-button').click()
 
   await expect(page).toHaveURL(/\/sim\/sim-e2e-1$/)
