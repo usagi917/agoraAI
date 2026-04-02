@@ -57,6 +57,7 @@ class ConversationManager:
             "channel_type": channel_type,
             "topic": topic,
             "participant_count": len(channel.participants),
+            "participants": [str(p) for p in channel.participants],
             "initiator_id": initiator_id,
         })
 
