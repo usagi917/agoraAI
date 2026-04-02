@@ -110,6 +110,14 @@ class DeliberationEngine:
         except Exception:
             logger.warning("SSE publish failed for agent_thinking_completed (agent=%s)", agent_name)
 
+        # Audit Trail: 熟慮前後の信念状態を記録
+        result["audit_data"] = {
+            "before_beliefs": beliefs,
+            "after_beliefs": result.get("belief_updates", []),
+            "reasoning_excerpt": result.get("reasoning_chain", "")[:500],
+            "has_opinion_shift": bool(result.get("belief_updates")),
+        }
+
         return result
 
     def decay_commitments(self, intentions: list[dict]) -> list[dict]:

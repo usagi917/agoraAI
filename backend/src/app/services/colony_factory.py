@@ -25,6 +25,7 @@ class ColonyConfig:
     model_override: str | None
     adversarial: bool
     round_count: int
+    snapshot_id: str | None = None
 
 
 def _load_perspectives() -> list[dict]:
@@ -49,6 +50,7 @@ def generate_colony_configs(
     simulation_id: str,
     profile_name: str,
     diversity_mode: str = "balanced",
+    snapshot_id: str | None = None,
 ) -> list[ColonyConfig]:
     """Swarm プロファイルに基づいて ColonyConfig リストを生成する。"""
     profiles = _load_swarm_profiles()
@@ -84,6 +86,7 @@ def generate_colony_configs(
             model_override=None,
             adversarial=perspective.get("adversarial", False),
             round_count=round_count,
+            snapshot_id=snapshot_id,
         )
         configs.append(config)
 

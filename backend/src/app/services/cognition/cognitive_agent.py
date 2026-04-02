@@ -124,6 +124,37 @@ class CognitiveAgent:
         # 3. Deliberate (メッセージコンテキスト付き)
         deliberation_result = await self.deliberate(session, round_number)
 
+        # 3.5 Audit Trail: 意見変化を記録 (best-effort)
+        audit_data = deliberation_result.get("audit_data", {})
+        if audit_data.get("has_opinion_shift"):
+            try:
+                from src.app.services.audit_trail_service import record_event
+                await record_event(
+                    session=session,
+                    simulation_id=self.run_id,
+                    agent_id=self.agent_id,
+                    agent_name=self.name,
+                    round_number=round_number,
+                    event_type="opinion_shift",
+                    before_state={"beliefs": audit_data.get("before_beliefs", [])},
+                    after_state={"belief_updates": audit_data.get("after_beliefs", [])},
+                    reasoning=audit_data.get("reasoning_excerpt", ""),
+                )
+            except Exception:
+                logger.warning("Audit record_event failed (agent=%s, round=%d)", self.name, round_number)
+
+            try:
+                await sse_manager.publish(self.run_id, "audit_opinion_shift", {
+                    "agent_id": self.agent_id,
+                    "agent_name": self.name,
+                    "round": round_number,
+                    "before_beliefs": audit_data.get("before_beliefs", []),
+                    "after_beliefs": audit_data.get("after_beliefs", []),
+                    "reasoning_excerpt": audit_data.get("reasoning_excerpt", ""),
+                })
+            except Exception:
+                logger.warning("SSE publish failed for audit_opinion_shift (agent=%s)", self.name)
+
         # 4. Commit
         self.commit(deliberation_result, round_number)
 

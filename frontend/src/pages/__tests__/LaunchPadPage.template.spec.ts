@@ -9,6 +9,7 @@ const apiMocks = vi.hoisted(() => ({
   getHealth: vi.fn(),
   getTemplates: vi.fn(),
   listSimulations: vi.fn(),
+  listPopulations: vi.fn(),
   createProject: vi.fn(),
   uploadDocument: vi.fn(),
   createSimulation: vi.fn(),
@@ -19,6 +20,13 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('../../api/client', () => apiMocks)
+
+vi.mock('../../stores/scenarioPairStore', () => ({
+  useScenarioPairStore: () => ({
+    createScenarioPair: vi.fn(),
+    error: null,
+  }),
+}))
 
 describe('LaunchPadPage — template-specific wizard steps', () => {
   beforeEach(() => {
@@ -47,6 +55,7 @@ describe('LaunchPadPage — template-specific wizard steps', () => {
       },
     ])
     apiMocks.listSimulations.mockResolvedValue([])
+    apiMocks.listPopulations.mockResolvedValue([])
     apiMocks.createSimulation.mockResolvedValue({ id: 'sim-1' })
   })
 
