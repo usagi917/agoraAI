@@ -297,15 +297,12 @@ describe('useScenarioPairSSE', () => {
     })
 
     it('transitions status from idle to running on non-terminal event', async () => {
-      const { start, baselineStatus } = await createSSE()
+      const { start } = await createSSE()
       start()
 
       // start() already sets to 'running', so test with a fresh intervention
       const { start: start2, interventionStatus } = await createSSE()
-      // Re-grab the fresh instances
-      const beforeCount = MockEventSource.instances.length
       start2()
-      const intervention = MockEventSource.instances[beforeCount + 1]
       // The status is already 'running' because start() sets it, but the
       // composable's internal logic also sets 'running' from 'idle'.
       // We verify the status is at least 'running'.
@@ -459,7 +456,7 @@ describe('useScenarioPairSSE', () => {
   // =========================================================================
   describe('edge cases', () => {
     it('skips baseline stream when baseline_simulation_id is null', async () => {
-      const { start, baselineStatus, isComplete, store } = await createSSE({
+      const { start, baselineStatus, store } = await createSSE({
         baselineId: null,
       })
       store.fetchComparison = vi.fn().mockResolvedValue({})
