@@ -89,6 +89,10 @@ async def _apply_sqlite_compatibility_migrations(conn: AsyncConnection) -> None:
             await conn.execute(
                 text("ALTER TABLE simulations ADD COLUMN seed INTEGER")
             )
+        if "scenario_pair_id" not in sim_columns:
+            await conn.execute(
+                text("ALTER TABLE simulations ADD COLUMN scenario_pair_id VARCHAR(36)")
+            )
 
 
 async def _get_postgres_columns(conn: AsyncConnection, table_name: str) -> set[str]:
@@ -116,6 +120,10 @@ async def _apply_postgres_compatibility_migrations(conn: AsyncConnection) -> Non
         if "seed" not in sim_columns:
             await conn.execute(
                 text("ALTER TABLE simulations ADD COLUMN seed INTEGER")
+            )
+        if "scenario_pair_id" not in sim_columns:
+            await conn.execute(
+                text("ALTER TABLE simulations ADD COLUMN scenario_pair_id VARCHAR(36)")
             )
         # 旧カラム（モデルから削除済み）の NOT NULL 制約を解除
         for legacy_col in ("colony_count", "deep_colony_count", "swarm_id"):

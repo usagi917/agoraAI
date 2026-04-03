@@ -5,6 +5,7 @@ import {
   getHealth,
   getTemplates,
   listSimulations,
+  listPopulations,
   createProject,
   uploadDocument,
   createSimulation,
@@ -12,9 +13,11 @@ import {
   type TemplateResponse,
   type SimulationListItem,
 } from '../api/client'
+import { useScenarioPairStore } from '../stores/scenarioPairStore'
 import InputPanel from '../components/InputPanel.vue'
 
 const router = useRouter()
+const scenarioPairStore = useScenarioPairStore()
 
 const templates = ref<TemplateResponse[]>([])
 const selectedTemplate = ref('')
@@ -36,6 +39,53 @@ const runtimeHealth = ref<HealthResponse | null>(null)
 const bootstrapError = ref('')
 // advanced options removed for simplicity
 
+// Scenario Comparison state
+const scenarioDecisionContext = ref('')
+const scenarioInterventionParams = ref(
+  JSON.stringify(
+    { policy_type: '住宅補助金', amount: '月3万円', target_population: '年収400万円以下', duration: '12ヶ月' },
+    null,
+    2,
+  ),
+)
+const scenarioPreset = ref('standard')
+const scenarioPopulationId = ref('')
+const scenarioIsLoading = ref(false)
+const scenarioError = ref('')
+const availablePopulations = ref<Array<{ id: string; agent_count: number; status: string }>>([])
+
+async function handleScenarioCompare() {
+  scenarioError.value = ''
+  if (!scenarioDecisionContext.value.trim()) {
+    scenarioError.value = '政策の説明を入力してください'
+    return
+  }
+  let parsedParams: Record<string, unknown>
+  try {
+    parsedParams = JSON.parse(scenarioInterventionParams.value)
+  } catch {
+    scenarioError.value = '介入パラメータのJSON形式が正しくありません'
+    return
+  }
+  if (!scenarioPopulationId.value) {
+    scenarioError.value = '母集団を選択してください'
+    return
+  }
+  scenarioIsLoading.value = true
+  try {
+    const pair = await scenarioPairStore.createScenarioPair({
+      population_id: scenarioPopulationId.value,
+      decision_context: scenarioDecisionContext.value.trim(),
+      intervention_params: parsedParams,
+    })
+    router.push(`/scenario/${pair.id}`)
+  } catch {
+    scenarioError.value = scenarioPairStore.error || 'シナリオ比較の作成に失敗しました'
+  } finally {
+    scenarioIsLoading.value = false
+  }
+}
+
 // Question Wizard state
 const questionTemplates = [
   {
@@ -43,6 +93,7 @@ const questionTemplates = [
     icon: '📊',
     title: 'この市場に参入すべきか？',
     desc: '市場環境・競合・参入障壁を社会反応から分析',
+    accentColor: '#3b82f6',
     steps: [
       { key: 'industry', label: '業界・市場', placeholder: '例: EV バッテリー市場、日本のペットフード市場' },
       { key: 'strengths', label: '自社の強み・制約', placeholder: '例: 独自の固体電池技術を保有、量産体制は未整備' },
@@ -54,6 +105,7 @@ const questionTemplates = [
     icon: '📦',
     title: 'この製品は受け入れられるか？',
     desc: '消費者・ステークホルダーの受容性を予測',
+    accentColor: '#22c55e',
     steps: [
       { key: 'product', label: '製品・サービスの概要', placeholder: '例: AIチャットボットによる健康相談サービス' },
       { key: 'target', label: 'ターゲット層', placeholder: '例: 30-50代の健康意識が高い都市部の会社員' },
@@ -65,6 +117,7 @@ const questionTemplates = [
     icon: '📜',
     title: 'この政策を導入したらどうなるか？',
     desc: '政策影響・世論支持・ステークホルダー反応を予測',
+    accentColor: '#a855f7',
     steps: [
       { key: 'policy', label: '政策の概要', placeholder: '例: 週休3日制の義務化' },
       { key: 'region', label: '対象地域・層', placeholder: '例: 日本全国、従業員50人以上の企業' },
@@ -76,6 +129,7 @@ const questionTemplates = [
     icon: '🔄',
     title: 'AとBどちらが良いか？',
     desc: '2つの選択肢を社会反応ベースで比較',
+    accentColor: '#f97316',
     steps: [
       { key: 'optionA', label: '選択肢A', placeholder: '例: 新工場を国内に建設' },
       { key: 'optionB', label: '選択肢B', placeholder: '例: 東南アジアの既存工場を拡張' },
@@ -165,6 +219,16 @@ onMounted(async () => {
     console.error('Bootstrap error:', error)
     bootstrapError.value = 'バックエンドへの接続に失敗しました。コンテナ起動直後は数秒待って再読み込みしてください。'
   }
+  // Load populations for scenario comparison (non-blocking)
+  try {
+    const pops = await listPopulations()
+    availablePopulations.value = pops
+    if (pops.length > 0) {
+      scenarioPopulationId.value = pops[0].id
+    }
+  } catch {
+    // Populations may not be available yet — not critical
+  }
 })
 
 async function handleLaunch() {
@@ -216,6 +280,15 @@ function getStatusColor(status: string) {
   }
 }
 
+function getStatusLabel(status: string) {
+  switch (status) {
+    case 'completed': return '完了'
+    case 'running': return '実行中'
+    case 'failed': return '失敗'
+    default: return '待機中'
+  }
+}
+
 function getPipelineStageLabel(stage: string) {
   switch (stage) {
     case 'single': return 'Stage 1'
@@ -232,52 +305,8 @@ function getPipelineStageLabel(stage: string) {
   <div class="launchpad-page">
     <!-- Hero -->
     <section class="hero">
-      <div class="hero-eyebrow">Swarm Intelligence Engine</div>
-      <h2 class="hero-title">Unified<br />Simulation Lab</h2>
-      <p class="hero-desc">1つの質問から社会の脈動を測定し、10人の評議会が議論し、意思決定に直結する Decision Brief を生成します。</p>
-
-      <!-- 3-Phase Visual Workflow -->
-      <div class="phase-workflow">
-        <div class="phase-card">
-          <div class="phase-number">01</div>
-          <div class="phase-icon">◇</div>
-          <h4 class="phase-name">Society Pulse</h4>
-          <p class="phase-detail">1,000人のAIエージェントから<br />意見を収集・分析</p>
-          <div class="phase-tags">
-            <span class="phase-tag">人口生成</span>
-            <span class="phase-tag">KGエンリッチ</span>
-            <span class="phase-tag">ペルソナ生成</span>
-          </div>
-        </div>
-        <div class="phase-connector">
-          <svg width="32" height="16" viewBox="0 0 32 16"><path d="M0 8h28l-6-6M22 14l6-6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" /></svg>
-        </div>
-        <div class="phase-card">
-          <div class="phase-number">02</div>
-          <div class="phase-icon">◉</div>
-          <h4 class="phase-name">Council</h4>
-          <p class="phase-detail">10人の代表者が名前付きで<br />3ラウンドの議論</p>
-          <div class="phase-tags">
-            <span class="phase-tag">反証役</span>
-            <span class="phase-tag">KG進化</span>
-            <span class="phase-tag">信念変化</span>
-          </div>
-        </div>
-        <div class="phase-connector">
-          <svg width="32" height="16" viewBox="0 0 32 16"><path d="M0 8h28l-6-6M22 14l6-6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" /></svg>
-        </div>
-        <div class="phase-card">
-          <div class="phase-number">03</div>
-          <div class="phase-icon">◈</div>
-          <h4 class="phase-name">Synthesis</h4>
-          <p class="phase-detail">ReACTパターンで<br />Decision Brief を生成</p>
-          <div class="phase-tags">
-            <span class="phase-tag">クロス検証</span>
-            <span class="phase-tag">エビデンス</span>
-            <span class="phase-tag">時間軸予測</span>
-          </div>
-        </div>
-      </div>
+      <h2 class="hero-title">ひとつの問いから、<br />社会の反応を予測する</h2>
+      <p class="hero-desc">AIエージェント1,000人が議論し、代表評議会が検証し、あなたの意思決定を支える Decision Brief を生成します。</p>
     </section>
 
     <section v-if="bootstrapError || (runtimeHealth && !runtimeHealth.live_simulation_available)" class="runtime-notice" :class="{ warning: runtimeHealth && !runtimeHealth.live_simulation_available, error: bootstrapError }">
@@ -302,9 +331,11 @@ function getPipelineStageLabel(stage: string) {
           :key="qt.id"
           class="question-card"
           :class="{ selected: selectedQuestionTemplate === qt.id }"
+          :style="{ '--card-accent': qt.accentColor }"
           :data-testid="`question-${qt.id}`"
           @click="selectQuestionTemplate(qt.id)"
         >
+          <span class="question-card-bar" />
           <span class="question-icon">{{ qt.icon }}</span>
           <span class="question-title">{{ qt.title }}</span>
         </button>
@@ -361,10 +392,11 @@ function getPipelineStageLabel(stage: string) {
             v-for="p in presets"
             :key="p.id"
             class="preset-card"
-            :class="{ selected: selectedPreset === p.id }"
+            :class="{ selected: selectedPreset === p.id, recommended: p.id === 'standard' }"
             :data-testid="`preset-${p.id}`"
             @click="selectedPreset = p.id"
           >
+            <span v-if="p.id === 'standard'" class="preset-recommended">おすすめ</span>
             <span class="preset-label">{{ p.label }}</span>
             <span class="preset-desc">{{ p.desc }}</span>
             <span class="preset-meta">{{ p.time }} · {{ p.phases }} phase{{ p.phases > 1 ? 's' : '' }}</span>
@@ -389,13 +421,107 @@ function getPipelineStageLabel(stage: string) {
       </p>
     </section>
 
+    <!-- How It Works (collapsed) -->
+    <details class="how-it-works">
+      <summary class="how-it-works-summary">仕組みを見る</summary>
+      <div class="phase-workflow">
+        <div class="phase-step"><span class="phase-num">01</span><strong>Society Pulse</strong> — 1,000人のAIエージェントから意見を収集</div>
+        <div class="phase-step"><span class="phase-num">02</span><strong>Council</strong> — 10人の代表者が3ラウンドの議論</div>
+        <div class="phase-step"><span class="phase-num">03</span><strong>Synthesis</strong> — エビデンス付きのDecision Briefを生成</div>
+      </div>
+    </details>
+
+    <!-- Scenario Comparison -->
+    <section class="section scenario-section" data-testid="scenario-comparison-section">
+      <div class="scenario-header">
+        <span class="scenario-accent-bar" />
+        <div>
+          <h3 class="scenario-title">シナリオ比較</h3>
+          <p class="scenario-desc">ベースラインと政策介入を比較し、影響を可視化します</p>
+        </div>
+      </div>
+
+      <div class="scenario-form">
+        <div class="scenario-field">
+          <label class="wizard-label" for="scenario-decision-context">政策の説明</label>
+          <input
+            id="scenario-decision-context"
+            v-model="scenarioDecisionContext"
+            class="wizard-input"
+            type="text"
+            placeholder="例: 住宅補助金制度の導入"
+            data-testid="scenario-decision-context"
+          />
+        </div>
+
+        <div class="scenario-field">
+          <label class="wizard-label" for="scenario-intervention-params">介入パラメータ (JSON)</label>
+          <textarea
+            id="scenario-intervention-params"
+            v-model="scenarioInterventionParams"
+            class="prompt-textarea scenario-textarea"
+            rows="5"
+            data-testid="scenario-intervention-params"
+          />
+        </div>
+
+        <div class="scenario-field" v-if="availablePopulations.length > 0">
+          <label class="wizard-label" for="scenario-population">母集団</label>
+          <select
+            id="scenario-population"
+            v-model="scenarioPopulationId"
+            class="wizard-input scenario-select"
+            data-testid="scenario-population"
+          >
+            <option v-for="pop in availablePopulations" :key="pop.id" :value="pop.id">
+              {{ pop.id.slice(0, 8) }}... ({{ pop.agent_count }}人)
+            </option>
+          </select>
+        </div>
+        <p v-else class="scenario-no-pop">母集団がありません。<router-link to="/populations">母集団を作成</router-link>してください。</p>
+
+        <div class="scenario-field">
+          <label class="wizard-label">分析モード</label>
+          <div class="preset-cards">
+            <button
+              v-for="p in presets"
+              :key="p.id"
+              class="preset-card"
+              :class="{ selected: scenarioPreset === p.id }"
+              @click="scenarioPreset = p.id"
+            >
+              <span class="preset-label">{{ p.label }}</span>
+              <span class="preset-desc">{{ p.desc }}</span>
+            </button>
+          </div>
+        </div>
+
+        <p v-if="scenarioError" class="scenario-error" data-testid="scenario-error">{{ scenarioError }}</p>
+
+        <button
+          class="btn btn-primary launch-button scenario-launch-btn"
+          :class="{ loading: scenarioIsLoading }"
+          :disabled="scenarioIsLoading"
+          data-testid="scenario-compare-button"
+          @click="handleScenarioCompare"
+        >
+          <span v-if="scenarioIsLoading" class="spinner"></span>
+          {{ scenarioIsLoading ? '作成中...' : 'シナリオ比較を開始' }}
+        </button>
+      </div>
+    </section>
+
     <!-- History -->
-    <section v-if="recentSimulations.length > 0" class="section">
+    <section class="section">
       <div class="section-header">
         <h3 class="section-title">実行履歴</h3>
-        <span class="section-badge">{{ recentSimulations.length }} 件</span>
+        <span v-if="recentSimulations.length > 0" class="section-badge">{{ recentSimulations.length }} 件</span>
       </div>
-      <div class="history-list">
+      <div v-if="recentSimulations.length === 0" class="empty-state">
+        <p class="empty-state-text">まだ分析がありません</p>
+        <p class="empty-state-hint">上のテンプレートを選んで、最初の質問を投げてみましょう</p>
+      </div>
+      <div v-else class="history-list">
         <router-link
           v-for="sim in recentSimulations"
           :key="sim.id"
@@ -417,7 +543,7 @@ function getPipelineStageLabel(stage: string) {
             </div>
           </div>
           <div class="history-right">
-            <span class="status-badge" :class="getStatusColor(sim.status)">{{ sim.status }}</span>
+            <span class="status-badge" :class="getStatusColor(sim.status)">{{ getStatusLabel(sim.status) }}</span>
             <span class="history-date">{{ new Date(sim.created_at).toLocaleString('ja-JP') }}</span>
           </div>
         </router-link>
@@ -435,57 +561,14 @@ function getPipelineStageLabel(stage: string) {
 
 .hero {
   text-align: center;
-  padding: clamp(2rem, 5vw, 3.5rem) 0 1rem;
-  position: relative;
-  overflow: hidden;
-}
-
-/* Swarm particle background */
-.hero::before {
-  content: '';
-  position: absolute;
-  inset: -40% -20%;
-  background:
-    radial-gradient(1.5px 1.5px at 20% 30%, rgba(99, 102, 241, 0.4) 50%, transparent 100%),
-    radial-gradient(1px 1px at 60% 20%, rgba(139, 92, 246, 0.3) 50%, transparent 100%),
-    radial-gradient(1.5px 1.5px at 80% 60%, rgba(59, 130, 246, 0.35) 50%, transparent 100%),
-    radial-gradient(1px 1px at 40% 80%, rgba(99, 102, 241, 0.25) 50%, transparent 100%),
-    radial-gradient(1px 1px at 10% 70%, rgba(139, 92, 246, 0.2) 50%, transparent 100%),
-    radial-gradient(1.5px 1.5px at 90% 40%, rgba(59, 130, 246, 0.3) 50%, transparent 100%);
-  background-size: 200px 200px, 300px 300px, 250px 250px, 350px 350px, 180px 180px, 280px 280px;
-  animation: swarmDrift 25s linear infinite;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0.7;
-}
-
-@keyframes swarmDrift {
-  0% { transform: translate(0, 0) rotate(0deg); }
-  25% { transform: translate(15px, -10px) rotate(2deg); }
-  50% { transform: translate(-5px, 15px) rotate(-1deg); }
-  75% { transform: translate(-15px, -5px) rotate(1deg); }
-  100% { transform: translate(0, 0) rotate(0deg); }
-}
-
-.hero > * { position: relative; z-index: 1; }
-
-.hero-eyebrow {
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6, #3b82f6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  margin-bottom: 0.6rem;
+  padding: clamp(2.5rem, 5vw, 4rem) 0 var(--space-6);
 }
 
 .hero-title {
-  font-size: clamp(2.2rem, 5vw, 3.2rem);
+  font-size: var(--text-3xl);
   font-weight: 800;
-  letter-spacing: -0.04em;
-  line-height: 1.05;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
   background: linear-gradient(180deg, #fff 30%, rgba(255,255,255,0.7) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -500,102 +583,60 @@ function getPipelineStageLabel(stage: string) {
   line-height: 1.65;
 }
 
-/* 3-Phase Workflow */
+/* How It Works (collapsible) */
+.how-it-works {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+
+.how-it-works-summary {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.how-it-works-summary::-webkit-details-marker { display: none; }
+.how-it-works-summary::before { content: '+ '; font-family: var(--font-mono); }
+.how-it-works[open] .how-it-works-summary::before { content: '- '; }
+
 .phase-workflow {
   display: flex;
-  align-items: stretch;
-  justify-content: center;
-  gap: 0;
-  margin-top: 2.5rem;
-  padding: 0 1rem;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--space-4) var(--space-4);
 }
 
-.phase-card {
-  flex: 1;
-  max-width: 14rem;
-  background: linear-gradient(165deg, rgba(99, 102, 241, 0.06) 0%, rgba(15, 15, 30, 0.8) 100%);
-  border: 1px solid rgba(99, 102, 241, 0.15);
-  border-radius: 12px;
-  padding: 1.5rem 1rem 1.25rem;
-  text-align: center;
-  position: relative;
-  transition: border-color 0.3s, box-shadow 0.3s, transform 0.3s;
-}
-
-.phase-card:hover {
-  border-color: rgba(99, 102, 241, 0.5);
-  box-shadow: 0 4px 30px rgba(99, 102, 241, 0.12), 0 0 60px rgba(99, 102, 241, 0.05);
-  transform: translateY(-2px);
-}
-
-.phase-card:nth-child(1):hover { box-shadow: 0 4px 30px rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.5); }
-.phase-card:nth-child(3):hover { box-shadow: 0 4px 30px rgba(139, 92, 246, 0.15); border-color: rgba(139, 92, 246, 0.5); }
-.phase-card:nth-child(5):hover { box-shadow: 0 4px 30px rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.5); }
-
-.phase-number {
-  position: absolute;
-  top: 0.65rem;
-  left: 0.8rem;
-  font-size: 0.58rem;
-  font-weight: 800;
-  color: rgba(255,255,255,0.2);
-  font-family: var(--font-mono);
-  letter-spacing: 0.05em;
-}
-
-.phase-icon {
-  font-size: 1.8rem;
-  margin-bottom: 0.6rem;
-  filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.4));
-}
-
-.phase-card:nth-child(1) .phase-icon { color: #3b82f6; filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.5)); }
-.phase-card:nth-child(3) .phase-icon { color: #8b5cf6; filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.5)); }
-.phase-card:nth-child(5) .phase-icon { color: #6366f1; filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.5)); }
-
-.phase-name {
-  font-size: 0.92rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin-bottom: 0.4rem;
-}
-
-.phase-detail {
-  font-size: 0.72rem;
+.phase-step {
+  font-size: var(--text-sm);
   color: var(--text-secondary);
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
-.phase-tags {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.3rem;
-  margin-top: 0.75rem;
+.phase-num {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--accent);
+  margin-right: var(--space-2);
 }
 
-.phase-tag {
-  font-size: 0.58rem;
-  padding: 0.18rem 0.45rem;
-  border-radius: 5px;
-  background: rgba(99, 102, 241, 0.1);
-  color: rgba(165, 168, 255, 0.9);
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  border: 1px solid rgba(99, 102, 241, 0.12);
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: var(--space-8) var(--space-4);
 }
 
-.phase-connector {
-  display: flex;
-  align-items: center;
-  padding: 0 0.4rem;
-  color: rgba(99, 102, 241, 0.35);
-  animation: connectorPulse 2s ease-in-out infinite;
+.empty-state-text {
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
 }
 
-@keyframes connectorPulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+.empty-state-hint {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 
 .runtime-notice {
@@ -722,20 +763,33 @@ function getPipelineStageLabel(stage: string) {
 }
 
 .question-card {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 0.75rem;
   padding: var(--panel-padding);
+  padding-top: calc(var(--panel-padding) + 4px);
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   cursor: pointer;
   transition: border-color 0.25s, box-shadow 0.25s;
   text-align: left;
+  overflow: hidden;
+}
+
+.question-card-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--card-accent, var(--accent));
+  border-radius: var(--radius) var(--radius) 0 0;
 }
 
 .question-card:hover { border-color: rgba(255,255,255,0.12); }
-.question-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: rgba(99, 102, 241, 0.06); }
+.question-card.selected { border-color: var(--card-accent, var(--accent)); box-shadow: 0 0 0 1px var(--card-accent, var(--accent)); background: rgba(255, 255, 255, 0.03); }
 
 .question-icon { font-size: 1.1rem; flex-shrink: 0; }
 
@@ -888,6 +942,25 @@ function getPipelineStageLabel(stage: string) {
   font-size: 0.6rem;
   color: var(--text-muted, #71717a);
   margin-top: auto;
+}
+
+.preset-card.recommended {
+  border-color: rgba(99, 102, 241, 0.3);
+  background: rgba(99, 102, 241, 0.06);
+  position: relative;
+}
+
+.preset-recommended {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: #a5b4fc;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 999px;
+  padding: 0.08rem 0.45rem;
+  letter-spacing: 0.04em;
+  align-self: flex-start;
 }
 
 /* Launch */
@@ -1156,5 +1229,92 @@ function getPipelineStageLabel(stage: string) {
     text-align: left;
     white-space: normal;
   }
+}
+
+/* === Scenario Comparison Section === */
+.scenario-section {
+  background: var(--bg-card);
+  border: 1px solid rgba(245, 158, 11, 0.18);
+  border-radius: 14px;
+  padding: 1.75rem 1.5rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.scenario-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.scenario-accent-bar {
+  width: 4px;
+  min-height: 2.5rem;
+  background: var(--warning, #f59e0b);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.scenario-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.scenario-desc {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-top: 0.2rem;
+  line-height: 1.5;
+}
+
+.scenario-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.scenario-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.scenario-textarea {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.scenario-select {
+  appearance: auto;
+  cursor: pointer;
+}
+
+.scenario-no-pop {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.scenario-no-pop a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.scenario-error {
+  font-size: 0.78rem;
+  color: var(--danger, #ef4444);
+  padding: 0.4rem 0.6rem;
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: var(--radius-sm, 6px);
+}
+
+.scenario-launch-btn {
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+}
+
+.scenario-launch-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 20px rgba(245, 158, 11, 0.4), 0 0 40px rgba(249, 115, 22, 0.15);
 }
 </style>

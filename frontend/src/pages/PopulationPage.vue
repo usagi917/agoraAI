@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import {
   listPopulations,
   getPopulationDetail,
@@ -10,6 +10,7 @@ import {
 
 const populations = ref<PopulationResponse[]>([])
 const selectedPop = ref<any>(null)
+const parentPop = ref<any>(null)
 const loading = ref(false)
 const generating = ref(false)
 const error = ref('')
@@ -43,7 +44,11 @@ async function handleGenerate() {
 
 async function handleSelectPop(popId: string) {
   try {
+    parentPop.value = null
     selectedPop.value = await getPopulationDetail(popId)
+    if (selectedPop.value?.parent_id) {
+      parentPop.value = await getPopulationDetail(selectedPop.value.parent_id)
+    }
   } catch (e) {
     error.value = '人口詳細の取得に失敗しました'
   }
@@ -57,6 +62,64 @@ async function handleFork(popId: string) {
     error.value = 'フォークに失敗しました'
   }
 }
+
+// --- Demographics distribution helpers ---
+
+interface DistItem {
+  label: string
+  count: number
+  percent: number
+}
+
+function computeDistribution(agents: any[], key: string): DistItem[] {
+  const counts: Record<string, number> = {}
+  for (const a of agents) {
+    const val = a.demographics?.[key]
+    if (val != null) counts[String(val)] = (counts[String(val)] || 0) + 1
+  }
+  const total = agents.length || 1
+  return Object.entries(counts)
+    .map(([label, count]) => ({ label, count, percent: Math.round((count / total) * 100) }))
+    .sort((a, b) => b.count - a.count)
+}
+
+function computeAgeDistribution(agents: any[]): DistItem[] {
+  const buckets: Record<string, number> = {}
+  for (const a of agents) {
+    const age = a.demographics?.age
+    if (age == null) continue
+    const decade = `${Math.floor(age / 10) * 10}代`
+    buckets[decade] = (buckets[decade] || 0) + 1
+  }
+  const total = agents.length || 1
+  return Object.entries(buckets)
+    .map(([label, count]) => ({ label, count, percent: Math.round((count / total) * 100) }))
+    .sort((a, b) => {
+      const numA = parseInt(a.label)
+      const numB = parseInt(b.label)
+      return numA - numB
+    })
+}
+
+const occupationDist = computed(() =>
+  selectedPop.value?.sample_agents ? computeDistribution(selectedPop.value.sample_agents, 'occupation') : [],
+)
+
+const regionDist = computed(() =>
+  selectedPop.value?.sample_agents ? computeDistribution(selectedPop.value.sample_agents, 'region') : [],
+)
+
+const ageDist = computed(() =>
+  selectedPop.value?.sample_agents ? computeAgeDistribution(selectedPop.value.sample_agents) : [],
+)
+
+// --- Fork diff ---
+
+const parentOccupationDist = computed(() =>
+  parentPop.value?.sample_agents ? computeDistribution(parentPop.value.sample_agents, 'occupation') : [],
+)
+
+const hasForkDiff = computed(() => !!selectedPop.value?.parent_id && !!parentPop.value)
 </script>
 
 <template>
@@ -71,7 +134,12 @@ async function handleFork(popId: string) {
     <section class="section">
       <div class="section-header">
         <h3 class="section-title">人口一覧</h3>
-        <button class="btn btn-primary" :disabled="generating" @click="handleGenerate">
+        <button
+          class="btn btn-primary"
+          data-testid="generate-button"
+          :disabled="generating"
+          @click="handleGenerate"
+        >
           {{ generating ? '生成中...' : '新規生成 (1,000人)' }}
         </button>
       </div>
@@ -106,6 +174,13 @@ async function handleFork(popId: string) {
         <span v-if="selectedPop.parent_id" class="section-badge">Fork元: {{ selectedPop.parent_id.slice(0, 8) }}</span>
       </div>
 
+      <!-- Version lineage -->
+      <div v-if="hasForkDiff" data-testid="version-lineage" class="version-lineage">
+        <span class="lineage-node">v{{ parentPop.version }}</span>
+        <span class="lineage-arrow">&rarr;</span>
+        <span class="lineage-node current">v{{ selectedPop.version }}</span>
+      </div>
+
       <div class="pop-detail-stats">
         <div class="stat-item">
           <span class="stat-label">エージェント数</span>
@@ -121,8 +196,90 @@ async function handleFork(popId: string) {
         </div>
       </div>
 
+      <!-- Demographics distribution charts -->
+      <div v-if="selectedPop.sample_agents?.length" data-testid="demographics-charts" class="demographics-charts">
+        <h4 class="subsection-title">デモグラフィック分布 (サンプル{{ selectedPop.sample_agents.length }}人)</h4>
+
+        <div class="charts-grid">
+          <!-- Occupation -->
+          <div data-testid="chart-occupation" class="dist-chart">
+            <h5 class="chart-title">職業</h5>
+            <div class="dist-bars">
+              <div v-for="item in occupationDist" :key="item.label" class="dist-row">
+                <span class="dist-label">{{ item.label }}</span>
+                <div class="dist-bar-track">
+                  <div data-testid="dist-bar" class="dist-bar-fill" :style="{ width: item.percent + '%' }"></div>
+                </div>
+                <span class="dist-count">{{ item.count }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Region -->
+          <div data-testid="chart-region" class="dist-chart">
+            <h5 class="chart-title">地域</h5>
+            <div class="dist-bars">
+              <div v-for="item in regionDist" :key="item.label" class="dist-row">
+                <span class="dist-label">{{ item.label }}</span>
+                <div class="dist-bar-track">
+                  <div data-testid="dist-bar" class="dist-bar-fill region" :style="{ width: item.percent + '%' }"></div>
+                </div>
+                <span class="dist-count">{{ item.count }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Age -->
+          <div data-testid="chart-age" class="dist-chart">
+            <h5 class="chart-title">年代</h5>
+            <div class="dist-bars">
+              <div v-for="item in ageDist" :key="item.label" class="dist-row">
+                <span class="dist-label">{{ item.label }}</span>
+                <div class="dist-bar-track">
+                  <div data-testid="dist-bar" class="dist-bar-fill age" :style="{ width: item.percent + '%' }"></div>
+                </div>
+                <span class="dist-count">{{ item.count }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fork diff -->
+      <div v-if="hasForkDiff" data-testid="fork-diff" class="fork-diff">
+        <h4 class="subsection-title">Fork 差分 (v{{ parentPop.version }} &rarr; v{{ selectedPop.version }})</h4>
+
+        <div class="diff-grid">
+          <div class="diff-column">
+            <span class="diff-column-label">v{{ parentPop.version }} (親)</span>
+            <div class="dist-bars">
+              <div v-for="item in parentOccupationDist" :key="item.label" class="dist-row">
+                <span class="dist-label">{{ item.label }}</span>
+                <div class="dist-bar-track">
+                  <div class="dist-bar-fill parent" :style="{ width: item.percent + '%' }"></div>
+                </div>
+                <span class="dist-count">{{ item.count }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="diff-column">
+            <span class="diff-column-label">v{{ selectedPop.version }} (現在)</span>
+            <div class="dist-bars">
+              <div v-for="item in occupationDist" :key="item.label" class="dist-row">
+                <span class="dist-label">{{ item.label }}</span>
+                <div class="dist-bar-track">
+                  <div class="dist-bar-fill" :style="{ width: item.percent + '%' }"></div>
+                </div>
+                <span class="dist-count">{{ item.count }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sample agents -->
       <div v-if="selectedPop.sample_agents?.length" class="sample-agents">
-        <h4 class="subsection-title">サンプルエージェント (先頭20人)</h4>
+        <h4 class="subsection-title">サンプルエージェント (先頭{{ selectedPop.sample_agents.length }}人)</h4>
         <div class="agent-grid">
           <div v-for="agent in selectedPop.sample_agents" :key="agent.id" class="agent-card">
             <div class="agent-header">
@@ -141,38 +298,74 @@ async function handleFork(popId: string) {
 </template>
 
 <style scoped>
-.population-page { display: flex; flex-direction: column; gap: clamp(1.25rem, 1vw + 1rem, 2rem); }
-.hero { text-align: center; padding: clamp(1.5rem, 4vw, 3rem) 0 0.5rem; }
-.hero-title { font-size: clamp(1.5rem, 3vw, 2rem); font-weight: 700; letter-spacing: -0.04em; }
-.hero-desc { margin: 0.5rem auto 0; font-size: 0.88rem; color: var(--text-secondary); }
-.error-banner { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: var(--radius); padding: 0.75rem; color: var(--danger); font-size: 0.82rem; }
-.loading-text { font-size: 0.82rem; color: var(--text-muted); }
-.section-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap; }
-.section-title { font-size: 0.9rem; font-weight: 600; }
-.section-badge { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); background: rgba(255,255,255,0.04); padding: 0.15rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); }
-.pop-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.75rem; }
-.pop-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--panel-padding); cursor: pointer; transition: border-color 0.25s; display: flex; flex-direction: column; gap: 0.35rem; }
+.population-page { display: flex; flex-direction: column; gap: var(--section-gap); }
+.hero { text-align: center; padding: clamp(1.5rem, 4vw, 3rem) 0 var(--space-2); }
+.hero-title { font-size: var(--text-3xl); font-weight: 700; letter-spacing: -0.04em; }
+.hero-desc { margin: var(--space-2) auto 0; font-size: var(--text-sm); color: var(--text-secondary); }
+.error-banner { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: var(--radius); padding: var(--space-3); color: var(--danger); font-size: var(--text-sm); }
+.loading-text { font-size: var(--text-sm); color: var(--text-muted); }
+.section-header { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); flex-wrap: wrap; }
+.section-title { font-size: var(--text-sm); font-weight: 600; }
+.section-badge { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted); background: rgba(255,255,255,0.04); padding: 0.15rem var(--space-2); border-radius: 999px; border: 1px solid var(--border); }
+.pop-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-3); }
+.pop-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--panel-padding); cursor: pointer; transition: border-color 0.25s; display: flex; flex-direction: column; gap: var(--space-1); }
 .pop-card:hover { border-color: rgba(255,255,255,0.12); }
 .pop-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .pop-card-top { display: flex; justify-content: space-between; align-items: center; }
-.pop-version { font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; color: var(--accent); }
+.pop-version { font-family: var(--font-mono); font-size: var(--text-xs); font-weight: 700; color: var(--accent); }
 .pop-status { font-family: var(--font-mono); font-size: 0.65rem; padding: 0.1rem 0.35rem; border-radius: 3px; }
 .pop-status.ready { background: rgba(34,197,94,0.15); color: var(--success); }
 .pop-status.generating { background: var(--accent-subtle); color: var(--accent); }
-.pop-count { font-size: 1.2rem; font-weight: 700; }
-.pop-date { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); }
-.pop-actions { margin-top: 0.25rem; }
-.btn-sm { font-size: 0.72rem; padding: 0.25rem 0.5rem; }
-.pop-detail-stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
-.stat-item { display: flex; flex-direction: column; gap: 0.15rem; }
-.stat-label { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; }
-.stat-value { font-size: 1rem; font-weight: 600; }
-.subsection-title { font-size: 0.82rem; font-weight: 600; margin-bottom: 0.5rem; }
-.agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.5rem; }
-.agent-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.6rem; }
-.agent-header { display: flex; justify-content: space-between; margin-bottom: 0.25rem; }
-.agent-index { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); }
+.pop-count { font-size: var(--text-xl); font-weight: 700; }
+.pop-date { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted); }
+.pop-actions { margin-top: var(--space-1); }
+
+/* Version lineage */
+.version-lineage { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-4); font-family: var(--font-mono); font-size: var(--text-sm); }
+.lineage-node { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-3); }
+.lineage-node.current { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.lineage-arrow { color: var(--text-muted); }
+
+/* Stats */
+.pop-detail-stats { display: flex; gap: var(--space-6); flex-wrap: wrap; margin-bottom: var(--space-4); }
+.stat-item { display: flex; flex-direction: column; gap: var(--space-1); }
+.stat-label { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted); text-transform: uppercase; }
+.stat-value { font-size: var(--text-base); font-weight: 600; }
+
+/* Demographics charts */
+.demographics-charts { margin-bottom: var(--space-6); }
+.subsection-title { font-size: var(--text-sm); font-weight: 600; margin-bottom: var(--space-3); }
+.charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-4); }
+.dist-chart { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--panel-padding); }
+.chart-title { font-size: var(--text-xs); font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: var(--space-3); }
+.dist-bars { display: flex; flex-direction: column; gap: var(--space-2); }
+.dist-row { display: grid; grid-template-columns: 5rem 1fr 1.5rem; gap: var(--space-2); align-items: center; }
+.dist-label { font-size: var(--text-xs); color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dist-bar-track { height: 6px; background: rgba(255,255,255,0.04); border-radius: 3px; overflow: hidden; }
+.dist-bar-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.4s ease-out; min-width: 2px; }
+.dist-bar-fill.region { background: var(--success); }
+.dist-bar-fill.age { background: var(--warning); }
+.dist-bar-fill.parent { background: var(--text-muted); }
+.dist-count { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted); text-align: right; }
+
+/* Fork diff */
+.fork-diff { margin-bottom: var(--space-6); }
+.diff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+.diff-column { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--panel-padding); }
+.diff-column-label { display: block; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted); margin-bottom: var(--space-3); text-transform: uppercase; }
+
+/* Sample agents */
+.sample-agents { margin-top: var(--space-2); }
+.agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-2); }
+.agent-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-3); }
+.agent-header { display: flex; justify-content: space-between; margin-bottom: var(--space-1); }
+.agent-index { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted); }
 .agent-backend { font-family: var(--font-mono); font-size: 0.65rem; color: var(--accent); background: var(--accent-subtle); padding: 0.1rem 0.3rem; border-radius: 3px; }
-.agent-demo { font-size: 0.78rem; color: var(--text-secondary); }
-.agent-memory { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.25rem; font-style: italic; }
+.agent-demo { font-size: var(--text-xs); color: var(--text-secondary); }
+.agent-memory { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--space-1); font-style: italic; }
+
+@media (max-width: 640px) {
+  .diff-grid { grid-template-columns: 1fr; }
+  .charts-grid { grid-template-columns: 1fr; }
+}
 </style>

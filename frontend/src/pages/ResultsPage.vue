@@ -517,6 +517,60 @@ async function handleRerun() {
   }
 }
 
+const pdfGenerating = ref(false)
+
+async function handlePdfDownload() {
+  pdfGenerating.value = true
+  try {
+    const { default: html2canvas } = await import('html2canvas')
+    const { default: jsPDF } = await import('jspdf')
+
+    const el = document.querySelector('.results-page') as HTMLElement
+    if (!el) return
+
+    const canvas = await html2canvas(el, {
+      backgroundColor: '#0a0a0f',
+      scale: 2,
+      useCORS: true,
+    })
+
+    const imgData = canvas.toDataURL('image/png')
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+    })
+
+    const pageWidth = pdf.internal.pageSize.getWidth()
+    const pageHeight = pdf.internal.pageSize.getHeight()
+    const imgWidth = pageWidth - 20
+    const imgHeight = (canvas.height * imgWidth) / canvas.width
+
+    let yOffset = 10
+    let remainingHeight = imgHeight
+
+    // First page
+    pdf.addImage(imgData, 'PNG', 10, yOffset, imgWidth, imgHeight)
+    remainingHeight -= (pageHeight - 20)
+
+    // Additional pages if needed
+    while (remainingHeight > 0) {
+      pdf.addPage()
+      yOffset -= (pageHeight - 20)
+      pdf.addImage(imgData, 'PNG', 10, yOffset, imgWidth, imgHeight)
+      remainingHeight -= (pageHeight - 20)
+    }
+
+    const filename = `agora-ai-report-${simId.slice(0, 8)}.pdf`
+    pdf.save(filename)
+  } catch (e) {
+    console.error('PDF generation failed:', e)
+    alert('PDF生成に失敗しました。ブラウザの Cmd+P (印刷) もお試しください。')
+  } finally {
+    pdfGenerating.value = false
+  }
+}
+
 function setCopyState(state: 'idle' | 'success' | 'error') {
   copyState.value = state
 
@@ -609,7 +663,10 @@ function renderMarkdown(content: string): string {
             {{ sim.template_name || 'プロンプト実行' }} · {{ sim.execution_profile }}
           </span>
         </div>
-        <div class="header-actions">
+        <div class="header-actions no-print">
+          <button class="btn btn-secondary btn-sm" @click="handlePdfDownload" :disabled="pdfGenerating">
+            {{ pdfGenerating ? 'PDF生成中...' : 'PDF保存' }}
+          </button>
           <button class="btn btn-ghost" @click="handleRerun">再実行</button>
           <router-link :to="`/sim/${simId}`" class="btn btn-ghost">実行画面</router-link>
         </div>
@@ -1662,4 +1719,32 @@ function renderMarkdown(content: string): string {
 .transcript-stance { font-size: 0.68rem; padding: 0.1rem 0.35rem; border-radius: 4px; border: 1px solid var(--border); color: var(--text-secondary); }
 .transcript-text { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6; white-space: pre-line; }
 .transcript-address { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem; }
+
+/* Print styles — Results page specific */
+@media print {
+  .result-header { break-after: avoid; }
+  .header-actions,
+  .tab-bar,
+  .followup-section,
+  .quality-meta { display: none !important; }
+
+  .results-page { padding: 0; max-width: 100%; }
+
+  .decision-brief { break-inside: avoid; }
+  .brief-section { break-inside: avoid; page-break-inside: avoid; }
+  .reason-card,
+  .detail-card,
+  .option-card,
+  .horizon-card { break-inside: avoid; }
+
+  .graph-container,
+  .canvas-wrapper { display: none !important; }
+
+  .evidence-panel { break-before: page; }
+  .evidence-card { break-inside: avoid; }
+
+  .stakeholder-bar-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .confidence-gauge-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .recommendation-badge { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+}
 </style>

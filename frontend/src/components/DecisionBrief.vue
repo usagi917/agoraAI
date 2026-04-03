@@ -45,7 +45,7 @@ function pct(value?: number | null): string {
 
 <template>
   <div class="decision-brief">
-    <div class="brief-hero">
+    <div class="brief-hero" data-testid="brief-hero-card">
       <div class="hero-main">
         <span
           data-testid="recommendation-badge"
@@ -63,6 +63,13 @@ function pct(value?: number | null): string {
       <div v-if="scoreValue !== null" class="agreement-overview">
         <span class="agreement-label">{{ scoreLabel }}</span>
         <span class="agreement-value">{{ pct(scoreValue) }}%</span>
+        <div class="confidence-gauge" data-testid="confidence-gauge">
+          <div
+            class="confidence-gauge-fill"
+            data-testid="confidence-gauge-fill"
+            :style="{ width: pct(scoreValue) + '%' }"
+          />
+        </div>
       </div>
     </div>
 
@@ -71,7 +78,7 @@ function pct(value?: number | null): string {
       <p class="section-prose">{{ brief.confidence_explainer }}</p>
     </div>
 
-    <div v-if="keyReasons.length" class="brief-section">
+    <div v-if="keyReasons.length" class="brief-section" data-testid="section-key-reasons">
       <h4 class="brief-section-title">主な判断根拠</h4>
       <div class="reason-list">
         <div v-for="(item, index) in keyReasons" :key="index" class="reason-card">
@@ -86,7 +93,7 @@ function pct(value?: number | null): string {
       </div>
     </div>
 
-    <div v-if="guardrails.length" class="brief-section">
+    <div v-if="guardrails.length" class="brief-section" data-testid="section-guardrails">
       <h4 class="brief-section-title">この判断が成り立つ条件</h4>
       <div class="detail-list">
         <div v-for="(item, index) in guardrails" :key="index" class="detail-card">
@@ -99,7 +106,7 @@ function pct(value?: number | null): string {
       </div>
     </div>
 
-    <div v-if="dealBreakers.length" class="brief-section">
+    <div v-if="dealBreakers.length" class="brief-section" data-testid="section-deal-breakers">
       <h4 class="brief-section-title">判断を覆すトリガー</h4>
       <div class="detail-list">
         <div v-for="(item, index) in dealBreakers" :key="index" class="detail-card detail-card-danger">
@@ -112,7 +119,7 @@ function pct(value?: number | null): string {
       </div>
     </div>
 
-    <div v-if="criticalUnknowns.length" class="brief-section">
+    <div v-if="criticalUnknowns.length" class="brief-section" data-testid="section-critical-unknowns">
       <h4 class="brief-section-title">追加で潰すべき論点</h4>
       <div class="detail-list">
         <div v-for="(item, index) in criticalUnknowns" :key="index" class="detail-card">
@@ -254,32 +261,32 @@ function pct(value?: number | null): string {
 .decision-brief {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: var(--space-6);
 }
 
 .brief-hero {
   display: flex;
   justify-content: space-between;
-  gap: 1.5rem;
-  padding: 1.25rem;
-  background: rgba(255,255,255,0.02);
+  gap: var(--space-6);
+  padding: var(--space-6);
+  background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
 }
 
 .hero-main {
   display: flex;
   flex-direction: column;
-  gap: 0.8rem;
+  gap: var(--space-3);
   flex: 1;
 }
 
 .recommendation-badge {
   align-self: flex-start;
   font-family: var(--font-mono);
-  font-size: 1.3rem;
+  font-size: var(--text-xl);
   font-weight: 700;
-  padding: 0.5rem 1.2rem;
+  padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-sm);
   border: 2px solid;
 }
@@ -304,26 +311,26 @@ function pct(value?: number | null): string {
 
 .decision-summary {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-base);
   font-weight: 600;
   line-height: 1.7;
 }
 
 .decision-why-now {
   margin: 0;
-  font-size: 0.86rem;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   line-height: 1.7;
 }
 
 .why-now-label {
   display: inline-block;
-  margin-right: 0.45rem;
-  padding: 0.1rem 0.45rem;
+  margin-right: var(--space-2);
+  padding: var(--space-1) var(--space-2);
   border-radius: 999px;
   background: rgba(255,255,255,0.06);
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   text-transform: uppercase;
 }
@@ -331,12 +338,13 @@ function pct(value?: number | null): string {
 .agreement-overview {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: var(--space-1);
   align-items: flex-end;
+  min-width: 80px;
 }
 
 .agreement-label {
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   text-transform: uppercase;
   font-family: var(--font-mono);
@@ -344,22 +352,38 @@ function pct(value?: number | null): string {
 
 .agreement-value {
   font-family: var(--font-mono);
-  font-size: 1.8rem;
+  font-size: var(--text-2xl);
   font-weight: 700;
   color: var(--accent);
 }
 
+.confidence-gauge {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: var(--space-1, 0.25rem);
+}
+
+.confidence-gauge-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+
 .brief-section-title {
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   font-weight: 600;
-  margin-bottom: 0.65rem;
-  padding-bottom: 0.35rem;
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--border);
 }
 
 .section-prose {
   margin: 0;
-  font-size: 0.88rem;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   line-height: 1.8;
 }
@@ -370,7 +394,7 @@ function pct(value?: number | null): string {
 .stakeholder-list {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: var(--space-3);
 }
 
 .reason-card,
@@ -378,10 +402,10 @@ function pct(value?: number | null): string {
 .risk-item,
 .horizon-card,
 .option-card {
-  padding: 0.85rem;
+  padding: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: rgba(255,255,255,0.02);
+  background: var(--bg-card);
 }
 
 .reason-head,
@@ -389,7 +413,7 @@ function pct(value?: number | null): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 .reason-index {
@@ -401,13 +425,13 @@ function pct(value?: number | null): string {
   border-radius: 999px;
   background: rgba(255,255,255,0.08);
   font-family: var(--font-mono);
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
 }
 
 .reason-confidence,
 .detail-status {
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   color: var(--accent);
 }
 
@@ -417,7 +441,7 @@ function pct(value?: number | null): string {
 
 .reason-text,
 .detail-title {
-  font-size: 0.88rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   line-height: 1.6;
 }
@@ -425,8 +449,8 @@ function pct(value?: number | null): string {
 .reason-meta,
 .detail-body,
 .detail-foot {
-  margin-top: 0.45rem;
-  font-size: 0.8rem;
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   line-height: 1.7;
 }
@@ -434,7 +458,7 @@ function pct(value?: number | null): string {
 .detail-foot {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 .detail-card-danger {
@@ -447,64 +471,64 @@ function pct(value?: number | null): string {
 .options-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 .breakdown-item {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.2rem;
-  padding: 0.75rem;
-  background: rgba(255,255,255,0.02);
+  gap: var(--space-1);
+  padding: var(--space-3);
+  background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
 
 .breakdown-label {
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
 
 .breakdown-value {
   font-family: var(--font-mono);
-  font-size: 1.1rem;
+  font-size: var(--text-lg);
   font-weight: 700;
   color: var(--text-primary);
 }
 
 .option-label {
-  font-size: 0.88rem;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 
 .option-effect {
-  margin-top: 0.35rem;
-  font-size: 0.8rem;
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
   color: var(--success);
   line-height: 1.6;
 }
 
 .option-risk {
-  margin-top: 0.35rem;
-  font-size: 0.78rem;
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
   color: var(--danger);
   line-height: 1.6;
 }
 
 .option-fit {
-  margin-top: 0.35rem;
-  font-size: 0.78rem;
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   line-height: 1.6;
 }
 
 .counterargument-text {
-  font-size: 0.88rem;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   line-height: 1.7;
-  padding: 0.85rem;
+  padding: var(--space-4);
   border-left: 3px solid var(--danger);
   background: rgba(239,68,68,0.05);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
@@ -515,16 +539,16 @@ function pct(value?: number | null): string {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 .risk-condition {
-  font-size: 0.84rem;
+  font-size: var(--text-sm);
   font-weight: 500;
 }
 
 .risk-impact {
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   color: var(--danger);
   text-align: right;
 }
@@ -532,18 +556,18 @@ function pct(value?: number | null): string {
 .horizon-card {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: var(--space-2);
 }
 
 .horizon-period {
   font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--accent);
 }
 
 .horizon-prediction {
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   line-height: 1.5;
 }
@@ -551,19 +575,19 @@ function pct(value?: number | null): string {
 .stakeholder-row {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 .stakeholder-group {
   width: 100px;
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   font-weight: 500;
   flex-shrink: 0;
 }
 
 .stakeholder-reaction {
   width: 90px;
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
   color: var(--text-secondary);
   flex-shrink: 0;
 }
@@ -586,14 +610,14 @@ function pct(value?: number | null): string {
 .stakeholder-pct {
   width: 40px;
   font-family: var(--font-mono);
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   text-align: right;
 }
 
 .next-steps-list {
-  padding-left: 1.4rem;
-  font-size: 0.84rem;
+  padding-left: var(--space-6);
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   line-height: 1.8;
 }
@@ -622,6 +646,42 @@ function pct(value?: number | null): string {
   .risk-item {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media print {
+  .decision-brief { gap: 0.75rem; }
+  .brief-hero {
+    background: white;
+    border: 1px solid #ccc;
+    padding: 0.75rem;
+  }
+  .recommendation-badge {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .confidence-gauge {
+    background: #e5e5e5;
+  }
+  .confidence-gauge-fill {
+    background: #333;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .reason-card,
+  .detail-card,
+  .option-card,
+  .horizon-card,
+  .breakdown-item {
+    background: white;
+    border: 1px solid #ccc;
+    break-inside: avoid;
+  }
+  .stakeholder-bar-track { background: #e5e5e5; }
+  .stakeholder-bar-fill {
+    background: #333;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
 }
 </style>

@@ -24,6 +24,11 @@ const router = createRouter({
       name: 'populations',
       component: () => import('./pages/PopulationPage.vue'),
     },
+    {
+      path: '/scenario/:id',
+      name: 'scenario-comparison',
+      component: () => import('./pages/ScenarioComparisonPage.vue'),
+    },
     // === レガシーリダイレクト ===
     {
       path: '/run/:id',

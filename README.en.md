@@ -16,15 +16,18 @@
 - Follow progress live over SSE with activity feed, social response views, conversations, and graph updates.
 - Review Decision Briefs, scenario comparison, propagation analysis, transcripts, reruns, and follow-up questions on the results page.
 - Generate, inspect, and fork synthetic populations from `/populations`.
+- Decision Lab runs two scenarios against the same population side-by-side, comparing opinion shifts, coalition changes, and audit trails.
+- Theater UI shows debate cards, live dialogue streams, and real-time stance shifts during simulation.
 
 ## Screens And Workflow
 
 | Route | Purpose | Main contents |
 | --- | --- | --- |
 | `/` | LaunchPad | question templates, free-form prompt, file upload, preset selection, run history |
-| `/sim/:id` | Live Simulation | SSE progress, activity feed, social response views, conversations, live graph |
+| `/sim/:id` | Live Simulation | SSE progress, activity feed, social response views, conversations, live graph, Theater UI (debate cards, dialogue stream) |
 | `/sim/:id/results` | Results | Decision Brief, scenario comparison, propagation, transcript, follow-up |
 | `/populations` | Populations | generation, listing, detail view, forking |
+| `/scenario/:id` | Decision Lab | scenario pair comparison, opinion shift table, coalition map, audit timeline |
 
 The main execution flow has three stages:
 

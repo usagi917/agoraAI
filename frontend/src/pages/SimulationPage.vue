@@ -35,6 +35,10 @@ import ThinkingPanel from '../components/ThinkingPanel.vue'
 import AgentActivityTicker from '../components/AgentActivityTicker.vue'
 import LiveDialogueStream from '../components/LiveDialogueStream.vue'
 import DigitalWorkspaceBackground from '../components/DigitalWorkspaceBackground.vue'
+import DebateCards from '../components/DebateCards.vue'
+import ForceGraph2D from '../components/ForceGraph2D.vue'
+import { useTheaterStore } from '../stores/theaterStore'
+import { isWebGLSupported } from '../composables/useWebGLDetect'
 import {
   getDefaultLiveSecondaryTab,
   getLivePrimaryView,
@@ -64,6 +68,8 @@ const elapsedTime = ref(0)
 const activeSecondaryTab = ref<LiveSecondaryTab>('progress')
 let timer: ReturnType<typeof setInterval> | null = null
 let persistTimer: ReturnType<typeof setTimeout> | null = null
+
+const webglAvailable = isWebGLSupported()
 
 const store = useSimulationStore()
 const graphStore = useGraphStore()
@@ -109,7 +115,28 @@ const {
   applyDiff: applyGraphDiff,
   resetCamera,
   getInternalNodes,
+  pulseNode,
+  focusOnNode,
 } = useForceGraph(graphCanvas, thinkingMode, { nodeExtension: agentStatusRing.nodeExtension })
+
+const theaterStore = useTheaterStore()
+
+// Pulse + camera focus on theater events
+watch(() => theaterStore.latestClaim, (claim) => {
+  if (claim) {
+    pulseNode(claim.agentId)
+    focusOnNode(claim.agentId, 'claim_made')
+  }
+})
+watch(() => theaterStore.latestShift, (shift) => {
+  if (shift) focusOnNode(shift.agentId, 'stance_shifted')
+})
+watch(() => theaterStore.latestAlliance, (alliance) => {
+  if (alliance?.agentIds?.[0]) focusOnNode(alliance.agentIds[0], 'alliance_formed')
+})
+watch(() => theaterStore.decision, (decision) => {
+  if (decision) focusOnNode('', 'decision_locked')
+})
 
 const commPulse = useCommunicationPulse(graph, getInternalNodes)
 let lastProcessedFlowIndex = 0
@@ -369,6 +396,7 @@ const livePrimaryView = computed<LivePrimaryView>(() => getLivePrimaryView(liveL
 const liveSecondaryTabs = computed<LiveSecondaryTab[]>(() => getLiveSecondaryTabs(liveLayoutContext.value))
 const liveSecondaryLabels: Record<LiveSecondaryTab, string> = {
   progress: 'Progress',
+  debate: 'Debate',
   activity: 'Activity',
   society: 'Society',
   colonies: 'Colonies',
@@ -648,6 +676,7 @@ onUnmounted(() => {
   activityStore.clear()
   societyGraphStore.reset()
   vizStore.reset()
+  theaterStore.reset()
   agentStatusRing.stopAnimationLoop()
   stopCommunicationPulseLoop()
   commPulse.dispose()
@@ -843,8 +872,8 @@ function goToResults() {
               v-if="store.isSocietyMode"
               :simulation-id="simId"
             />
-            <!-- Other modes: Knowledge Graph -->
-            <template v-else>
+            <!-- Other modes: Knowledge Graph (3D or 2D fallback) -->
+            <template v-else-if="webglAvailable">
               <div ref="graphCanvas" class="graph-canvas-host"></div>
               <div v-if="graphError" class="graph-error-state">
                 <div class="graph-empty-shell">
@@ -876,6 +905,10 @@ function goToResults() {
                 <span class="phase-icon">{{ phaseOverlay.icon }}</span>
                 <span class="phase-label">{{ phaseOverlay.label }}</span>
               </div>
+            </template>
+            <!-- 2D SVG Fallback when WebGL unavailable -->
+            <template v-else>
+              <ForceGraph2D :nodes="graphStore.nodes" :edges="graphStore.edges" />
             </template>
             <AgentActivityTicker />
           </div>
@@ -971,6 +1004,10 @@ function goToResults() {
             <p class="prompt-text">Round {{ societyGraphStore.currentRound }} / 活性化 {{ societyGraphStore.activationCompleted }}/{{ societyGraphStore.activationTotal }}</p>
             <p class="prompt-text">{{ stageLabel }}</p>
           </div>
+        </div>
+
+        <div v-if="activeSecondaryTab === 'debate'" class="panel-card">
+          <DebateCards />
         </div>
 
         <div v-if="activeSecondaryTab === 'activity'" class="panel-card">

@@ -6,6 +6,7 @@ from typing import Any
 from src.app.llm.multi_client import multi_llm_client
 from src.app.models.conversation_log import ConversationLog
 from src.app.services.conversation_log_store import persist_conversation_logs
+from src.app.services.theater_events import process_round_theater_events
 from src.app.services.society.activation_layer import _temperature_from_big_five
 from src.app.services.society.activation_prompts import SPEECH_STYLE_DIRECTIVES
 from src.app.sse.manager import sse_manager
@@ -882,6 +883,16 @@ async def run_meeting(
                         total_usage["total_tokens"] += u.get("total_tokens", 0)
             except Exception as e:
                 logger.warning("Direct exchanges failed, continuing: %s", e)
+
+        # Emit theater events (claim_made, stance_shifted, alliance_formed)
+        if simulation_id:
+            try:
+                prev_round = all_arguments[-1] if all_arguments else None
+                await process_round_theater_events(
+                    simulation_id, arguments, prev_round,
+                )
+            except Exception as e:
+                logger.warning("Theater events failed for round %d: %s", round_idx + 1, e)
 
         if simulation_id:
             await sse_manager.publish(simulation_id, "meeting_round_completed", {

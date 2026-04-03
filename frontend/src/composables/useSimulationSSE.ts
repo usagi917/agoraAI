@@ -7,10 +7,17 @@ import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
 import { useAgentVisualizationStore } from '../stores/agentVisualizationStore'
 import { useCognitiveSSE } from './useCognitiveSSE'
+import { useTheaterSSE } from './useTheaterSSE'
 
 function getSimulationStreamUrl(simulationId: string) {
   const base = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '')
   return `${base}/simulations/${simulationId}/stream`
+}
+
+function sendCompletionNotification() {
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    new Notification('分析完了', { body: 'シミュレーションが完了しました。結果を確認してください。' })
+  }
 }
 
 export function useSimulationSSE(simulationId: string) {
@@ -21,7 +28,11 @@ export function useSimulationSSE(simulationId: string) {
   const societyGraphStore = useSocietyGraphStore()
   const vizStore = useAgentVisualizationStore()
   const { handleCognitiveEvent } = useCognitiveSSE()
+  const { handleTheaterEvent } = useTheaterSSE()
   let source: EventSource | null = null
+  let reconnectAttempts = 0
+  const MAX_RECONNECTS = 3
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   function start() {
     const e2eEvents = (window as Window & {
@@ -133,6 +144,12 @@ export function useSimulationSSE(simulationId: string) {
       'conversation_turn_advanced',
       'conversation_concluded',
       'debate_result',
+      // Theater イベント
+      'claim_made',
+      'stance_shifted',
+      'alliance_formed',
+      'market_moved',
+      'decision_locked',
     ]
 
     for (const type of eventTypes) {
@@ -147,13 +164,24 @@ export function useSimulationSSE(simulationId: string) {
     }
 
     source.onerror = () => {
-      if (store.status !== 'completed' && store.status !== 'failed') {
-        store.setStatus('disconnected')
+      if (store.status === 'completed' || store.status === 'failed') return
+      store.setStatus('disconnected')
+      source?.close()
+      source = null
+
+      if (reconnectAttempts < MAX_RECONNECTS) {
+        const delay = Math.pow(2, reconnectAttempts) * 1000
+        reconnectAttempts++
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null
+          start()
+        }, delay)
       }
     }
   }
 
   function handleEvent(eventType: string, payload: Record<string, any>) {
+    reconnectAttempts = 0
     switch (eventType) {
       // === Meta Simulation イベント ===
       case 'meta_started':
@@ -659,12 +687,16 @@ export function useSimulationSSE(simulationId: string) {
         if (payload.aggregation?.stance_distribution) {
           store.setOpinionDistribution(payload.aggregation.stance_distribution)
         }
-        vizStore.addSystemEvent('✓', '活性化完了', `平均信頼度: ${(payload.aggregation?.average_confidence * 100)?.toFixed(1)}%`)
-        activity.addEntry('event', '◎', '活性化完了', {
-          detail: `平均信頼度: ${(payload.aggregation?.average_confidence * 100)?.toFixed(1)}%`,
-          track: 'phase',
-          status: 'completed',
-        })
+        {
+          const avgConf = payload.aggregation?.average_confidence
+          const avgConfStr = avgConf != null ? `${(avgConf * 100).toFixed(1)}%` : '?'
+          vizStore.addSystemEvent('✓', '活性化完了', `平均信頼度: ${avgConfStr}`)
+          activity.addEntry('event', '◎', '活性化完了', {
+            detail: `平均信頼度: ${avgConfStr}`,
+            track: 'phase',
+            status: 'completed',
+          })
+        }
         break
 
       case 'society_evaluation_completed':
@@ -815,6 +847,7 @@ export function useSimulationSSE(simulationId: string) {
         store.setPhase('completed')
         store.setReportReady(true)
         store.setReportError('')
+        sendCompletionNotification()
         close()
         break
 
@@ -824,10 +857,12 @@ export function useSimulationSSE(simulationId: string) {
         close()
         break
 
-      // === 認知シミュレーション イベント ===
+      // === Theater + 認知シミュレーション イベント ===
       default:
-        // 認知関連イベントは専用ハンドラーに委譲
-        handleCognitiveEvent(eventType, payload)
+        // Theater イベントを先に試行、該当しなければ認知ハンドラーに委譲
+        if (!handleTheaterEvent(eventType, payload)) {
+          handleCognitiveEvent(eventType, payload)
+        }
         if (eventType === 'graphrag_started') {
           store.setPhase('graphrag')
           activity.addEntry('phase', '◈', 'GraphRAG 構築開始', {
@@ -878,6 +913,10 @@ export function useSimulationSSE(simulationId: string) {
   }
 
   function close() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
     source?.close()
     source = null
   }

@@ -138,8 +138,20 @@ class TestGeneratePopulation:
         assert len(set(ids)) == 100
 
     @pytest.mark.asyncio
-    async def test_llm_backend_assignment(self):
+    async def test_llm_backend_assignment(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr(
+            type(settings),
+            "load_population_mix_config",
+            lambda self: {
+                "activation_layer": {
+                    "weights": {
+                        "openai": 0.5,
+                        "gemini": 0.5,
+                    }
+                }
+            },
+        )
         agents = await generate_population("pop", count=200, seed=42)
         backends = set(a["llm_backend"] for a in agents)
-        # Should assign at least 2 different backends
+        assert backends <= {"openai", "gemini"}
         assert len(backends) >= 2

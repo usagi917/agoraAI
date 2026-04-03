@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.database import async_session
 from src.app.models.project import Project
+from src.app.models.scenario_pair import ScenarioPair
 from src.app.models.simulation import Simulation, normalize_mode
 from src.app.services.baseline_orchestrator import run_baseline
 from src.app.services.unified_orchestrator import run_unified
@@ -36,6 +37,15 @@ async def dispatch_simulation(simulation_id: str) -> None:
             sim.status = "running"
             sim.started_at = datetime.now(timezone.utc)
             await session.commit()
+
+            # Decision Lab: scenario_pair_id があれば intervention_params を取得
+            if sim.scenario_pair_id:
+                pair = await session.get(ScenarioPair, sim.scenario_pair_id)
+                if pair and pair.intervention_params:
+                    meta = dict(sim.metadata_json) if sim.metadata_json else {}
+                    meta["intervention_params"] = pair.intervention_params
+                    sim.metadata_json = meta
+                    await session.commit()
 
             # プロジェクト確保（prompt_text のみの場合は自動生成）
             project_id = await _ensure_project(session, sim)
