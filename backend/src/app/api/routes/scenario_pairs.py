@@ -11,6 +11,7 @@ from src.app.models.population import Population
 from src.app.models.scenario_pair import ScenarioPair
 from src.app.services.audit_trail_service import get_audit_trail as get_audit_trail_events
 from src.app.services.population_snapshot_service import create_snapshot
+from src.app.services.scenario_comparison import build_scenario_comparison
 from src.app.services.scenario_pair_factory import create_scenario_pair
 
 logger = logging.getLogger(__name__)
@@ -122,20 +123,18 @@ async def get_scenario_comparison(
     scenario_pair_id: str,
     session: AsyncSession = Depends(get_session),
 ):
-    """Get the comparison Decision Brief.
-
-    This will eventually call scenario_comparison.build_scenario_comparison().
-    For now, return a placeholder structure.
-    """
+    """Get the comparison Decision Brief."""
     pair = await session.get(ScenarioPair, scenario_pair_id)
     if not pair:
         raise HTTPException(status_code=404, detail="ScenarioPair が見つかりません")
-    return {
-        "scenario_pair_id": pair.id,
-        "status": pair.status,
-        "comparison": None,
-        "message": "Comparison not yet implemented. Will be available once both simulations complete.",
-    }
+    if pair.status != "completed":
+        return {
+            "scenario_pair_id": pair.id,
+            "status": pair.status,
+            "comparison": None,
+            "message": "Both simulations must complete before comparison is available.",
+        }
+    return await build_scenario_comparison(session, scenario_pair_id)
 
 
 # ---------------------------------------------------------------------------

@@ -181,6 +181,7 @@ describe('LaunchPadPage', () => {
       population_id: 'pop-abc123',
       decision_context: '住宅補助金制度の導入',
       intervention_params: expect.objectContaining({ policy_type: '住宅補助金' }),
+      preset: 'standard',
     })
     expect(push).toHaveBeenCalledWith('/scenario/pair-42')
   })

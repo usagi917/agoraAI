@@ -28,6 +28,9 @@ class SSEEvent:
         return f"event: {self.event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+_SUBSCRIBE_TIMEOUT = 60 * 30  # 30 minutes max per subscription
+
+
 class SSEManager:
     def __init__(self):
         self._channels: dict[str, list[asyncio.Queue]] = {}
@@ -77,7 +80,11 @@ class SSEManager:
 
         try:
             while True:
-                event = await queue.get()
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=_SUBSCRIBE_TIMEOUT)
+                except asyncio.TimeoutError:
+                    logger.warning(f"SSE subscription timed out for run {run_id}")
+                    break
                 yield event.to_sse()
                 if event.event_type in (
                     "run_completed", "run_failed",

@@ -378,9 +378,11 @@ async def test_scenario_pair_with_intervention_params(db_session):
     assert baseline.seed == 7
     assert intervention.seed == 7
 
-    # Verify simulation prompts match the decision context
+    # Verify simulation prompts
     assert baseline.prompt_text == "Corporate tax reform impact analysis"
-    assert intervention.prompt_text == "Corporate tax reform impact analysis"
+    assert "Corporate tax reform impact analysis" in intervention.prompt_text
+    assert "【介入パラメータ】" in intervention.prompt_text
+    assert "tax_reform" in intervention.prompt_text
 
 
 # ---------------------------------------------------------------------------

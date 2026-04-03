@@ -1,5 +1,6 @@
 """Scenario Pair Factory: ベースライン vs 介入シミュレーションペアの作成"""
 
+import json
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,10 +61,15 @@ async def create_scenario_pair(
     )
     session.add(sim_baseline)
 
-    # 3. Intervention Simulation
+    # 3. Intervention Simulation — inject intervention_params into prompt
+    intervention_prompt = (
+        f"{decision_context}\n\n"
+        f"【介入パラメータ】\n"
+        f"{json.dumps(intervention_params, ensure_ascii=False, indent=2)}"
+    )
     sim_intervention = Simulation(
         mode=preset,
-        prompt_text=decision_context,
+        prompt_text=intervention_prompt,
         template_name="general",
         execution_profile="standard",
         population_id=population_id,

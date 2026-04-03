@@ -77,6 +77,7 @@ async function handleScenarioCompare() {
       population_id: scenarioPopulationId.value,
       decision_context: scenarioDecisionContext.value.trim(),
       intervention_params: parsedParams,
+      preset: scenarioPreset.value,
     })
     router.push(`/scenario/${pair.id}`)
   } catch {
