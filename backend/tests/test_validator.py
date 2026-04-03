@@ -1,6 +1,8 @@
 import pytest
+from pydantic import ValidationError
 
 from src.app.llm.validator import (
+    AgentPayloadModel,
     validate_agents,
     validate_pm_board_output,
     validate_round_result,
@@ -62,3 +64,25 @@ def test_validate_pm_board_output_requires_top_level_sections():
                 "overall_confidence": 0.6,
             }
         )
+
+
+# ---------------------------------------------------------------------------
+# AgentPayloadModel: source_entity_id + name max_length (spec F/G)
+# ---------------------------------------------------------------------------
+
+
+def test_agent_source_entity_id_preserved():
+    model = AgentPayloadModel.model_validate(
+        {"id": "a1", "name": "Alice", "source_entity_id": "uuid-abc-123"}
+    )
+    assert model.source_entity_id == "uuid-abc-123"
+
+
+def test_agent_source_entity_id_optional():
+    model = AgentPayloadModel.model_validate({"id": "a1", "name": "Alice"})
+    assert model.source_entity_id is None
+
+
+def test_agent_name_max_length():
+    with pytest.raises(ValidationError):
+        AgentPayloadModel.model_validate({"id": "a1", "name": "x" * 201})

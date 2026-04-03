@@ -25,6 +25,11 @@ const router = createRouter({
       component: () => import('./pages/PopulationPage.vue'),
     },
     {
+      path: '/compare',
+      name: 'compare-setup',
+      component: () => import('./pages/CompareSetupPage.vue'),
+    },
+    {
       path: '/scenario/:id',
       name: 'scenario-comparison',
       component: () => import('./pages/ScenarioComparisonPage.vue'),
