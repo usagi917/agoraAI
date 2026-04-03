@@ -52,6 +52,7 @@ class SingleRunSimulator:
         sse_channel: str | None = None,
         prompt_text: str = "",
         cognitive_mode: str = "legacy",
+        stakeholder_seeds=None,
     ) -> dict:
         """事前構築済みの world_state を使ってシミュレーションを実行する。
 
@@ -65,7 +66,11 @@ class SingleRunSimulator:
         if self.colony_config:
             agent_prompt = self._inject_perspective(agent_prompt)
 
-        agents = await generate_agents(session, run_id, world_state, agent_prompt, prompt_text=prompt_text)
+        agents = await generate_agents(
+            session, run_id, world_state, agent_prompt,
+            prompt_text=prompt_text,
+            stakeholder_seeds=stakeholder_seeds,
+        )
         await session.commit()
 
         await sse_manager.publish(channel, "agents_built", {
@@ -218,6 +223,7 @@ async def run_simulation(
             template_prompts = template.prompts if template else {}
 
             # 世界構築（initial_world_state が渡された場合はスキップ）
+            stakeholder_seeds = None
             if initial_world_state is not None:
                 world_state = initial_world_state
                 await sse_manager.publish(run_id, "world_initialized", {
@@ -257,6 +263,25 @@ async def run_simulation(
                 )
                 await session.commit()
 
+                # ステークホルダーシード（GraphRAG 有効 + 十分なエンティティがある場合のみ）
+                stakeholder_seeds = None
+                if graphrag_config.get("enabled", False) and knowledge_graph is not None:
+                    from src.app.services.graphrag.stakeholder_mapper import (
+                        MIN_STAKEHOLDER_COUNT,
+                        map_stakeholders,
+                    )
+                    try:
+                        seeds = map_stakeholders(knowledge_graph)
+                        if len(seeds) >= MIN_STAKEHOLDER_COUNT:
+                            stakeholder_seeds = seeds
+                        else:
+                            logger.info(
+                                "Insufficient stakeholder seeds (%d < %d), using generic agents",
+                                len(seeds), MIN_STAKEHOLDER_COUNT,
+                            )
+                    except Exception:
+                        logger.warning("map_stakeholders failed, falling back to generic agents")
+
             # 初期グラフ投影
             graph = project_graph(world_state)
             diff = compute_diff(None, graph)
@@ -284,6 +309,7 @@ async def run_simulation(
                 total_rounds=run.total_rounds,
                 prompt_text=prompt_text,
                 cognitive_mode=cognitive_mode,
+                stakeholder_seeds=stakeholder_seeds,
             )
 
             # レポート生成

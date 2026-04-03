@@ -83,8 +83,9 @@ class WorldBuildPayload(_StrictBaseModel):
 
 class AgentPayloadModel(_StrictBaseModel):
     id: str = Field(min_length=1)
-    name: str = Field(min_length=1)
+    name: str = Field(min_length=1, max_length=200)
     role: str | None = None
+    source_entity_id: str | None = None
     goals: list[Any] = Field(default_factory=list)
 
 
