@@ -135,23 +135,34 @@ async def _generate_from_seeds(
     if not isinstance(result, dict):
         raise ValueError(f"seeds エージェント生成の LLM 応答が JSON ではありませんでした: {str(result)[:100]}")
 
-    # source_entity_id でフィルタリング
+    # source_entity_id でフィルタリングし、seed と 1:1 対応しているか検証する。
     seed_ids = {s.entity_id for s in seeds}
+    seen_seed_ids: set[str] = set()
     valid_agents = []
     for agent in result.get("agents", []):
         sid = agent.get(SOURCE_ENTITY_ID_FIELD)
-        if sid in seed_ids:
-            valid_agents.append(agent)
-        else:
+        if sid not in seed_ids:
             logger.warning(
                 "Agent '%s' has unknown %s '%s', excluding",
                 agent.get("name"), SOURCE_ENTITY_ID_FIELD, sid,
             )
+            continue
 
-    if not valid_agents:
+        if sid in seen_seed_ids:
+            logger.warning(
+                "Agent '%s' reuses %s '%s', falling back to generic generation",
+                agent.get("name"), SOURCE_ENTITY_ID_FIELD, sid,
+            )
+            return await _generate_generic(session, run_id, world_state, template_prompt, prompt_text)
+
+        seen_seed_ids.add(sid)
+        valid_agents.append(agent)
+
+    missing_seed_ids = seed_ids - seen_seed_ids
+    if missing_seed_ids:
         logger.warning(
-            "All %d seeded agents excluded (UUID mismatch), falling back to generic generation",
-            len(result.get("agents", [])),
+            "Seeded agent output missing %d/%d source entities, falling back to generic generation",
+            len(missing_seed_ids), len(seeds),
         )
         return await _generate_generic(session, run_id, world_state, template_prompt, prompt_text)
 

@@ -85,6 +85,9 @@ def map_stakeholders(
         selected.append(sorted_bucket[0])
         remainder.extend(sorted_bucket[1:])
 
+    # コミュニティ代表も次数順に並べ直し、切り詰め時の順序依存を避ける。
+    selected.sort(key=_sort_key)
+
     # 残りを次数降順・名前昇順で補充
     remainder.sort(key=_sort_key)
     combined = (selected + remainder)[:max_count]

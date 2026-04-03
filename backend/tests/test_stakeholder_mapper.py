@@ -84,6 +84,32 @@ def test_map_community_diversity():
     assert len(seeds) == 2
 
 
+def test_map_selected_communities_ranked_before_truncation():
+    entities = [
+        _entity("A0", community_label="community_0"),
+        _entity("A1", community_label="community_0"),
+        _entity("B0", community_label="community_1"),
+        _entity("B1", community_label="community_1"),
+        _entity("C0", community_label="community_2"),
+        _entity("C1", community_label="community_2"),
+        _entity("L0", type_="location", community_label="locations"),
+        _entity("L1", type_="location", community_label="locations"),
+        _entity("L2", type_="location", community_label="locations"),
+    ]
+    relations = [
+        _rel("A0", "L0"),
+        _rel("B0", "L0"),
+        _rel("B0", "L1"),
+        _rel("C0", "L0"),
+        _rel("C0", "L1"),
+        _rel("C0", "L2"),
+    ]
+
+    seeds = map_stakeholders(_kg(entities=entities, relations=relations), max_count=2)
+
+    assert [s.name for s in seeds] == ["C0", "B0"]
+
+
 def test_map_description_truncated():
     entity = _entity("Tanaka", description="x" * 1000)
     seeds = map_stakeholders(_kg(entities=[entity]))

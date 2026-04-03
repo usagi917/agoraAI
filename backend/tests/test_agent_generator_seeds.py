@@ -155,6 +155,48 @@ async def test_all_excluded_fallback(mock_session):
 
 
 @pytest.mark.asyncio
+async def test_duplicate_or_missing_seed_bindings_fallback(mock_session):
+    seeds = [_seed(f"p{i}") for i in range(3)]
+    bad_payload = {"agents": [
+        _agent(seeds[0]),
+        {
+            "id": str(uuid.uuid4()),
+            "name": "duplicate",
+            "role": "stakeholder",
+            "source_entity_id": seeds[0].entity_id,
+            "goals": [],
+        },
+        _agent(seeds[1]),
+    ]}
+    generic_payload = {"agents": [
+        {"id": str(uuid.uuid4()), "name": "generic", "role": "r", "goals": []},
+    ]}
+
+    call_count = 0
+
+    async def side_effect(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return make_llm_response(bad_payload if call_count == 1 else generic_payload)
+
+    with patch(
+        "src.app.services.agent_generator.llm_client.call_with_retry",
+        new=side_effect,
+    ), patch(
+        "src.app.services.agent_generator.record_usage",
+        new=AsyncMock(),
+    ):
+        result = await generate_agents(
+            mock_session, "run-1",
+            {"entities": [], "relations": [], "world_summary": ""},
+            "template", stakeholder_seeds=seeds,
+        )
+
+    assert call_count == 2
+    assert result["agents"][0]["name"] == "generic"
+
+
+@pytest.mark.asyncio
 async def test_more_than_seeds(mock_session):
     seeds = [_seed(f"p{i}") for i in range(8)]
     valid_agents = [_agent(s) for s in seeds]
