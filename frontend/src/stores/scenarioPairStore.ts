@@ -49,6 +49,7 @@ export const useScenarioPairStore = defineStore('scenarioPair', () => {
     population_id: string
     decision_context: string
     intervention_params: Record<string, unknown>
+    preset?: string
   }) {
     isLoading.value = true
     error.value = null

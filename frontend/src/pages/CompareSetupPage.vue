@@ -64,6 +64,7 @@ async function handleSubmit() {
       population_id: selectedPopulationId.value,
       decision_context: decisionContext.value.trim(),
       intervention_params: interventionParams,
+      preset: selectedPreset.value,
     })
     router.push(`/scenario/${pair.id}`)
   } catch {
@@ -83,7 +84,7 @@ async function handleSubmit() {
 
     <div v-if="loadError" class="notice error">{{ loadError }}</div>
 
-    <div v-if="populations.length === 0 && !loadError" class="notice info">
+    <div v-else-if="populations.length === 0" class="notice info">
       <p>母集団がありません。先に母集団を作成してください。</p>
       <router-link to="/populations" class="btn btn-primary notice-btn">母集団を作成 →</router-link>
     </div>

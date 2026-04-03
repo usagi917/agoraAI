@@ -89,6 +89,16 @@ describe('CompareSetupPage', () => {
     expect(wrapper.find('[data-testid="compare-submit-button"]').exists()).toBe(false)
   })
 
+  it('hides the form when population loading fails', async () => {
+    apiMocks.listPopulations.mockRejectedValue(new Error('load failed'))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('母集団の取得に失敗しました')
+    expect(wrapper.find('[data-testid="compare-submit-button"]').exists()).toBe(false)
+    expect(wrapper.find('form').exists()).toBe(false)
+  })
+
   it('shows a validation error when decision context is empty', async () => {
     const wrapper = mountPage()
     await flushPromises()
@@ -106,6 +116,7 @@ describe('CompareSetupPage', () => {
     const wrapper = mountPage()
     await flushPromises()
 
+    await wrapper.get('[data-testid="compare-preset-deep"]').trigger('click')
     await wrapper.get('[data-testid="compare-decision-context"]').setValue('住宅補助金制度の導入')
     await wrapper.get('[data-testid="compare-policy-type"]').setValue('住宅補助金')
     await wrapper.get('[data-testid="compare-amount"]').setValue('月3万円')
@@ -124,6 +135,7 @@ describe('CompareSetupPage', () => {
         target_population: '年収400万円以下',
         duration: '12ヶ月',
       },
+      preset: 'deep',
     })
     expect(push).toHaveBeenCalledWith('/scenario/pair-99')
   })

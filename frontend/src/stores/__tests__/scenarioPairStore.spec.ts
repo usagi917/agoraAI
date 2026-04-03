@@ -118,10 +118,17 @@ describe('scenarioPairStore', () => {
       population_id: 'pop-1',
       decision_context: 'test context',
       intervention_params: { policy: 'new-tax' },
+      preset: 'research',
     })
 
     expect(result).toEqual(MOCK_PAIR)
     expect(store.currentPair).toEqual(MOCK_PAIR)
+    expect(mockApi.post).toHaveBeenCalledWith('/scenario-pairs', {
+      population_id: 'pop-1',
+      decision_context: 'test context',
+      intervention_params: { policy: 'new-tax' },
+      preset: 'research',
+    })
   })
 
   it('isCompleted computed returns true when status is completed', async () => {
