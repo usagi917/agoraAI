@@ -28,6 +28,7 @@ class AnthropicAdapter(LLMAdapter):
         temperature: float = 0.5,
         max_tokens: int = 1024,
         seed: int | None = None,
+        response_format: dict | None = None,
     ) -> tuple[str, dict]:
         url = f"{self.api_base}/v1/messages"
 

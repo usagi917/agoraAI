@@ -78,7 +78,7 @@ class TestMultiLLMClientSeed:
         await client.call("test", "sys", "user", seed=42)
 
         mock_adapter.call.assert_called_once_with(
-            "sys", "user", 0.5, 1024, seed=42,
+            "sys", "user", 0.5, 1024, seed=42, response_format=None,
         )
 
     @pytest.mark.asyncio
@@ -100,7 +100,7 @@ class TestMultiLLMClientSeed:
         await client.call("test", "sys", "user")
 
         mock_adapter.call.assert_called_once_with(
-            "sys", "user", 0.5, 1024, seed=None,
+            "sys", "user", 0.5, 1024, seed=None, response_format=None,
         )
 
 

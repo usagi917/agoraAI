@@ -12,7 +12,7 @@ cognitive:
   bdi:
     max_intentions: 3
     commitment_decay: 0.1
-    belief_update_threshold: 0.3
+    belief_update_threshold: 0.5
   perception:
     visibility_radius: 0.7
     noise_level: 0.1
@@ -42,7 +42,7 @@ scheduling:
 communication:
   max_messages_per_agent_per_round: 5
   max_conversation_turns: 8
-  batch_response_size: 5
+  batch_response_size: 3
   relevance_threshold: 0.3
   enable_structured_debate: true
 

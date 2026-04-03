@@ -351,19 +351,23 @@ async def run_activation(
 
     # プロンプト構築
     calls = []
-    for agent in agents:
+    for idx, agent in enumerate(agents):
         system_prompt, user_prompt = build_activation_prompt(
             agent, theme, grounding_facts=agent.get("grounding_facts")
         )
         agent_temperature = _temperature_from_big_five(
             agent.get("big_five", {}), base_temperature=temperature,
         )
+        # エージェント別seedで応答多様性を確保
+        agent_seed = hash(agent.get("id", idx)) % (2**31)
         calls.append({
             "provider": agent.get("llm_backend", "openai"),
             "system_prompt": system_prompt,
             "user_prompt": user_prompt,
             "temperature": agent_temperature,
             "max_tokens": max_tokens,
+            "seed": agent_seed,
+            "response_format": {"type": "json_object"},
         })
 
     # バッチ呼び出し

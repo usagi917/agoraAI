@@ -4,7 +4,7 @@
 providers:
   openai:
     type: openai
-    model: gpt-5-nano-2025-08-07
+    model: gpt-5.4-nano
     api_base: https://api.openai.com/v1
     env_key: OPENAI_API_KEY
     cost_per_1k_input: 0.00015

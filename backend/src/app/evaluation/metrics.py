@@ -1,6 +1,7 @@
 """具象メトリクス: 既存 evaluation.py のロジックを BaseMetric パターンに昇格"""
 
 import math
+import re
 from collections import Counter
 from typing import Any
 
@@ -162,5 +163,162 @@ class CoverageMetric(BaseMetric):
                 "observed_stances": sorted(observed),
                 "covered_count": len(covered),
                 "total_categories": len(STANDARD_STANCES),
+            },
+        }
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 追加メトリクス
+# ---------------------------------------------------------------------------
+
+# 日本語トークン分割: 句読点・助詞・スペースで分割し、意味のある単位を抽出
+_JP_TOKEN_PATTERN = re.compile(
+    r"[一-龥ぁ-んァ-ヴー\w]+"
+)
+
+
+class ResponseDepthMetric(BaseMetric):
+    """活性化レスポンスの reason + personal_story 平均文字数を測定する。
+
+    目標: 平均 250 文字以上で score=1.0。0 文字で 0.0。線形補間。
+    """
+
+    name = "response_depth"
+    description = "活性化レスポンスの理由説明の深さ（平均文字数）"
+
+    TARGET_CHARS = 250
+
+    def compute(self, **kwargs: Any) -> dict:
+        responses = kwargs.get("responses", [])
+        if not responses:
+            return {"score": 0.0, "details": {"method": "avg_reason_length", "avg_chars": 0}}
+
+        total_chars = 0
+        valid_count = 0
+        for r in responses:
+            if r.get("_failed"):
+                continue
+            reason = r.get("reason", "")
+            personal_story = r.get("personal_story", "")
+            total_chars += len(reason) + len(personal_story)
+            valid_count += 1
+
+        if valid_count == 0:
+            return {"score": 0.0, "details": {"method": "avg_reason_length", "avg_chars": 0}}
+
+        avg_chars = total_chars / valid_count
+        score = min(1.0, avg_chars / self.TARGET_CHARS)
+
+        return {
+            "score": round(score, 4),
+            "details": {
+                "method": "avg_reason_length",
+                "avg_chars": round(avg_chars, 1),
+                "target_chars": self.TARGET_CHARS,
+                "valid_responses": valid_count,
+            },
+        }
+
+
+class MeetingPolarizationMetric(BaseMetric):
+    """Meeting 各ラウンドのスタンス多様性を測定する。
+
+    各ラウンドのユニークな position 数をカウントし、最終ラウンドでも
+    分極が維持されているかを評価する。
+    目標: 最終ラウンドでも少なくとも 2 つ以上のユニークな立場が残る。
+    score = 最終ラウンドのユニーク立場数 / 参加者数（上限1.0）。
+    """
+
+    name = "meeting_polarization"
+    description = "Meeting 最終ラウンドのスタンス多様性維持度"
+
+    # 最終ラウンドでこれ以上のユニーク立場比率なら score=1.0
+    TARGET_DIVERSITY_RATIO = 0.4
+
+    def compute(self, **kwargs: Any) -> dict:
+        meeting_rounds: list[list[dict]] = kwargs.get("meeting_rounds", [])
+        if not meeting_rounds:
+            return {"score": 0.0, "details": {"method": "round_stance_diversity", "rounds": 0}}
+
+        round_stats = []
+        for round_idx, arguments in enumerate(meeting_rounds):
+            positions = [
+                self._normalize_position(a.get("position", ""))
+                for a in arguments
+                if a.get("position")
+            ]
+            unique = len(set(positions))
+            total = len(positions)
+            round_stats.append({
+                "round": round_idx + 1,
+                "unique_positions": unique,
+                "total_arguments": total,
+            })
+
+        # 最終ラウンドのスタンス多様性で評価
+        last = round_stats[-1]
+        if last["total_arguments"] == 0:
+            score = 0.0
+        else:
+            ratio = last["unique_positions"] / last["total_arguments"]
+            score = min(1.0, ratio / self.TARGET_DIVERSITY_RATIO)
+
+        return {
+            "score": round(score, 4),
+            "details": {
+                "method": "round_stance_diversity",
+                "rounds": len(meeting_rounds),
+                "round_stats": round_stats,
+                "target_diversity_ratio": self.TARGET_DIVERSITY_RATIO,
+            },
+        }
+
+    @staticmethod
+    def _normalize_position(pos: str) -> str:
+        """立場表現を正規化して比較可能にする。"""
+        pos = pos.strip()
+        for label in ("条件付き賛成", "条件付き反対", "賛成", "反対", "中立"):
+            if label in pos:
+                return label
+        return pos[:20]
+
+
+class LexicalDiversityMetric(BaseMetric):
+    """全エージェント応答の語彙多様性を Type-Token Ratio (TTR) で測定する。
+
+    各エージェントの reason テキストを結合し、全体の TTR を計算する。
+    score = TTR（0.0〜1.0）。高いほど語彙が豊富で、エージェント間の
+    表現の画一化が少ない。
+    """
+
+    name = "lexical_diversity"
+    description = "全エージェント応答の語彙多様性 (Type-Token Ratio)"
+
+    def compute(self, **kwargs: Any) -> dict:
+        responses = kwargs.get("responses", [])
+        if not responses:
+            return {"score": 0.0, "details": {"method": "type_token_ratio", "types": 0, "tokens": 0}}
+
+        all_tokens: list[str] = []
+        for r in responses:
+            if r.get("_failed"):
+                continue
+            text = r.get("reason", "") + " " + r.get("personal_story", "")
+            tokens = _JP_TOKEN_PATTERN.findall(text)
+            all_tokens.extend(tokens)
+
+        if not all_tokens:
+            return {"score": 0.0, "details": {"method": "type_token_ratio", "types": 0, "tokens": 0}}
+
+        types = len(set(all_tokens))
+        tokens_count = len(all_tokens)
+        ttr = types / tokens_count
+
+        return {
+            "score": round(ttr, 4),
+            "details": {
+                "method": "type_token_ratio",
+                "types": types,
+                "tokens": tokens_count,
             },
         }
