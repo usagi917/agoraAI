@@ -16,8 +16,11 @@
           <router-link to="/" class="nav-link" active-class="active">
             シミュレーション
           </router-link>
+          <router-link to="/compare" class="nav-link" active-class="active">
+            比較
+          </router-link>
           <router-link to="/populations" class="nav-link" active-class="active">
-            人口管理
+            母集団
           </router-link>
         </nav>
       </div>

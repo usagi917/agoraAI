@@ -33,6 +33,28 @@ describe('layoutRules', () => {
       })).toBe('scenarios')
     })
 
+    it('prefers decision_brief over scenarios for unified mode', () => {
+      expect(getResultsPrimaryView({
+        mode: 'unified',
+        hasScenarios: true,
+        hasDecisionBrief: true,
+        hasPmBoard: true,
+        hasSociety: true,
+        hasEvidence: true,
+      })).toBe('decision_brief')
+    })
+
+    it('falls back to scenarios for unified mode when no decision brief', () => {
+      expect(getResultsPrimaryView({
+        mode: 'unified',
+        hasScenarios: true,
+        hasDecisionBrief: false,
+        hasPmBoard: false,
+        hasSociety: true,
+        hasEvidence: false,
+      })).toBe('scenarios')
+    })
+
     it('keeps pm_board details as primary when available', () => {
       expect(getResultsPrimaryView({
         mode: 'pm_board',

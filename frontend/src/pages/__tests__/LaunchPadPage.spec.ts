@@ -9,15 +9,9 @@ const apiMocks = vi.hoisted(() => ({
   getHealth: vi.fn(),
   getTemplates: vi.fn(),
   listSimulations: vi.fn(),
-  listPopulations: vi.fn(),
   createProject: vi.fn(),
   uploadDocument: vi.fn(),
   createSimulation: vi.fn(),
-}))
-
-const scenarioPairMocks = vi.hoisted(() => ({
-  createScenarioPair: vi.fn(),
-  error: null as string | null,
 }))
 
 vi.mock('vue-router', () => ({
@@ -26,15 +20,9 @@ vi.mock('vue-router', () => ({
 
 vi.mock('../../api/client', () => apiMocks)
 
-vi.mock('../../stores/scenarioPairStore', () => ({
-  useScenarioPairStore: () => scenarioPairMocks,
-}))
-
 describe('LaunchPadPage', () => {
   beforeEach(() => {
     push.mockReset()
-    scenarioPairMocks.createScenarioPair.mockReset()
-    scenarioPairMocks.error = null
     apiMocks.getHealth.mockResolvedValue({
       status: 'ok',
       version: '1.0.0',
@@ -52,9 +40,6 @@ describe('LaunchPadPage', () => {
       },
     ])
     apiMocks.listSimulations.mockResolvedValue([])
-    apiMocks.listPopulations.mockResolvedValue([
-      { id: 'pop-abc123', agent_count: 1000, status: 'ready' },
-    ])
     apiMocks.createProject.mockResolvedValue({ id: 'project-1' })
     apiMocks.uploadDocument.mockResolvedValue({})
     apiMocks.createSimulation.mockResolvedValue({ id: 'sim-1' })
@@ -148,40 +133,12 @@ describe('LaunchPadPage', () => {
     expect(standardCard.classes()).toContain('recommended')
   })
 
-  it('renders scenario comparison section with heading and button', async () => {
+  it('does not render scenario comparison section on the launchpad', async () => {
     const wrapper = mount(LaunchPadPage, {
       global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
     })
     await flushPromises()
 
-    const section = wrapper.get('[data-testid="scenario-comparison-section"]')
-    expect(section.text()).toContain('シナリオ比較')
-    expect(section.text()).toContain('ベースラインと政策介入を比較し、影響を可視化します')
-
-    const button = wrapper.get('[data-testid="scenario-compare-button"]')
-    expect(button.text()).toContain('シナリオ比較を開始')
-  })
-
-  it('calls createScenarioPair and navigates on scenario compare button click', async () => {
-    scenarioPairMocks.createScenarioPair.mockResolvedValue({ id: 'pair-42' })
-
-    const wrapper = mount(LaunchPadPage, {
-      global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
-    })
-    await flushPromises()
-
-    // Fill in the decision context
-    await wrapper.get('[data-testid="scenario-decision-context"]').setValue('住宅補助金制度の導入')
-
-    // Click the compare button
-    await wrapper.get('[data-testid="scenario-compare-button"]').trigger('click')
-    await flushPromises()
-
-    expect(scenarioPairMocks.createScenarioPair).toHaveBeenCalledWith({
-      population_id: 'pop-abc123',
-      decision_context: '住宅補助金制度の導入',
-      intervention_params: expect.objectContaining({ policy_type: '住宅補助金' }),
-    })
-    expect(push).toHaveBeenCalledWith('/scenario/pair-42')
+    expect(wrapper.find('[data-testid="scenario-comparison-section"]').exists()).toBe(false)
   })
 })

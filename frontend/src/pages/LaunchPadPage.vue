@@ -5,7 +5,6 @@ import {
   getHealth,
   getTemplates,
   listSimulations,
-  listPopulations,
   createProject,
   uploadDocument,
   createSimulation,
@@ -13,11 +12,9 @@ import {
   type TemplateResponse,
   type SimulationListItem,
 } from '../api/client'
-import { useScenarioPairStore } from '../stores/scenarioPairStore'
 import InputPanel from '../components/InputPanel.vue'
 
 const router = useRouter()
-const scenarioPairStore = useScenarioPairStore()
 
 const templates = ref<TemplateResponse[]>([])
 const selectedTemplate = ref('')
@@ -29,7 +26,6 @@ const presets = [
   { id: 'standard', label: 'Standard', desc: '社会反応 → 評議会 → レポート', time: '約3分', phases: 3 },
   { id: 'deep', label: 'Deep', desc: '全フェーズ投入・最高品質', time: '約8分', phases: 5 },
   { id: 'research', label: 'Research', desc: 'イシュー深掘り＋介入テスト', time: '約10分', phases: 5 },
-  { id: 'baseline', label: 'Baseline', desc: '単一LLM・学術比較用', time: '約30秒', phases: 1 },
 ]
 const promptText = ref('')
 const files = ref<File[]>([])
@@ -38,53 +34,6 @@ const recentSimulations = ref<SimulationListItem[]>([])
 const runtimeHealth = ref<HealthResponse | null>(null)
 const bootstrapError = ref('')
 // advanced options removed for simplicity
-
-// Scenario Comparison state
-const scenarioDecisionContext = ref('')
-const scenarioInterventionParams = ref(
-  JSON.stringify(
-    { policy_type: '住宅補助金', amount: '月3万円', target_population: '年収400万円以下', duration: '12ヶ月' },
-    null,
-    2,
-  ),
-)
-const scenarioPreset = ref('standard')
-const scenarioPopulationId = ref('')
-const scenarioIsLoading = ref(false)
-const scenarioError = ref('')
-const availablePopulations = ref<Array<{ id: string; agent_count: number; status: string }>>([])
-
-async function handleScenarioCompare() {
-  scenarioError.value = ''
-  if (!scenarioDecisionContext.value.trim()) {
-    scenarioError.value = '政策の説明を入力してください'
-    return
-  }
-  let parsedParams: Record<string, unknown>
-  try {
-    parsedParams = JSON.parse(scenarioInterventionParams.value)
-  } catch {
-    scenarioError.value = '介入パラメータのJSON形式が正しくありません'
-    return
-  }
-  if (!scenarioPopulationId.value) {
-    scenarioError.value = '母集団を選択してください'
-    return
-  }
-  scenarioIsLoading.value = true
-  try {
-    const pair = await scenarioPairStore.createScenarioPair({
-      population_id: scenarioPopulationId.value,
-      decision_context: scenarioDecisionContext.value.trim(),
-      intervention_params: parsedParams,
-    })
-    router.push(`/scenario/${pair.id}`)
-  } catch {
-    scenarioError.value = scenarioPairStore.error || 'シナリオ比較の作成に失敗しました'
-  } finally {
-    scenarioIsLoading.value = false
-  }
-}
 
 // Question Wizard state
 const questionTemplates = [
@@ -219,16 +168,6 @@ onMounted(async () => {
     console.error('Bootstrap error:', error)
     bootstrapError.value = 'バックエンドへの接続に失敗しました。コンテナ起動直後は数秒待って再読み込みしてください。'
   }
-  // Load populations for scenario comparison (non-blocking)
-  try {
-    const pops = await listPopulations()
-    availablePopulations.value = pops
-    if (pops.length > 0) {
-      scenarioPopulationId.value = pops[0].id
-    }
-  } catch {
-    // Populations may not be available yet — not critical
-  }
 })
 
 async function handleLaunch() {
@@ -269,6 +208,15 @@ async function handleLaunch() {
   } finally {
     isLoading.value = false
   }
+}
+
+function getTemplateName(templateName: string | null | undefined): string {
+  const map: Record<string, string> = {
+    market_entry: '市場参入分析',
+    policy_impact: '政策影響分析',
+    scenario_exploration: 'シナリオ探索',
+  }
+  return templateName ? (map[templateName] ?? templateName) : 'カスタム分析'
 }
 
 function getStatusColor(status: string) {
@@ -431,86 +379,6 @@ function getPipelineStageLabel(stage: string) {
       </div>
     </details>
 
-    <!-- Scenario Comparison -->
-    <section class="section scenario-section" data-testid="scenario-comparison-section">
-      <div class="scenario-header">
-        <span class="scenario-accent-bar" />
-        <div>
-          <h3 class="scenario-title">シナリオ比較</h3>
-          <p class="scenario-desc">ベースラインと政策介入を比較し、影響を可視化します</p>
-        </div>
-      </div>
-
-      <div class="scenario-form">
-        <div class="scenario-field">
-          <label class="wizard-label" for="scenario-decision-context">政策の説明</label>
-          <input
-            id="scenario-decision-context"
-            v-model="scenarioDecisionContext"
-            class="wizard-input"
-            type="text"
-            placeholder="例: 住宅補助金制度の導入"
-            data-testid="scenario-decision-context"
-          />
-        </div>
-
-        <div class="scenario-field">
-          <label class="wizard-label" for="scenario-intervention-params">介入パラメータ (JSON)</label>
-          <textarea
-            id="scenario-intervention-params"
-            v-model="scenarioInterventionParams"
-            class="prompt-textarea scenario-textarea"
-            rows="5"
-            data-testid="scenario-intervention-params"
-          />
-        </div>
-
-        <div class="scenario-field" v-if="availablePopulations.length > 0">
-          <label class="wizard-label" for="scenario-population">母集団</label>
-          <select
-            id="scenario-population"
-            v-model="scenarioPopulationId"
-            class="wizard-input scenario-select"
-            data-testid="scenario-population"
-          >
-            <option v-for="pop in availablePopulations" :key="pop.id" :value="pop.id">
-              {{ pop.id.slice(0, 8) }}... ({{ pop.agent_count }}人)
-            </option>
-          </select>
-        </div>
-        <p v-else class="scenario-no-pop">母集団がありません。<router-link to="/populations">母集団を作成</router-link>してください。</p>
-
-        <div class="scenario-field">
-          <label class="wizard-label">分析モード</label>
-          <div class="preset-cards">
-            <button
-              v-for="p in presets"
-              :key="p.id"
-              class="preset-card"
-              :class="{ selected: scenarioPreset === p.id }"
-              @click="scenarioPreset = p.id"
-            >
-              <span class="preset-label">{{ p.label }}</span>
-              <span class="preset-desc">{{ p.desc }}</span>
-            </button>
-          </div>
-        </div>
-
-        <p v-if="scenarioError" class="scenario-error" data-testid="scenario-error">{{ scenarioError }}</p>
-
-        <button
-          class="btn btn-primary launch-button scenario-launch-btn"
-          :class="{ loading: scenarioIsLoading }"
-          :disabled="scenarioIsLoading"
-          data-testid="scenario-compare-button"
-          @click="handleScenarioCompare"
-        >
-          <span v-if="scenarioIsLoading" class="spinner"></span>
-          {{ scenarioIsLoading ? '作成中...' : 'シナリオ比較を開始' }}
-        </button>
-      </div>
-    </section>
-
     <!-- History -->
     <section class="section">
       <div class="section-header">
@@ -532,7 +400,7 @@ function getPipelineStageLabel(stage: string) {
             <span class="status-dot" :class="getStatusColor(sim.status)"></span>
             <div class="history-info">
               <span class="history-template">
-                {{ sim.template_name || 'プロンプト実行' }}
+                {{ getTemplateName(sim.template_name) }}
               </span>
               <span class="history-meta">
                 {{ sim.execution_profile }}
@@ -657,14 +525,14 @@ function getPipelineStageLabel(stage: string) {
 }
 
 .runtime-copy {
-  font-size: 0.84rem;
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   line-height: 1.6;
 }
 
 .runtime-hint {
   margin-top: 0.6rem;
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: 1.6;
 }
@@ -680,12 +548,12 @@ function getPipelineStageLabel(stage: string) {
 .section-title { font-size: 0.9rem; font-weight: 600; letter-spacing: -0.01em; }
 .section-badge { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); background: rgba(255,255,255,0.04); padding: 0.15rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); }
 .section-note { margin-top: 0.75rem; font-size: 0.78rem; color: var(--text-muted); line-height: 1.6; }
-.section-note-warning { color: #f59e0b; }
+.section-note-warning { color: var(--warning); }
 .section-toggle { margin-left: auto; font-size: 0.78rem; }
 
 .default-flow-card {
-  background: linear-gradient(135deg, rgba(99,102,241,0.12), rgba(16,185,129,0.08));
-  border: 1px solid rgba(99,102,241,0.24);
+  background: linear-gradient(135deg, var(--accent-subtle), rgba(16,185,129,0.08));
+  border: 1px solid var(--border-active);
   border-radius: var(--radius);
   padding: var(--panel-padding);
   display: flex;
@@ -728,9 +596,9 @@ function getPipelineStageLabel(stage: string) {
 
 /* === Unified Input Section === */
 .input-section {
-  background: linear-gradient(170deg, rgba(99, 102, 241, 0.04) 0%, var(--bg-card) 40%);
-  border: 1px solid rgba(99, 102, 241, 0.12);
-  border-radius: 14px;
+  background: linear-gradient(170deg, var(--accent-subtle) 0%, var(--bg-card) 40%);
+  border: 1px solid var(--border-active);
+  border-radius: var(--radius-lg);
   padding: 1.75rem 1.5rem;
   position: relative;
 }
@@ -740,8 +608,8 @@ function getPipelineStageLabel(stage: string) {
   position: absolute;
   top: 0; left: 0; right: 0;
   height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.5), rgba(139, 92, 246, 0.5), transparent);
-  border-radius: 14px 14px 0 0;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--highlight), transparent);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 .input-section-title {
@@ -798,10 +666,10 @@ function getPipelineStageLabel(stage: string) {
 /* Wizard Inline */
 .wizard-inline {
   margin-top: 1rem;
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  border: 1px solid var(--border-active);
   border-radius: var(--radius);
   padding: 1rem;
-  background: rgba(99, 102, 241, 0.03);
+  background: var(--accent-subtle);
 }
 
 .wizard-inline-header {
@@ -814,7 +682,7 @@ function getPipelineStageLabel(stage: string) {
 .wizard-inline-title {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--accent, #6366f1);
+  color: var(--accent);
 }
 
 .wizard-clear-btn {
@@ -869,8 +737,8 @@ function getPipelineStageLabel(stage: string) {
 
 .prompt-textarea:focus {
   outline: none;
-  border-color: var(--accent, #6366f1);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
 }
 
 .prompt-textarea::placeholder { color: var(--text-muted); }
@@ -924,15 +792,15 @@ function getPipelineStageLabel(stage: string) {
   border-color: var(--text-muted, #71717a);
 }
 .preset-card.selected {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 1px #6366f1, 0 2px 8px rgba(99, 102, 241, 0.2);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 2px 8px var(--accent-glow);
 }
 .preset-label {
   font-weight: 700;
   font-size: 0.85rem;
   color: var(--text-primary, #fafafa);
 }
-.preset-card.selected .preset-label { color: #a5b4fc; }
+.preset-card.selected .preset-label { color: var(--accent-hover); }
 .preset-desc {
   font-size: 0.65rem;
   color: var(--text-muted, #a1a1aa);
@@ -945,8 +813,8 @@ function getPipelineStageLabel(stage: string) {
 }
 
 .preset-card.recommended {
-  border-color: rgba(99, 102, 241, 0.3);
-  background: rgba(99, 102, 241, 0.06);
+  border-color: var(--border-active);
+  background: var(--accent-subtle);
   position: relative;
 }
 
@@ -954,9 +822,9 @@ function getPipelineStageLabel(stage: string) {
   font-family: var(--font-mono);
   font-size: 0.58rem;
   font-weight: 700;
-  color: #a5b4fc;
-  background: rgba(99, 102, 241, 0.18);
-  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: var(--accent-hover);
+  background: var(--accent-subtle);
+  border: 1px solid var(--border-active);
   border-radius: 999px;
   padding: 0.08rem 0.45rem;
   letter-spacing: 0.04em;
@@ -970,9 +838,9 @@ function getPipelineStageLabel(stage: string) {
   padding: 0.9rem 1.5rem;
   font-size: 1rem;
   font-weight: 700;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  background: linear-gradient(135deg, var(--accent), var(--highlight));
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   color: #fff;
   cursor: pointer;
   transition: box-shadow 0.3s, transform 0.15s;
@@ -980,7 +848,7 @@ function getPipelineStageLabel(stage: string) {
 }
 
 .launch-button:hover:not(:disabled) {
-  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4), 0 0 40px rgba(139, 92, 246, 0.15);
+  box-shadow: 0 4px 20px var(--accent-glow), 0 0 40px var(--highlight-glow);
   transform: translateY(-1px);
 }
 
@@ -1001,8 +869,8 @@ function getPipelineStageLabel(stage: string) {
 .wizard-form {
   margin-top: 1rem;
   padding: var(--panel-padding);
-  background: linear-gradient(135deg, rgba(99,102,241,0.08), rgba(16,185,129,0.05));
-  border: 1px solid rgba(99,102,241,0.18);
+  background: linear-gradient(135deg, var(--accent-subtle), rgba(16,185,129,0.05));
+  border: 1px solid var(--border-active);
   border-radius: var(--radius);
 }
 
@@ -1231,90 +1099,4 @@ function getPipelineStageLabel(stage: string) {
   }
 }
 
-/* === Scenario Comparison Section === */
-.scenario-section {
-  background: var(--bg-card);
-  border: 1px solid rgba(245, 158, 11, 0.18);
-  border-radius: 14px;
-  padding: 1.75rem 1.5rem;
-  position: relative;
-  overflow: hidden;
-}
-
-.scenario-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  margin-bottom: 1.25rem;
-}
-
-.scenario-accent-bar {
-  width: 4px;
-  min-height: 2.5rem;
-  background: var(--warning, #f59e0b);
-  border-radius: 2px;
-  flex-shrink: 0;
-}
-
-.scenario-title {
-  font-size: 1.05rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-.scenario-desc {
-  font-size: 0.78rem;
-  color: var(--text-secondary);
-  margin-top: 0.2rem;
-  line-height: 1.5;
-}
-
-.scenario-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-}
-
-.scenario-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.scenario-textarea {
-  font-family: var(--font-mono, monospace);
-  font-size: 0.8rem;
-  line-height: 1.5;
-}
-
-.scenario-select {
-  appearance: auto;
-  cursor: pointer;
-}
-
-.scenario-no-pop {
-  font-size: 0.78rem;
-  color: var(--text-muted);
-}
-
-.scenario-no-pop a {
-  color: var(--accent);
-  text-decoration: underline;
-}
-
-.scenario-error {
-  font-size: 0.78rem;
-  color: var(--danger, #ef4444);
-  padding: 0.4rem 0.6rem;
-  background: rgba(239, 68, 68, 0.08);
-  border-radius: var(--radius-sm, 6px);
-}
-
-.scenario-launch-btn {
-  background: linear-gradient(135deg, #f59e0b, #f97316);
-}
-
-.scenario-launch-btn:hover:not(:disabled) {
-  box-shadow: 0 4px 20px rgba(245, 158, 11, 0.4), 0 0 40px rgba(249, 115, 22, 0.15);
-}
 </style>

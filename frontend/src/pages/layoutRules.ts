@@ -26,7 +26,6 @@ const SCENARIO_FIRST_MODES = new Set([
   'hybrid',
   'society_first',
   'meta_simulation',
-  'unified',
 ])
 
 const SOCIETY_MODES = new Set([
