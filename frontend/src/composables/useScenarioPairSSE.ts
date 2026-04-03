@@ -51,8 +51,9 @@ export function useScenarioPairSSE(pairId: string) {
   function checkCompletion() {
     if (baselineStatus.value === 'completed' && interventionStatus.value === 'completed') {
       isComplete.value = true
-      store.fetchComparison(pairId).catch(() => {
-        // comparison fetch may fail silently; user can retry
+      store.fetchComparison(pairId).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : 'Failed to fetch comparison'
+        store.error = message
       })
     }
   }
@@ -106,9 +107,14 @@ export function useScenarioPairSSE(pairId: string) {
       })
     }
 
+    let errorCount = 0
     source.onerror = () => {
-      if (statusRef.value === 'running') {
-        // Don't set to failed on transient errors; EventSource auto-reconnects
+      errorCount++
+      if (errorCount >= 5 && statusRef.value === 'running') {
+        statusRef.value = 'failed'
+        store.error = `SSE connection lost for ${role} simulation`
+        source.close()
+        checkCompletion()
       }
     }
 
