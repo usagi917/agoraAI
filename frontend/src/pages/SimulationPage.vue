@@ -36,6 +36,7 @@ import AgentActivityTicker from '../components/AgentActivityTicker.vue'
 import LiveDialogueStream from '../components/LiveDialogueStream.vue'
 import DigitalWorkspaceBackground from '../components/DigitalWorkspaceBackground.vue'
 import DebateCards from '../components/DebateCards.vue'
+import ConnectionTimeline from '../components/ConnectionTimeline.vue'
 import ForceGraph2D from '../components/ForceGraph2D.vue'
 import { useTheaterStore } from '../stores/theaterStore'
 import { isWebGLSupported } from '../composables/useWebGLDetect'
@@ -402,6 +403,7 @@ const liveSecondaryLabels: Record<LiveSecondaryTab, string> = {
   colonies: 'Colonies',
   thinking: 'Thinking',
   dialogue: 'Dialogue',
+  connections: 'Connections',
 }
 const livePrimaryTitle = computed(() => (
   livePrimaryView.value === 'society'
@@ -413,6 +415,22 @@ const livePrimaryDescription = computed(() => (
     ? '社会系モードでは、意見分布とネットワークの変化を優先表示します。'
     : '通常モードでは、グラフの変化とフェーズ進行を優先表示します。'
 ))
+
+function handleConnectionHighlight(sourceId: string, targetId: string) {
+  const matchingEdge = societyGraphStore.liveEdges.find((edge) =>
+    (edge.source === sourceId && edge.target === targetId)
+    || (edge.source === targetId && edge.target === sourceId),
+  )
+  const interactionCount = societyGraphStore.getInteractionCount(sourceId, targetId)
+
+  societyGraphStore.setSelectedEdge({
+    id: matchingEdge?.id || `conversation:${sourceId}:${targetId}`,
+    relationType: matchingEdge?.relationType || 'mentions',
+    weight: matchingEdge?.strength ?? Math.min(1, Math.max(0.35, interactionCount * 0.2)),
+    sourceId,
+    targetId,
+  })
+}
 
 function liveStateKey(id: string) {
   return `agent-ai:live:${id}`
@@ -1030,6 +1048,10 @@ function goToResults() {
         <div v-if="activeSecondaryTab === 'dialogue'" class="panel-card dialogue-tab">
           <LiveDialogueStream />
         </div>
+
+        <div v-if="activeSecondaryTab === 'connections'" class="panel-card connections-tab">
+          <ConnectionTimeline @highlight-edge="handleConnectionHighlight" />
+        </div>
       </div>
     </div>
   </div>
@@ -1353,6 +1375,7 @@ function goToResults() {
 .panel-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--panel-padding); }
 .thinking-tab { min-height: 20rem; max-height: 36rem; overflow-y: auto; }
 .dialogue-tab { flex: 1; min-height: 20rem; overflow: hidden; }
+.connections-tab { flex: 1; min-height: 20rem; overflow: hidden; }
 .panel-count { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); background: rgba(255,255,255,0.04); padding: 0.1rem 0.4rem; border-radius: 4px; }
 .panel-count.live { color: var(--success); background: rgba(34,197,94,0.1); }
 
