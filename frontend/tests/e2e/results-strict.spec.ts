@@ -66,6 +66,9 @@ test('shows unsupported strict-evidence state in results', async ({ page }) => {
   await page.route('**/api/simulations/sim-strict/graph', async (route) => {
     await route.fulfill({ json: { nodes: [], edges: [] } })
   })
+  await page.route('**/api/society/simulations/sim-strict/propagation', async (route) => {
+    await route.fulfill({ json: { phase_data: null } })
+  })
 
   await page.goto('/sim/sim-strict/results')
 

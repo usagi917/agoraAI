@@ -149,6 +149,53 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     agentList.value.filter((a) => a.status === 'speaking'),
   )
 
+  // --- Phase 1a: インタラクション頻度マトリクス ---
+
+  /** ペアワイズのインタラクション回数 (key: "agentId-A::agentId-B" ソート済み) */
+  const interactionMatrix = computed(() => {
+    const matrix = new Map<string, number>()
+    const agentsByIndex = new Map<number, string>()
+    for (const agent of liveAgents.value.values()) {
+      agentsByIndex.set(agent.agentIndex, agent.id)
+    }
+
+    for (const arg of currentArguments.value) {
+      const sourceId = agentsByIndex.get(arg.participant_index)
+      if (!sourceId) continue
+      const targetId = arg.addressed_to_participant_index != null
+        ? agentsByIndex.get(arg.addressed_to_participant_index)
+        : undefined
+      if (targetId && targetId !== sourceId) {
+        const key = [sourceId, targetId].sort().join('::')
+        matrix.set(key, (matrix.get(key) || 0) + 1)
+      }
+    }
+    return matrix
+  })
+
+  /** 2エージェント間の会話を取得 */
+  function getConversationBetween(agentIdA: string, agentIdB: string): MeetingArgument[] {
+    const agentA = liveAgents.value.get(agentIdA)
+    const agentB = liveAgents.value.get(agentIdB)
+    if (!agentA || !agentB) return []
+
+    const indexA = agentA.agentIndex
+    const indexB = agentB.agentIndex
+
+    return currentArguments.value.filter((arg) =>
+      (arg.participant_index === indexA && arg.addressed_to_participant_index === indexB)
+      || (arg.participant_index === indexB && arg.addressed_to_participant_index === indexA)
+      || (arg.participant_index === indexA && arg.addressed_to?.includes(agentB.displayName || agentB.label))
+      || (arg.participant_index === indexB && arg.addressed_to?.includes(agentA.displayName || agentA.label)),
+    )
+  }
+
+  /** ペアのインタラクション数を取得 */
+  function getInteractionCount(agentIdA: string, agentIdB: string): number {
+    const key = [agentIdA, agentIdB].sort().join('::')
+    return interactionMatrix.value.get(key) || 0
+  }
+
   // === Actions ===
 
   function getMeetingArgumentKey(round: number, arg: MeetingArgument) {
@@ -544,8 +591,11 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     nodeCount,
     edgeCount,
     speakingAgents,
+    interactionMatrix,
     // Actions
     setSelectedAgents,
+    getConversationBetween,
+    getInteractionCount,
     updateActivationProgress,
     hydrateWithSocialGraph,
     setMeetingRound,
