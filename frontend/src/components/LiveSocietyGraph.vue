@@ -81,7 +81,21 @@ const selectedEdgeInfo = computed(() => {
     sourceName: src?.displayName || src?.label || e.sourceId,
     targetName: tgt?.displayName || tgt?.label || e.targetId,
     color: (RELATION_TYPE_STYLES[e.relationType] || RELATION_TYPE_STYLES.default).color,
+    sourceId: e.sourceId,
+    targetId: e.targetId,
   }
+})
+
+const edgeConversation = computed(() => {
+  const info = selectedEdgeInfo.value
+  if (!info) return []
+  return societyGraphStore.getConversationBetween(info.sourceId, info.targetId)
+})
+
+const edgeInteractionCount = computed(() => {
+  const info = selectedEdgeInfo.value
+  if (!info) return 0
+  return societyGraphStore.getInteractionCount(info.sourceId, info.targetId)
 })
 
 function clearSelection() {
@@ -266,6 +280,23 @@ onUnmounted(() => {
           <span class="meta-chip">
             Strength {{ Math.round(selectedEdgeInfo.weight * 100) }}%
           </span>
+          <span v-if="edgeInteractionCount > 0" class="meta-chip interaction-chip">
+            {{ edgeInteractionCount }} interactions
+          </span>
+        </div>
+        <!-- Conversation transcript -->
+        <div v-if="edgeConversation.length > 0" class="edge-transcript">
+          <div class="transcript-header">Conversation</div>
+          <div class="transcript-scroll">
+            <div
+              v-for="(arg, i) in edgeConversation"
+              :key="i"
+              class="transcript-entry"
+            >
+              <span class="transcript-speaker">{{ arg.participant_name }}</span>
+              <span class="transcript-text">{{ arg.argument.length > 120 ? arg.argument.slice(0, 117) + '...' : arg.argument }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -686,5 +717,64 @@ onUnmounted(() => {
   right: 0.75rem;
   z-index: 10;
   pointer-events: auto;
+  max-width: 20rem;
+}
+
+.interaction-chip {
+  border-color: rgba(0, 229, 255, 0.4) !important;
+  color: rgba(0, 229, 255, 0.8) !important;
+}
+
+.edge-transcript {
+  margin-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 0.4rem;
+}
+
+.transcript-header {
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(180, 180, 200, 0.5);
+  margin-bottom: 0.3rem;
+}
+
+.transcript-scroll {
+  max-height: 10rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.transcript-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.3rem 0.4rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+  border-left: 2px solid rgba(100, 187, 106, 0.4);
+}
+
+.transcript-speaker {
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: rgba(100, 187, 106, 0.8);
+}
+
+.transcript-text {
+  font-size: 0.65rem;
+  color: rgba(200, 200, 220, 0.7);
+  line-height: 1.3;
+}
+
+.transcript-scroll::-webkit-scrollbar {
+  width: 3px;
+}
+.transcript-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
 }
 </style>

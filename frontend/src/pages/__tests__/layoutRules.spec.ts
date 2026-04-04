@@ -108,7 +108,7 @@ describe('layoutRules', () => {
         mode: 'society_first',
         hasColonies: true,
         hasActivity: true,
-      })).toEqual(['progress', 'debate', 'society', 'activity', 'colonies', 'dialogue'])
+      })).toEqual(['progress', 'debate', 'society', 'activity', 'colonies', 'dialogue', 'connections'])
       expect(getDefaultLiveSecondaryTab({
         mode: 'society_first',
         hasColonies: true,

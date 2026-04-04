@@ -182,6 +182,13 @@ export function useLiveSocietyGraph(
     { deep: true },
   )
 
+  // Sync interaction counts to edge widths
+  watch(
+    () => societyGraphStore.interactionMatrix,
+    (matrix) => forceGraph.updateInteractionCounts(matrix),
+    { deep: true },
+  )
+
   // Animate status rings and speech bubbles
   function startAnimationLoop() {
     if (animFrameId !== null) return

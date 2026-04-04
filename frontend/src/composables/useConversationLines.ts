@@ -18,7 +18,12 @@ const CONV_OPACITY: Record<ConversationEdge['type'], number> = {
 const POOL_SIZE = 30
 const PARTICLES_PER_LINE = 5
 const ARC_HEIGHT_BASE = 15
-const TUBE_RADIUS = 0.15
+const TUBE_RADIUS_DEFAULT = 0.15
+const TUBE_RADIUS_ACTIVE: Record<ConversationEdge['type'], number> = {
+  question: 0.25,
+  response: 0.25,
+  general: 0.15,
+}
 const TUBE_SEGMENTS = 20
 const FADE_IN_MS = 500
 const FADE_OUT_MS = 300
@@ -29,6 +34,7 @@ interface LineEntry {
   targetId: string
   tube: THREE.Mesh
   particles: THREE.Points
+  labelSprite: THREE.Sprite | null
   curve: THREE.QuadraticBezierCurve3
   material: THREE.MeshBasicMaterial
   particleMaterial: THREE.PointsMaterial
@@ -42,6 +48,46 @@ interface PoolEntry {
   tube: THREE.Mesh
   particles: THREE.Points
   inUse: boolean
+}
+
+const LABEL_MAP: Record<ConversationEdge['type'], string> = {
+  question: 'Q',
+  response: 'R',
+  general: '',
+}
+
+function createConvLabelSprite(type: ConversationEdge['type']): THREE.Sprite | null {
+  const label = LABEL_MAP[type]
+  if (!label) return null
+
+  const canvas = document.createElement('canvas')
+  canvas.width = 64
+  canvas.height = 64
+  const ctx = canvas.getContext('2d')!
+
+  // Background circle
+  ctx.fillStyle = type === 'question' ? 'rgba(0, 229, 255, 0.7)' : 'rgba(255, 215, 64, 0.7)'
+  ctx.beginPath()
+  ctx.arc(32, 32, 24, 0, Math.PI * 2)
+  ctx.fill()
+
+  // Label text
+  ctx.fillStyle = '#000000'
+  ctx.font = 'bold 28px sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(label, 32, 33)
+
+  const texture = new THREE.CanvasTexture(canvas)
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  })
+  const sprite = new THREE.Sprite(material)
+  sprite.scale.set(2.5, 2.5, 1)
+  return sprite
 }
 
 export function useConversationLines(
@@ -68,7 +114,7 @@ export function useConversationLines(
     tube.visible = false
 
     const particleMat = new THREE.PointsMaterial({
-      size: 1.2,
+      size: 1.8,
       transparent: true,
       opacity: 0,
       depthWrite: false,
@@ -135,7 +181,8 @@ export function useConversationLines(
     if (!poolEntry) return null
 
     const curve = buildCurve(srcPos, tgtPos, edge.type)
-    const tubeGeo = new THREE.TubeGeometry(curve, TUBE_SEGMENTS, TUBE_RADIUS, 4, false)
+    const tubeRadius = TUBE_RADIUS_ACTIVE[edge.type] || TUBE_RADIUS_DEFAULT
+    const tubeGeo = new THREE.TubeGeometry(curve, TUBE_SEGMENTS, tubeRadius, 4, false)
 
     // Replace geometry
     poolEntry.tube.geometry.dispose()
@@ -160,12 +207,21 @@ export function useConversationLines(
     }
     posArr.needsUpdate = true
 
+    // Label sprite at curve midpoint
+    const labelSprite = createConvLabelSprite(edge.type)
+    if (labelSprite) {
+      const midPt = curve.getPoint(0.5)
+      labelSprite.position.set(midPt.x, midPt.y + 1.5, midPt.z)
+      group.add(labelSprite)
+    }
+
     return {
       id: edge.id,
       sourceId: edge.source,
       targetId: edge.target,
       tube: poolEntry.tube,
       particles: poolEntry.particles,
+      labelSprite,
       curve,
       material: tubeMat,
       particleMaterial: particleMat,
@@ -211,6 +267,7 @@ export function useConversationLines(
         const opacity = CONV_OPACITY[line.type] * (1 - fadeProgress)
         line.material.opacity = opacity
         line.particleMaterial.opacity = opacity
+        if (line.labelSprite) line.labelSprite.material.opacity = opacity
 
         if (fadeProgress >= 1) {
           toRemove.push(id)
@@ -237,13 +294,14 @@ export function useConversationLines(
         if (dist > 0.5) {
           const newCurve = buildCurve(srcPos, tgtPos, line.type)
           line.curve = newCurve
-          const newGeo = new THREE.TubeGeometry(newCurve, TUBE_SEGMENTS, TUBE_RADIUS, 4, false)
+          const tubeRadius = TUBE_RADIUS_ACTIVE[line.type] || TUBE_RADIUS_DEFAULT
+          const newGeo = new THREE.TubeGeometry(newCurve, TUBE_SEGMENTS, tubeRadius, 4, false)
           line.tube.geometry.dispose()
           line.tube.geometry = newGeo
         }
       }
 
-      // Animate particles along curve
+      // Animate particles along curve from source to target.
       const posArr = line.particles.geometry.attributes.position as THREE.BufferAttribute
       for (let i = 0; i < PARTICLES_PER_LINE; i++) {
         const baseT = i / PARTICLES_PER_LINE
@@ -252,12 +310,24 @@ export function useConversationLines(
         posArr.setXYZ(i, pt.x, pt.y, pt.z)
       }
       posArr.needsUpdate = true
+
+      // Update label sprite position
+      if (line.labelSprite) {
+        const midPt = line.curve.getPoint(0.5)
+        line.labelSprite.position.set(midPt.x, midPt.y + 1.5, midPt.z)
+        line.labelSprite.material.opacity = baseOpacity
+      }
     }
 
     // Clean up fully faded lines
     for (const id of toRemove) {
       const line = activeLines.get(id)
       if (line) {
+        if (line.labelSprite) {
+          group.remove(line.labelSprite)
+          line.labelSprite.material.map?.dispose()
+          line.labelSprite.material.dispose()
+        }
         const poolEntry = pool.find((p) => p.tube === line.tube)
         if (poolEntry) releaseToPool(poolEntry)
         activeLines.delete(id)

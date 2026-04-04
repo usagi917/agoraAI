@@ -1,7 +1,7 @@
 export type ResultsPrimaryView = 'report' | 'scenarios' | 'decision_brief'
 export type ResultsSecondaryTab = 'pm' | 'society' | 'evidence' | 'transcript'
 export type LivePrimaryView = 'graph' | 'society'
-export type LiveSecondaryTab = 'progress' | 'debate' | 'activity' | 'society' | 'colonies' | 'thinking' | 'dialogue'
+export type LiveSecondaryTab = 'progress' | 'debate' | 'activity' | 'society' | 'colonies' | 'thinking' | 'dialogue' | 'connections'
 
 export interface ResultsLayoutContext {
   mode?: string | null
@@ -124,6 +124,10 @@ export function getLiveSecondaryTabs(context: LiveLayoutContext): LiveSecondaryT
 
   if (SOCIETY_MODES.has(context.mode || '') || context.hasCognitiveData) {
     tabs.push('dialogue')
+  }
+
+  if (SOCIETY_MODES.has(context.mode || '')) {
+    tabs.push('connections')
   }
 
   return tabs

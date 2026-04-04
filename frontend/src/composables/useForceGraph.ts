@@ -148,6 +148,8 @@ interface InternalLink {
   color: string
   opacity: number
   relationType: string
+  interactionCount: number
+  curveIndex: number
 }
 
 export type { InternalLink }
@@ -478,6 +480,48 @@ export function useForceGraph(
   const pulseMap = new Map<string, number>()
   const PULSE_DECAY = 0.03
 
+  // Edge label sprites
+  const edgeLabelGroup = new THREE.Group()
+  edgeLabelGroup.name = 'edgeLabels'
+  const edgeLabelPool = new Map<string, THREE.Sprite>()
+  const EDGE_LABEL_MAX = 20
+  const EDGE_LABEL_DISTANCE_THRESHOLD = 300
+
+  const RELATION_ABBREV: Record<string, string> = {
+    friend: 'F', family: 'Fm', colleague: 'C', neighbor: 'N',
+    acquaintance: 'A', trust: 'T', influence: 'I', conflict: 'X',
+    mentions: 'M',
+  }
+
+  function createEdgeLabelSprite(text: string, color: string): THREE.Sprite {
+    const canvas = document.createElement('canvas')
+    canvas.width = 48
+    canvas.height = 48
+    const ctx = canvas.getContext('2d')!
+    ctx.fillStyle = 'rgba(16, 16, 30, 0.75)'
+    ctx.beginPath()
+    ctx.arc(24, 24, 20, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.strokeStyle = color
+    ctx.lineWidth = 2
+    ctx.stroke()
+    ctx.fillStyle = color
+    ctx.font = 'bold 18px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(text, 24, 25)
+    const texture = new THREE.CanvasTexture(canvas)
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+    })
+    const sprite = new THREE.Sprite(material)
+    sprite.scale.set(3, 3, 1)
+    sprite.visible = false
+    return sprite
+  }
+
   // Camera focus priority queue
   const CAMERA_PRIORITY: Record<string, number> = {
     decision_locked: 4,
@@ -755,7 +799,8 @@ export function useForceGraph(
         .linkWidth((link: any) => {
           const l = link as InternalLink
           const style = RELATION_TYPE_STYLES[l.relationType] || RELATION_TYPE_STYLES.default
-          return Math.max(0.8, style.width + l.weight * 1.0)
+          const interactionBoost = Math.min((l.interactionCount || 0) * 0.3, 2.0)
+          return Math.max(0.8, style.width + l.weight * 1.0 + interactionBoost)
         })
         .linkColor((link: any) => (link as InternalLink).color)
         .linkMaterial((link: any) => {
@@ -780,6 +825,11 @@ export function useForceGraph(
         })
         .linkCurvature((link: any) => {
           const l = link as InternalLink
+          if (l.curveIndex !== 0) {
+            // マルチエッジ: 段階的にカーブを分離
+            const baseCurve = 0.15
+            return baseCurve * l.curveIndex
+          }
           return l.weight > 0.7 ? 0.2 : 0.1
         })
         .d3AlphaDecay(GRAPH_LAYOUT.alphaDecay)
@@ -829,6 +879,7 @@ export function useForceGraph(
 
       const scene = fg.scene()
       sceneRef = scene
+      scene.add(edgeLabelGroup)
       scene.fog = new THREE.FogExp2(0x020210, 0.0004)
 
       const ambientLight = new THREE.AmbientLight(0x080820, 1.6)
@@ -921,6 +972,54 @@ export function useForceGraph(
             pulseMap.set(nodeId, next)
           }
         }
+
+        // Edge labels: show abbreviations at link midpoints when camera is close
+        if (tickCount % 10 === 0) {
+          const cam = fg.camera()
+          const camPos = cam.position
+          const shownIds = new Set<string>()
+          let labelCount = 0
+
+          for (const link of internalLinks) {
+            if (labelCount >= EDGE_LABEL_MAX) break
+            const abbrev = RELATION_ABBREV[link.relationType]
+            if (!abbrev) continue
+            if (link.weight < 0.5 && (link.interactionCount || 0) === 0) continue
+
+            const src = typeof link.source === 'string' ? null : link.source
+            const tgt = typeof link.target === 'string' ? null : link.target
+            if (!src || !tgt) continue
+            if (!Number.isFinite(src.x) || !Number.isFinite(tgt.x)) continue
+
+            const midX = ((src.x || 0) + (tgt.x || 0)) / 2
+            const midY = ((src.y || 0) + (tgt.y || 0)) / 2
+            const midZ = ((src.z || 0) + (tgt.z || 0)) / 2
+            const dist = camPos.distanceTo(new THREE.Vector3(midX, midY, midZ))
+
+            if (dist > EDGE_LABEL_DISTANCE_THRESHOLD) continue
+
+            shownIds.add(link.id)
+            labelCount++
+
+            let sprite = edgeLabelPool.get(link.id)
+            if (!sprite) {
+              const style = RELATION_TYPE_STYLES[link.relationType] || RELATION_TYPE_STYLES.default
+              sprite = createEdgeLabelSprite(abbrev, style.color)
+              edgeLabelPool.set(link.id, sprite)
+              edgeLabelGroup.add(sprite)
+            }
+
+            sprite.position.set(midX, midY + 2, midZ)
+            sprite.visible = true
+          }
+
+          // Hide labels for links no longer shown
+          for (const [id, sprite] of edgeLabelPool.entries()) {
+            if (!shownIds.has(id)) {
+              sprite.visible = false
+            }
+          }
+        }
       })
 
       fg.onNodeClick((node: any) => {
@@ -984,8 +1083,35 @@ export function useForceGraph(
     }
   }
 
+  /** 同一ノードペア間の複数エッジにカーブインデックスを割り当て */
+  function assignCurveIndices() {
+    const pairCounts = new Map<string, InternalLink[]>()
+    for (const link of internalLinks) {
+      const srcId = typeof link.source === 'string' ? link.source : link.source.id
+      const tgtId = typeof link.target === 'string' ? link.target : link.target.id
+      const key = [srcId, tgtId].sort().join('::')
+      const arr = pairCounts.get(key)
+      if (arr) arr.push(link)
+      else pairCounts.set(key, [link])
+    }
+
+    for (const links of pairCounts.values()) {
+      if (links.length <= 1) {
+        links[0].curveIndex = 0
+        continue
+      }
+      // 複数エッジ: -1, 0, 1 or -1.5, -0.5, 0.5, 1.5 etc.
+      const half = (links.length - 1) / 2
+      for (let i = 0; i < links.length; i++) {
+        links[i].curveIndex = i - half
+      }
+    }
+  }
+
   function syncGraphData(options: { reheat?: boolean } = {}) {
     if (!graph.value) return
+
+    assignCurveIndices()
 
     graph.value.graphData({
       nodes: [...internalNodes],
@@ -1000,6 +1126,25 @@ export function useForceGraph(
   function refreshGraph() {
     if (!graph.value) return
     graph.value.refresh()
+  }
+
+  /** ストアのインタラクション数をリンクに反映 */
+  function updateInteractionCounts(matrix: Map<string, number>) {
+    let changed = false
+    for (const link of internalLinks) {
+      const srcId = typeof link.source === 'string' ? link.source : link.source.id
+      const tgtId = typeof link.target === 'string' ? link.target : link.target.id
+      const key = [srcId, tgtId].sort().join('::')
+      const nextCount = matrix.get(key) || 0
+      if (link.interactionCount !== nextCount) {
+        link.interactionCount = nextCount
+        changed = true
+      }
+    }
+
+    if (changed) {
+      refreshGraph()
+    }
   }
 
   function animateGrowIn(node: InternalNode) {
@@ -1091,6 +1236,8 @@ export function useForceGraph(
             color: relationType !== 'default' ? style.color : getLinkColor(e.source, nodeMap),
             opacity: DEFAULT_LINK_OPACITY,
             relationType,
+            interactionCount: 0,
+            curveIndex: 0,
           })
         }
       }
@@ -1178,6 +1325,8 @@ export function useForceGraph(
         color,
         opacity: DEFAULT_LINK_OPACITY,
         relationType,
+        interactionCount: 0,
+        curveIndex: 0,
       }
     })
 
@@ -1432,6 +1581,8 @@ export function useForceGraph(
         color: getLinkColor(basisEdge.source, toNodeMap, fromNodeMap, currentNodeMap),
         opacity: DEFAULT_LINK_OPACITY,
         relationType: basisEdge.relation_type || 'default',
+        interactionCount: 0,
+        curveIndex: 0,
       }
 
       const fromFrame = fromEdge
@@ -1652,5 +1803,6 @@ export function useForceGraph(
     toggleBloom,
     bloomEnabled,
     setActiveSpeakers,
+    updateInteractionCounts,
   }
 }
