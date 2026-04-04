@@ -90,6 +90,20 @@ function createConvLabelSprite(type: ConversationEdge['type']): THREE.Sprite | n
   return sprite
 }
 
+function disposeLabelSprite(sprite: THREE.Sprite) {
+  const material = sprite.material
+  if (Array.isArray(material)) {
+    for (const entry of material) {
+      entry.map?.dispose()
+      entry.dispose()
+    }
+    return
+  }
+
+  material.map?.dispose()
+  material.dispose()
+}
+
 export function useConversationLines(
   graphRef: Ref<ForceGraph3DInstance | null>,
   getInternalNodes: () => Array<{ id: string; x: number; y: number; z: number }>,
@@ -325,8 +339,7 @@ export function useConversationLines(
       if (line) {
         if (line.labelSprite) {
           group.remove(line.labelSprite)
-          line.labelSprite.material.map?.dispose()
-          line.labelSprite.material.dispose()
+          disposeLabelSprite(line.labelSprite)
         }
         const poolEntry = pool.find((p) => p.tube === line.tube)
         if (poolEntry) releaseToPool(poolEntry)
@@ -336,6 +349,12 @@ export function useConversationLines(
   }
 
   function dispose() {
+    for (const line of activeLines.values()) {
+      if (line.labelSprite) {
+        group.remove(line.labelSprite)
+        disposeLabelSprite(line.labelSprite)
+      }
+    }
     for (const entry of pool) {
       entry.tube.geometry.dispose()
       ;(entry.tube.material as THREE.Material).dispose()

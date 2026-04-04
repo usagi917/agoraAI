@@ -522,6 +522,21 @@ export function useForceGraph(
     return sprite
   }
 
+  function disposeEdgeLabelSprite(sprite: THREE.Sprite) {
+    edgeLabelGroup.remove(sprite)
+    const material = sprite.material
+    if (Array.isArray(material)) {
+      for (const entry of material) {
+        entry.map?.dispose()
+        entry.dispose()
+      }
+      return
+    }
+
+    material.map?.dispose()
+    material.dispose()
+  }
+
   // Camera focus priority queue
   const CAMERA_PRIORITY: Record<string, number> = {
     decision_locked: 4,
@@ -977,6 +992,7 @@ export function useForceGraph(
         if (tickCount % 10 === 0) {
           const cam = fg.camera()
           const camPos = cam.position
+          const currentLinkIds = new Set(internalLinks.map((link) => link.id))
           const shownIds = new Set<string>()
           let labelCount = 0
 
@@ -1015,6 +1031,11 @@ export function useForceGraph(
 
           // Hide labels for links no longer shown
           for (const [id, sprite] of edgeLabelPool.entries()) {
+            if (!currentLinkIds.has(id)) {
+              disposeEdgeLabelSprite(sprite)
+              edgeLabelPool.delete(id)
+              continue
+            }
             if (!shownIds.has(id)) {
               sprite.visible = false
             }
@@ -1721,6 +1742,11 @@ export function useForceGraph(
     }
     resizeObserver?.disconnect()
     stopThinkingAnimation()
+    for (const sprite of edgeLabelPool.values()) {
+      disposeEdgeLabelSprite(sprite)
+    }
+    edgeLabelPool.clear()
+    sceneRef?.remove(edgeLabelGroup)
     graph.value?._destructor?.()
     graph.value = null
     graphError.value = ''
