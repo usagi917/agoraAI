@@ -426,7 +426,6 @@ class TestAntiCentralTendencyPrompt:
         # 中立の安易な選択を防ぐ指示
         assert "中立" in prompt
         # 「中立は安易に選ばない」旨の指示が存在すること
-        neutral_section = prompt[prompt.index("中立"):]
         has_anti_neutral = any(
             keyword in prompt
             for keyword in ["判断不能", "本当に", "安易", "真に", "どちらにも"]

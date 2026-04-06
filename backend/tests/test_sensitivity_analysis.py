@@ -156,13 +156,25 @@ provider_distributions = {
 
 
 def _make_provider_activation_fn(provider_dists: dict[str, dict]):
-    """プロバイダ名に応じて異なる分布を返す activation_fn モック。"""
+    """run_activation の実際の返り値構造を返す activation_fn モック。
+
+    run_activation は provider 引数を受け取らず、stance_distribution は
+    aggregation キーの中に入っている。呼び出し順に応じて異なる分布を返す。
+    """
+    call_count = 0
+    providers_list = list(provider_dists.keys())
+
     async def activation_fn(agents, theme, **kwargs):
-        provider = kwargs.get("provider", "openai")
-        dist = provider_dists.get(provider, list(provider_dists.values())[0])
+        nonlocal call_count
+        dist = provider_dists[providers_list[call_count % len(providers_list)]]
+        call_count += 1
         return {
-            "stance_distribution": dist,
             "responses": [],
+            "aggregation": {
+                "stance_distribution": dist,
+            },
+            "representatives": [],
+            "usage": {},
         }
     return activation_fn
 

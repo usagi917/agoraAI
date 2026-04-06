@@ -251,7 +251,7 @@ class TestSurveyMatchingImprovements:
         assert len(matched) > 0
 
     def test_minimum_match_threshold(self):
-        """Jaccard < 0.15 のマッチは除外される。"""
+        """Jaccard < 0.05 のマッチは除外される。"""
         surveys = [
             self._make_survey("全く関係ないテーマ", "social", ["無関係", "別件"]),
         ]

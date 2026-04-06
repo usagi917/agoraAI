@@ -22,13 +22,14 @@ from src.app.services.society.survey_anchor import (
     compare_with_surveys,
 )
 from src.app.services.society.calibration import (
-    brier_external,
     extremeness_aversion_correction,
 )
 from src.app.services.society.transfer_calibrator import (
     BiasProfile,
     compute_bias_profile,
 )
+
+_DEFAULT_GAMMA = 0.7
 
 
 class AccuracyReport(TypedDict):
@@ -152,6 +153,7 @@ async def find_optimal_gamma(
     theme_category: str | None = None,
     gamma_range: tuple[float, float] = (0.3, 1.5),
     gamma_step: float = 0.1,
+    _records: list | None = None,
 ) -> GammaSearchResult:
     """検証済みレコードから最適な extremeness aversion γ をグリッドサーチで発見する。
 
@@ -163,14 +165,16 @@ async def find_optimal_gamma(
         theme_category: フィルタ用のテーマカテゴリ（None で全カテゴリ）
         gamma_range: γ の探索範囲 (min, max)
         gamma_step: γ のステップ幅
+        _records: 事前フェッチ済みレコード（find_optimal_gamma_by_category からの再利用用）
 
     Returns:
         best_gamma, gamma_scores, theme_category を含む辞書
     """
-    _DEFAULT_GAMMA = 0.7
-
-    repo = ValidationRepository(session)
-    records = await repo.list_validated()
+    if _records is None:
+        repo = ValidationRepository(session)
+        records = await repo.list_validated()
+    else:
+        records = _records
 
     # カテゴリフィルタ
     if theme_category:
@@ -191,6 +195,8 @@ async def find_optimal_gamma(
         g += gamma_step
 
     # 各 γ について平均 Brier スコアを計算
+    # validation_repo の _brier_score_distributions と同じ全分布 Brier を使用:
+    # Σ(p_i - a_i)² where p_i = corrected, a_i = actual
     gamma_scores: list[dict] = []
     for gamma in gammas:
         brier_sum = 0.0
@@ -199,9 +205,13 @@ async def find_optimal_gamma(
             if not record.simulated_distribution or not record.actual_distribution:
                 continue
             corrected = extremeness_aversion_correction(record.simulated_distribution, gamma)
-            # actual の最大確率スタンスを observed_outcome として使用
-            observed = max(record.actual_distribution, key=record.actual_distribution.get)
-            brier_sum += brier_external(corrected, observed)
+            actual = record.actual_distribution
+            all_keys = set(corrected.keys()) | set(actual.keys())
+            full_dist_brier = sum(
+                (corrected.get(k, 0.0) - actual.get(k, 0.0)) ** 2
+                for k in all_keys
+            )
+            brier_sum += full_dist_brier
             count += 1
         avg_brier = brier_sum / count if count > 0 else float("inf")
         gamma_scores.append({"gamma": gamma, "avg_brier": avg_brier})
@@ -239,7 +249,7 @@ async def find_optimal_gamma_by_category(
 
     by_category: dict[str, GammaSearchResult] = {}
     for cat in categories:
-        result = await find_optimal_gamma(session, theme_category=cat)
+        result = await find_optimal_gamma(session, theme_category=cat, _records=records)
         by_category[cat] = result
 
     return CategoryGammaResult(by_category=by_category)

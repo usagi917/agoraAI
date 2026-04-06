@@ -178,7 +178,7 @@ def find_relevant_surveys(
     改善点:
     - theme_category によるプレフィルタ
     - 同義語展開
-    - 最低マッチ閾値 (Jaccard > 0.15)
+    - 最低マッチ閾値 (Jaccard >= 0.05)
     """
     # カテゴリプレフィルタ
     candidates = surveys

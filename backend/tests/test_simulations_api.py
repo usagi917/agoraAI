@@ -682,7 +682,7 @@ async def test_create_simulation_normalizes_legacy_evidence_mode_alias(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(type(settings), "live_simulation_available", lambda self: True)
-    monkeypatch.setattr("src.app.api.routes.simulations._spawn_simulation", lambda simulation_id: None)
+    monkeypatch.setattr("src.app.api.routes.simulations.spawn_simulation", lambda simulation_id: None)
 
     response = await client.post(
         "/simulations",
@@ -712,7 +712,7 @@ async def test_create_simulation_accepts_meta_mode(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(type(settings), "live_simulation_available", lambda self: True)
-    monkeypatch.setattr("src.app.api.routes.simulations._spawn_simulation", lambda simulation_id: None)
+    monkeypatch.setattr("src.app.api.routes.simulations.spawn_simulation", lambda simulation_id: None)
 
     response = await client.post(
         "/simulations",
@@ -743,7 +743,7 @@ async def test_create_simulation_accepts_unified_mode(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(type(settings), "live_simulation_available", lambda self: True)
-    monkeypatch.setattr("src.app.api.routes.simulations._spawn_simulation", lambda simulation_id: None)
+    monkeypatch.setattr("src.app.api.routes.simulations.spawn_simulation", lambda simulation_id: None)
 
     response = await client.post(
         "/simulations",

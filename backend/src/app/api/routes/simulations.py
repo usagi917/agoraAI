@@ -136,10 +136,14 @@ async def create_simulation(
 
 
 @router.get("")
-async def list_simulations(session: AsyncSession = Depends(get_session)):
+async def list_simulations(
+    skip: int = 0,
+    limit: int = 20,
+    session: AsyncSession = Depends(get_session),
+):
     """Simulation 一覧を取得する。"""
     result = await session.execute(
-        select(Simulation).order_by(Simulation.created_at.desc()).limit(50)
+        select(Simulation).order_by(Simulation.created_at.desc()).offset(skip).limit(min(limit, 100))
     )
     sims = result.scalars().all()
     return [
@@ -571,6 +575,6 @@ async def rerun_simulation(sim_id: str, session: AsyncSession = Depends(get_sess
     session.add(new_sim)
     await session.commit()
 
-    _spawn_simulation(new_sim.id)
+    spawn_simulation(new_sim.id)
 
     return {"id": new_sim.id, "status": "queued"}

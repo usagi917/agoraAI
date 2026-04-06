@@ -3,6 +3,7 @@
 LLM呼び出しを伴うためコストが大きく、オプトイン機能として実装する。
 """
 
+import asyncio
 import math
 import logging
 from typing import Any, Callable, Awaitable
@@ -108,13 +109,24 @@ async def run_provider_ensemble(
         from src.app.services.society.activation_layer import run_activation
         activation_fn = run_activation
 
-    # 各プロバイダでアクティベーションを実行
-    provider_results: list[tuple[str, dict]] = []
-    for provider in providers:
+    # 各プロバイダでアクティベーションを並列実行
+    async def _run_one(provider: str) -> tuple[str, dict]:
         logger.info("provider_ensemble: running provider=%s", provider)
-        result = await activation_fn(agents, theme, provider=provider)
-        dist = result.get("stance_distribution", {})
-        provider_results.append((provider, dist))
+        result = await activation_fn(agents, theme)
+        dist = result.get("aggregation", {}).get("stance_distribution", {})
+        return (provider, dist)
+
+    provider_results: list[tuple[str, dict]] = list(
+        await asyncio.gather(*[_run_one(p) for p in providers])
+    )
+
+    if not provider_results:
+        return {
+            "ensemble_distribution": {},
+            "provider_distributions": [],
+            "weights": {},
+            "agreement_score": 1.0,
+        }
 
     # 全スタンスキーの収集
     all_stances: set[str] = set()

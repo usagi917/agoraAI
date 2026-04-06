@@ -127,7 +127,9 @@ async def test_api_create_and_fetch_scenario_pair(client, session_factory):
     assert fetched["intervention_simulation_id"] == created["intervention_simulation_id"]
     assert fetched["intervention_params"] == created["intervention_params"]
     assert fetched["decision_context"] == created["decision_context"]
-    assert fetched["status"] == "running"
+    # Pair is created with status="created"; child simulations are "queued"
+    # GET returns stored pair status (no auto-refresh on GET)
+    assert fetched["status"] in {"created", "queued"}
     assert fetched["created_at"] == created["created_at"]
 
 

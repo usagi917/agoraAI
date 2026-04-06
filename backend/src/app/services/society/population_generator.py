@@ -283,9 +283,25 @@ def _generate_big_five(pop_config: dict) -> dict:
     """Big Five パーソナリティ特性を多変量正規分布で生成する。
 
     日本人ノルム（Oshio et al. 2012）に基づく非対称平均と特性間相関を反映。
+    pop_config["big_five"]["mean"] が設定されている場合はその値を使用する。
+    mean は各 trait へのマッピング dict または単一 float を受け付ける。
     """
     bf_cfg = pop_config.get("big_five", {})
     std = bf_cfg.get("std", _BIG_FIVE_STD)
+
+    # mean の解決: dict (per-trait) / float (共通) / 未設定 (デフォルト) に対応
+    labels = ["O", "C", "E", "A", "N"]
+    mean_cfg = bf_cfg.get("mean", None)
+    if mean_cfg is None:
+        # デフォルト: 日本人ノルム
+        means = _BIG_FIVE_MEANS
+    elif isinstance(mean_cfg, dict):
+        # per-trait 設定: {"O": 0.9, "C": 0.5, ...}
+        means = [mean_cfg.get(label, _BIG_FIVE_MEANS[k]) for k, label in enumerate(labels)]
+    else:
+        # スカラー設定: 全 trait 共通
+        scalar = float(mean_cfg)
+        means = [scalar] * 5
 
     # 独立標準正規乱数を5つ生成
     z = [random.gauss(0, 1) for _ in range(5)]
@@ -299,9 +315,8 @@ def _generate_big_five(pop_config: dict) -> dict:
 
     # 平均とスケールを適用し [0, 1] にクランプ
     traits = {}
-    labels = ["O", "C", "E", "A", "N"]
     for k, label in enumerate(labels):
-        raw = _BIG_FIVE_MEANS[k] + std * correlated[k]
+        raw = means[k] + std * correlated[k]
         traits[label] = round(max(0.0, min(1.0, raw)), 3)
 
     return traits
