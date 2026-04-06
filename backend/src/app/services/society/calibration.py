@@ -97,6 +97,56 @@ def calibration_grade(ece: float | None) -> str:
     return "poor"
 
 
+def platt_recalibrate(
+    confidence: float,
+    shrink_factor: float = 0.8,
+) -> float:
+    """エージェント confidence を Platt-style で再キャリブレーションする。
+
+    データ不足時の固定補正: calibrated = 0.5 + shrink_factor * (conf - 0.5)
+    shrink_factor < 1.0 で 0.5 方向に圧縮。
+
+    Args:
+        confidence: 元の confidence (0.0〜1.0)
+        shrink_factor: 圧縮係数 (デフォルト 0.8)
+
+    Returns:
+        再キャリブレーション済み confidence (0.0〜1.0)
+    """
+    calibrated = 0.5 + shrink_factor * (confidence - 0.5)
+    return max(0.0, min(1.0, calibrated))
+
+
+def extremeness_aversion_correction(
+    distribution: dict[str, float],
+    gamma: float = 0.7,
+) -> dict[str, float]:
+    """Extremeness aversion 補正: 中庸バイアスを逆補正する。
+
+    p_k' = p_k^gamma / Σ(p_j^gamma)
+    gamma < 1.0 で両端を膨張（中立寄りバイアスを補正）。
+    gamma = 1.0 で無変更。
+
+    Args:
+        distribution: スタンス分布 (合計1.0)
+        gamma: 補正指数 (デフォルト 0.7)
+
+    Returns:
+        補正後の正規化分布
+    """
+    if gamma == 1.0:
+        return dict(distribution)
+
+    powered = {}
+    for k, v in distribution.items():
+        powered[k] = v ** gamma if v > 0 else 0.0
+
+    total = sum(powered.values())
+    if total > 0:
+        return {k: v / total for k, v in powered.items()}
+    return dict(distribution)
+
+
 def apply_transfer_calibration(
     raw_distribution: dict[str, float],
     bias_profile: BiasProfile,

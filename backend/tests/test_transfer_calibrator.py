@@ -175,3 +175,83 @@ class TestComputeTransferUncertainty:
         uncertainty_few = compute_transfer_uncertainty(profile_few, "economy")
         uncertainty_many = compute_transfer_uncertainty(profile_many, "economy")
         assert uncertainty_few > uncertainty_many
+
+
+# ---------------------------------------------------------------------------
+# Phase E: James-Stein shrinkage + 時間減衰
+# ---------------------------------------------------------------------------
+
+
+class TestTimeDecayBiasProfile:
+    """Phase E: 時間減衰付きバイアスプロファイル構築テスト。"""
+
+    def test_recent_data_weighted_more(self):
+        """最近のデータがより大きい重みを持つこと。"""
+        # 古いデータ: 賛成に大きなバイアス (+0.20)
+        old_comp = _make_comparison(
+            "economy",
+            {"賛成": 0.50, "条件付き賛成": 0.20, "中立": 0.15, "条件付き反対": 0.10, "反対": 0.05},
+            {"賛成": 0.30, "条件付き賛成": 0.20, "中立": 0.20, "条件付き反対": 0.15, "反対": 0.15},
+        )
+        old_comp["days_since"] = 365  # 1年前
+
+        # 新しいデータ: 賛成にバイアスなし
+        new_comp = _make_comparison(
+            "economy",
+            {"賛成": 0.30, "条件付き賛成": 0.20, "中立": 0.20, "条件付き反対": 0.15, "反対": 0.15},
+            {"賛成": 0.30, "条件付き賛成": 0.20, "中立": 0.20, "条件付き反対": 0.15, "反対": 0.15},
+        )
+        new_comp["days_since"] = 10  # 10日前
+
+        profile = compute_bias_profile([old_comp, new_comp])
+        # 時間減衰があれば、新しいデータ（バイアスなし）の影響が大きい
+        # → 平均バイアスは 0.10 より小さくなるはず
+        assert profile["economy"]["賛成"]["mean_deviation"] < 0.10
+
+    def test_no_days_since_falls_back_to_equal_weight(self):
+        """days_since がないデータは等重み扱い。"""
+        comps = [
+            _make_comparison(
+                "economy",
+                {"賛成": 0.40, "条件付き賛成": 0.20, "中立": 0.15, "条件付き反対": 0.15, "反対": 0.10},
+                {"賛成": 0.30, "条件付き賛成": 0.20, "中立": 0.20, "条件付き反対": 0.15, "反対": 0.15},
+            ),
+            _make_comparison(
+                "economy",
+                {"賛成": 0.50, "条件付き賛成": 0.15, "中立": 0.15, "条件付き反対": 0.10, "反対": 0.10},
+                {"賛成": 0.35, "条件付き賛成": 0.20, "中立": 0.20, "条件付き反対": 0.15, "反対": 0.10},
+            ),
+        ]
+        profile = compute_bias_profile(comps)
+        # days_since がなければ等重み → 平均 = (0.10 + 0.15) / 2 = 0.125
+        assert abs(profile["economy"]["賛成"]["mean_deviation"] - 0.125) < 0.001
+
+
+class TestJamesSteinShrinkage:
+    """Phase E: James-Stein shrinkage のテスト。"""
+
+    def test_shrinkage_toward_grand_mean(self):
+        """複数カテゴリがある場合、全カテゴリの平均に向かって shrink。"""
+        # 2つのカテゴリ、economy は大きなバイアス、politics は小さなバイアス
+        profile: BiasProfile = {
+            "economy": {
+                "賛成": {"mean_deviation": 0.20, "sample_count": 5, "std_deviation": 0.05},
+                "条件付き賛成": {"mean_deviation": 0.0, "sample_count": 5, "std_deviation": 0.02},
+                "中立": {"mean_deviation": -0.10, "sample_count": 5, "std_deviation": 0.03},
+                "条件付き反対": {"mean_deviation": -0.05, "sample_count": 5, "std_deviation": 0.02},
+                "反対": {"mean_deviation": -0.05, "sample_count": 5, "std_deviation": 0.02},
+            },
+            "politics": {
+                "賛成": {"mean_deviation": 0.02, "sample_count": 10, "std_deviation": 0.02},
+                "条件付き賛成": {"mean_deviation": 0.01, "sample_count": 10, "std_deviation": 0.01},
+                "中立": {"mean_deviation": -0.01, "sample_count": 10, "std_deviation": 0.01},
+                "条件付き反対": {"mean_deviation": -0.01, "sample_count": 10, "std_deviation": 0.01},
+                "反対": {"mean_deviation": -0.01, "sample_count": 10, "std_deviation": 0.01},
+            },
+        }
+        dist = {"賛成": 0.40, "条件付き賛成": 0.20, "中立": 0.15, "条件付き反対": 0.15, "反対": 0.10}
+        corrected = apply_transfer_correction(dist, profile, "economy")
+        # 補正後は正規化されて合計1.0
+        assert abs(sum(corrected.values()) - 1.0) < 0.001
+        # 賛成は正のバイアスなので減少
+        assert corrected["賛成"] < dist["賛成"]

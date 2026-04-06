@@ -1,6 +1,5 @@
 """統一 Simulation API エンドポイント"""
 
-import asyncio
 import json
 import logging
 import uuid
@@ -39,20 +38,12 @@ from src.app.services.quality import (
     normalize_evidence_mode,
     supports_evidence_mode,
 )
-from src.app.services.simulation_dispatcher import dispatch_simulation
+from src.app.services.simulation_dispatcher import spawn_simulation
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-_background_tasks: set[asyncio.Task] = set()
-
-
-def _spawn_simulation(simulation_id: str) -> None:
-    task = asyncio.create_task(dispatch_simulation(simulation_id))
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
 
 
 class SimulationCreate(BaseModel):
@@ -130,7 +121,7 @@ async def create_simulation(
     await session.commit()
     await session.refresh(sim)
 
-    _spawn_simulation(sim.id)
+    spawn_simulation(sim.id)
 
     return {
         "id": sim.id,

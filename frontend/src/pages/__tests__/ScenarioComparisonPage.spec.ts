@@ -128,7 +128,7 @@ describe('ScenarioComparisonPage', () => {
     // Do not resolve promises yet so loading persists
     mockApi.get.mockReturnValue(new Promise(() => {}))
     const wrapper = createWrapper()
-    expect(wrapper.text()).toContain('Loading scenario pair')
+    expect(wrapper.text()).toContain('比較データを読み込んでいます')
   })
 
   it('fetches scenario pair on mount', async () => {
@@ -149,7 +149,7 @@ describe('ScenarioComparisonPage', () => {
     const wrapper = createWrapper()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Scenario Comparison')
+    expect(wrapper.text()).toContain('2条件の比較結果')
   })
 
   it('renders decision context from pair', async () => {
@@ -200,7 +200,7 @@ describe('ScenarioComparisonPage', () => {
 
     const badge = wrapper.find('.status-badge')
     expect(badge.exists()).toBe(true)
-    expect(badge.text()).toBe('completed')
+    expect(badge.text()).toBe('完了')
   })
 
   it('shows back button that navigates to home', async () => {
@@ -223,7 +223,7 @@ describe('ScenarioComparisonPage', () => {
     const wrapper = createWrapper()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Comparison results will appear here once both simulations complete')
+    expect(wrapper.text()).toContain('2つの分析が終わると、ここに違いが表示されます。')
   })
 
   it('does not render comparison components when no comparison data', async () => {

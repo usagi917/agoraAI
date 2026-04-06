@@ -25,6 +25,30 @@ const { events, baselineStatus, interventionStatus, isComplete, start: startSSE 
 const isRunning = computed(() =>
   baselineStatus.value === 'running' || interventionStatus.value === 'running',
 )
+const isFailed = computed(() =>
+  store.currentPair?.status === 'failed' ||
+  baselineStatus.value === 'failed' ||
+  interventionStatus.value === 'failed',
+)
+
+function formatStatus(status: string): string {
+  switch (status) {
+    case 'created':
+      return '作成済み'
+    case 'pending':
+      return '待機中'
+    case 'running':
+      return '実行中'
+    case 'completed':
+      return '完了'
+    case 'failed':
+      return '失敗'
+    case 'idle':
+      return '待機中'
+    default:
+      return status
+  }
+}
 
 const opinionShifts = computed<OpinionShift[]>(() => {
   if (!store.comparisonResult?.opinion_shifts_top5) return []
@@ -57,17 +81,17 @@ onMounted(async () => {
     const pair = store.currentPair
 
     if (!pair) {
-      fetchError.value = 'Scenario pair not found'
+      fetchError.value = '比較データが見つかりません'
       return
     }
 
     if (pair.status === 'completed') {
       await store.fetchComparison(scenarioId)
-    } else {
+    } else if (pair.status === 'running' || pair.status === 'created') {
       startSSE()
     }
   } catch (err: any) {
-    fetchError.value = err.message || 'Failed to load scenario pair'
+    fetchError.value = err.message || '比較データの読み込みに失敗しました'
   } finally {
     loading.value = false
   }
@@ -78,13 +102,14 @@ onMounted(async () => {
   <div class="scenario-page">
     <header class="page-header">
       <button class="btn btn-ghost" @click="router.push('/')">
-        &larr; Back
+        &larr; 戻る
       </button>
       <div class="header-info">
-        <h1 class="page-title">Scenario Comparison</h1>
+        <h1 class="page-title">2条件の比較結果</h1>
         <p v-if="store.currentPair" class="page-subtitle">
           {{ store.currentPair.decision_context }}
         </p>
+        <p class="page-caption">同じ母集団で、「介入なし」と「介入あり」を比べています</p>
       </div>
       <div v-if="store.currentPair" class="header-status">
         <span
@@ -95,7 +120,7 @@ onMounted(async () => {
             'status-failed': store.currentPair.status === 'failed',
           }"
         >
-          {{ isRunning ? 'Running' : store.currentPair.status }}
+          {{ isRunning ? '実行中' : formatStatus(store.currentPair.status) }}
         </span>
       </div>
     </header>
@@ -103,13 +128,13 @@ onMounted(async () => {
     <!-- Loading -->
     <div v-if="loading" class="page-loading">
       <div class="spinner" />
-      <p class="loading-text">Loading scenario pair...</p>
+      <p class="loading-text">比較データを読み込んでいます...</p>
     </div>
 
     <!-- Error -->
     <div v-else-if="fetchError" class="page-error card">
       <p class="error-text">{{ fetchError }}</p>
-      <button class="btn btn-primary" @click="router.push('/')">Home</button>
+      <button class="btn btn-primary" @click="router.push('/')">ホームへ戻る</button>
     </div>
 
     <!-- Content -->
@@ -118,22 +143,29 @@ onMounted(async () => {
       <div v-if="isRunning" class="progress-section">
         <div class="progress-grid">
           <div class="card">
-            <h3 class="progress-label">Baseline</h3>
+            <h3 class="progress-label">介入なし</h3>
             <div class="progress-status">
               <span class="status-dot" :class="'dot-' + baselineStatus" />
-              {{ baselineStatus }}
+              {{ formatStatus(baselineStatus) }}
             </div>
             <SimulationProgress />
           </div>
           <div class="card">
-            <h3 class="progress-label">Intervention</h3>
+            <h3 class="progress-label">介入あり</h3>
             <div class="progress-status">
               <span class="status-dot" :class="'dot-' + interventionStatus" />
-              {{ interventionStatus }}
+              {{ formatStatus(interventionStatus) }}
             </div>
             <SimulationProgress />
           </div>
         </div>
+      </div>
+
+      <div
+        v-else-if="isFailed"
+        class="card page-error"
+      >
+        <p class="error-text">比較シミュレーションの実行に失敗しました。</p>
       </div>
 
       <!-- Completed: show comparison -->
@@ -157,10 +189,10 @@ onMounted(async () => {
 
       <!-- No comparison yet and not running -->
       <div
-        v-if="!store.hasComparison && !isRunning && !loading"
+        v-if="!store.hasComparison && !isRunning && !isFailed && !loading"
         class="card page-waiting"
       >
-        <p class="waiting-text">Comparison results will appear here once both simulations complete.</p>
+        <p class="waiting-text">2つの分析が終わると、ここに違いが表示されます。</p>
       </div>
     </template>
   </div>
@@ -197,6 +229,12 @@ onMounted(async () => {
   font-size: var(--text-sm);
   color: var(--text-secondary);
   line-height: 1.6;
+}
+
+.page-caption {
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
 
 .header-status {

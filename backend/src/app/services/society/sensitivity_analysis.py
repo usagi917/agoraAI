@@ -77,3 +77,94 @@ async def run_sensitivity_check(
         "distributions": distributions,
         "n_seeds": n_seeds,
     }
+
+
+async def run_provider_ensemble(
+    agents: list[dict],
+    theme: str,
+    providers: list[str] | None = None,
+    activation_fn: Callable[..., Awaitable[dict]] | None = None,
+) -> dict:
+    """異なる LLM プロバイダでアクティベーションを実行し、アンサンブル集約する。
+
+    Args:
+        agents: エージェントのリスト。
+        theme: シミュレーションのテーマ。
+        providers: プロバイダ名のリスト。None の場合は ["default"]。
+        activation_fn: アクティベーション関数。provider kwarg でプロバイダを指定される。
+
+    Returns:
+        {
+            "ensemble_distribution": dict,   # 加重平均された分布
+            "provider_distributions": list,  # 各プロバイダの分布
+            "weights": dict,                 # プロバイダごとの重み
+            "agreement_score": float,        # プロバイダ間一致度 (0-1)
+        }
+    """
+    if providers is None:
+        providers = ["default"]
+
+    if activation_fn is None:
+        from src.app.services.society.activation_layer import run_activation
+        activation_fn = run_activation
+
+    # 各プロバイダでアクティベーションを実行
+    provider_results: list[tuple[str, dict]] = []
+    for provider in providers:
+        logger.info("provider_ensemble: running provider=%s", provider)
+        result = await activation_fn(agents, theme, provider=provider)
+        dist = result.get("stance_distribution", {})
+        provider_results.append((provider, dist))
+
+    # 全スタンスキーの収集
+    all_stances: set[str] = set()
+    for _, dist in provider_results:
+        all_stances.update(dist.keys())
+
+    n = len(provider_results)
+    dists_list = [dist for _, dist in provider_results]
+
+    # プロバイダ間一致度: 1 - 平均ペアワイズ TVD (Total Variation Distance)
+    agreement_score = 1.0
+    if n >= 2:
+        # 各プロバイダの平均 TVD を計算（コンセンサスから遠いプロバイダは低重み）
+        avg_tvd_per_provider: dict[str, float] = {}
+        for i, (provider, _) in enumerate(provider_results):
+            tvds = []
+            for j in range(n):
+                if i == j:
+                    continue
+                d = sum(abs(dists_list[i].get(s, 0.0) - dists_list[j].get(s, 0.0)) for s in all_stances) / 2.0
+                tvds.append(d)
+            avg_tvd_per_provider[provider] = sum(tvds) / len(tvds)
+
+        # 逆 TVD で重み付け: コンセンサスに近いプロバイダほど高い重み
+        inv_tvds = {p: 1.0 / (tvd + 1e-8) for p, tvd in avg_tvd_per_provider.items()}
+        inv_total = sum(inv_tvds.values())
+        weights = {p: v / inv_total for p, v in inv_tvds.items()}
+
+        avg_distance = sum(avg_tvd_per_provider.values()) / len(avg_tvd_per_provider)
+        agreement_score = max(0.0, 1.0 - avg_distance)
+    else:
+        weights = {provider_results[0][0]: 1.0}
+
+    # 加重平均で ensemble_distribution を算出
+    ensemble: dict[str, float] = {s: 0.0 for s in all_stances}
+    for provider, dist in provider_results:
+        w = weights[provider]
+        for stance in all_stances:
+            ensemble[stance] += dist.get(stance, 0.0) * w
+
+    # 正規化
+    total = sum(ensemble.values())
+    if total > 0:
+        ensemble = {k: v / total for k, v in ensemble.items()}
+
+    return {
+        "ensemble_distribution": ensemble,
+        "provider_distributions": [
+            {"provider": p, "distribution": d} for p, d in provider_results
+        ],
+        "weights": weights,
+        "agreement_score": agreement_score,
+    }

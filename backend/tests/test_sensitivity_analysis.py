@@ -143,3 +143,118 @@ async def test_sensitivity_max_deviation():
     dev = result["max_deviation"]
     assert isinstance(dev, float), f"max_deviation must be float, got {type(dev)}"
     assert dev >= 0.0, f"max_deviation must be non-negative, got {dev}"
+
+
+# ===== Phase C: Provider-mix ensemble テスト =====
+
+# プロバイダごとに異なる分布を返すモック
+provider_distributions = {
+    "openai": {"賛成": 0.35, "反対": 0.30, "中立": 0.15, "条件付き賛成": 0.10, "条件付き反対": 0.10},
+    "anthropic": {"賛成": 0.40, "反対": 0.25, "中立": 0.15, "条件付き賛成": 0.12, "条件付き反対": 0.08},
+    "google": {"賛成": 0.38, "反対": 0.28, "中立": 0.14, "条件付き賛成": 0.11, "条件付き反対": 0.09},
+}
+
+
+def _make_provider_activation_fn(provider_dists: dict[str, dict]):
+    """プロバイダ名に応じて異なる分布を返す activation_fn モック。"""
+    async def activation_fn(agents, theme, **kwargs):
+        provider = kwargs.get("provider", "openai")
+        dist = provider_dists.get(provider, list(provider_dists.values())[0])
+        return {
+            "stance_distribution": dist,
+            "responses": [],
+        }
+    return activation_fn
+
+
+@pytest.mark.asyncio
+async def test_ensemble_returns_ensemble_distribution():
+    """返り値に ensemble_distribution (合計≈1.0 の dict) が存在すること。"""
+    from src.app.services.society.sensitivity_analysis import run_provider_ensemble
+
+    activation_fn = _make_provider_activation_fn(provider_distributions)
+    result = await run_provider_ensemble(
+        agents=SAMPLE_AGENTS,
+        theme=SAMPLE_THEME,
+        providers=["openai", "anthropic", "google"],
+        activation_fn=activation_fn,
+    )
+
+    assert "ensemble_distribution" in result
+    dist = result["ensemble_distribution"]
+    assert isinstance(dist, dict)
+    assert sum(dist.values()) == pytest.approx(1.0, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_ensemble_returns_provider_distributions():
+    """返り値に各プロバイダの分布が含まれること。"""
+    from src.app.services.society.sensitivity_analysis import run_provider_ensemble
+
+    activation_fn = _make_provider_activation_fn(provider_distributions)
+    result = await run_provider_ensemble(
+        agents=SAMPLE_AGENTS,
+        theme=SAMPLE_THEME,
+        providers=["openai", "anthropic"],
+        activation_fn=activation_fn,
+    )
+
+    assert "provider_distributions" in result
+    assert len(result["provider_distributions"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_ensemble_returns_agreement_score():
+    """返り値に agreement_score (0-1) が存在すること。"""
+    from src.app.services.society.sensitivity_analysis import run_provider_ensemble
+
+    activation_fn = _make_provider_activation_fn(provider_distributions)
+    result = await run_provider_ensemble(
+        agents=SAMPLE_AGENTS,
+        theme=SAMPLE_THEME,
+        providers=["openai", "anthropic", "google"],
+        activation_fn=activation_fn,
+    )
+
+    assert "agreement_score" in result
+    score = result["agreement_score"]
+    assert isinstance(score, float)
+    assert 0.0 <= score <= 1.0
+
+
+@pytest.mark.asyncio
+async def test_ensemble_returns_weights():
+    """返り値に provider weights が存在すること。"""
+    from src.app.services.society.sensitivity_analysis import run_provider_ensemble
+
+    activation_fn = _make_provider_activation_fn(provider_distributions)
+    result = await run_provider_ensemble(
+        agents=SAMPLE_AGENTS,
+        theme=SAMPLE_THEME,
+        providers=["openai", "anthropic"],
+        activation_fn=activation_fn,
+    )
+
+    assert "weights" in result
+    weights = result["weights"]
+    assert len(weights) == 2
+    assert sum(weights.values()) == pytest.approx(1.0, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_ensemble_single_provider_returns_its_distribution():
+    """プロバイダ1つの場合、そのプロバイダの分布がそのまま返る。"""
+    from src.app.services.society.sensitivity_analysis import run_provider_ensemble
+
+    activation_fn = _make_provider_activation_fn(provider_distributions)
+    result = await run_provider_ensemble(
+        agents=SAMPLE_AGENTS,
+        theme=SAMPLE_THEME,
+        providers=["openai"],
+        activation_fn=activation_fn,
+    )
+
+    ensemble = result["ensemble_distribution"]
+    expected = provider_distributions["openai"]
+    for stance, prob in expected.items():
+        assert ensemble[stance] == pytest.approx(prob, abs=0.01)

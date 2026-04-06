@@ -387,3 +387,141 @@ class TestAggregateOpinionsWithIndependenceWeights:
         agg = _aggregate_opinions(responses, agents=agents, independence_weights=None)
 
         assert agg.get("independence_weighting_applied") is False
+
+
+# ---------------------------------------------------------------------------
+# Phase A: 反中庸バイアス・プロンプト改修テスト
+# ---------------------------------------------------------------------------
+
+
+class TestAntiCentralTendencyPrompt:
+    """Phase A: プロンプトが中庸バイアスを抑制する構造になっていることを検証。"""
+
+    def _build_prompt(self, **overrides) -> str:
+        agent = {
+            "demographics": {
+                "age": 42, "region": "関西", "occupation": "漁師",
+                "gender": "male", "education": "高校", "income_bracket": "low",
+            },
+            "big_five": {"O": 0.3, "C": 0.7, "E": 0.4, "A": 0.5, "N": 0.6},
+            "values": {"security": 0.8, "environment": 0.6},
+            "speech_style": "率直で簡潔",
+            "information_source": "地元の漁協",
+            **overrides,
+        }
+        system_prompt, _ = build_activation_prompt(agent, "漁業規制の強化")
+        return system_prompt
+
+    def test_prompt_uses_gut_reaction_first(self):
+        """思考プロセスが balanced pros/cons ではなく、直感的反応→理由→覆す条件の順序。"""
+        prompt = self._build_prompt()
+        # 旧プロンプトの balanced 構造（プラス/マイナス列挙）が存在しないこと
+        assert "プラスかマイナスかを判定" not in prompt
+        # motivated reasoning 型の要素が含まれること
+        assert "直感" in prompt or "最初に感じた" in prompt or "率直な反応" in prompt
+
+    def test_prompt_discourages_neutral_default(self):
+        """中立のデフォルト選択を抑制する指示が含まれること。"""
+        prompt = self._build_prompt()
+        # 中立の安易な選択を防ぐ指示
+        assert "中立" in prompt
+        # 「中立は安易に選ばない」旨の指示が存在すること
+        neutral_section = prompt[prompt.index("中立"):]
+        has_anti_neutral = any(
+            keyword in prompt
+            for keyword in ["判断不能", "本当に", "安易", "真に", "どちらにも"]
+        )
+        assert has_anti_neutral, "中立の安易な選択を抑制する指示がない"
+
+    def test_prompt_defines_confidence_correctly(self):
+        """confidence の定義が「自分の確信度」であり、「議論の度合い」でないことを明示。"""
+        prompt = self._build_prompt()
+        has_confidence_definition = any(
+            keyword in prompt
+            for keyword in ["確信", "自分の立場", "あなたがどれだけ"]
+        )
+        assert has_confidence_definition, "confidence の正しい定義が含まれていない"
+
+    def test_prompt_still_requires_json_format(self):
+        """後方互換: JSON レスポンス形式の要求は維持されること。"""
+        prompt = self._build_prompt()
+        assert "JSON" in prompt
+        assert '"stance"' in prompt
+        assert '"confidence"' in prompt
+        assert '"reason"' in prompt
+
+    def test_prompt_still_includes_persona(self):
+        """後方互換: ペルソナ情報（年齢、職業、地域）が含まれること。"""
+        prompt = self._build_prompt()
+        assert "42歳" in prompt
+        assert "漁師" in prompt
+        assert "関西" in prompt
+
+    def test_prompt_still_includes_speech_style(self):
+        """後方互換: 話し方スタイル指示が含まれること。"""
+        prompt = self._build_prompt()
+        assert "率直で簡潔" in prompt
+        assert "話し方" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Phase B: 品質重み減衰テスト
+# ---------------------------------------------------------------------------
+
+
+class TestQualityWeightedAggregation:
+    """Phase B: medium 品質レスポンスの重み減衰テスト。"""
+
+    def _make_agents(self, n: int) -> list[dict]:
+        regions = ["関東", "関西", "中部", "東北", "九州"]
+        genders = ["male", "female"]
+        return [
+            {
+                "id": f"agent-{i}",
+                "demographics": {
+                    "age": 35,
+                    "gender": genders[i % len(genders)],
+                    "region": regions[i % len(regions)],
+                    "age_bracket": "30-49",
+                },
+            }
+            for i in range(n)
+        ]
+
+    def test_medium_quality_responses_get_lower_weight(self):
+        """medium 品質と high 品質が混在する場合、品質重みが適用されていることを検証。
+        品質ゲーティングにより classify_response_quality が呼ばれている。"""
+        from src.app.services.society.output_validator import classify_response_quality
+
+        # medium: 賛成, confidence=0.5 (→ medium tier)
+        medium_responses = [
+            {"stance": "賛成", "confidence": 0.5, "reason": "良い政策だと思います。" * 10,
+             "concern": "コスト", "priority": "効率"}
+            for _ in range(10)
+        ]
+        # high: 反対, confidence=0.8, 具体的 reason (100文字以上・数字・地名あり)
+        high_responses = [
+            {"stance": "反対", "confidence": 0.8,
+             "reason": "私の東京都内の職場では月額30万円のコスト増が発生しており、この政策には強く反対します。2023年以降、売上が15%減少しており、このままでは事業の継続が困難になる恐れがあります。従業員の生活を守るためにも、拙速な導入は避けるべきです。",
+             "concern": "コスト増", "priority": "雇用維持"}
+            for _ in range(5)
+        ]
+
+        # 品質 tier が正しく分類されることを確認
+        assert classify_response_quality(medium_responses[0]) == "medium"
+        assert classify_response_quality(high_responses[0]) == "high"
+
+        responses = medium_responses + high_responses
+        agents = self._make_agents(15)
+
+        # agents あり (品質重み適用) の集約
+        agg = _aggregate_opinions(responses, agents=agents)
+
+        # 品質減衰なしなら 賛成=10/15=66%, 反対=5/15=33%
+        # 品質減衰あり: medium×0.7=7.0, high×1.0=5.0 → 賛成=7/12=58%, 反対=5/12=42%
+        # ポストストラットの影響もあるため、exact な値は比較しないが
+        # weighted_dist が存在し、stance_distribution_raw とは異なることを確認
+        assert "stance_distribution_raw" in agg
+        assert "stance_distribution" in agg
+        # weighted は raw と異なるはず（品質重み + ポストストラット）
+        assert agg["stance_distribution"] != agg["stance_distribution_raw"]

@@ -44,7 +44,7 @@ async function handleSubmit() {
   error.value = ''
 
   if (!decisionContext.value.trim()) {
-    error.value = '政策の説明を入力してください'
+    error.value = '比べたいテーマを入力してください'
     return
   }
   if (!selectedPopulationId.value) {
@@ -68,7 +68,7 @@ async function handleSubmit() {
     })
     router.push(`/scenario/${pair.id}`)
   } catch {
-    error.value = scenarioPairStore.error || 'シナリオ比較の作成に失敗しました'
+    error.value = scenarioPairStore.error || '2条件比較の作成に失敗しました'
   } finally {
     isLoading.value = false
   }
@@ -78,8 +78,8 @@ async function handleSubmit() {
 <template>
   <div class="compare-setup-page">
     <section class="page-header">
-      <h2 class="page-title">シナリオ比較</h2>
-      <p class="page-desc">ベースラインと政策介入を比較し、社会への影響を可視化します</p>
+      <h2 class="page-title">2つの条件を比べる</h2>
+      <p class="page-desc">同じ母集団で、「介入なし」と「介入あり」を見比べます</p>
     </section>
 
     <div v-if="loadError" class="notice error">{{ loadError }}</div>
@@ -91,22 +91,22 @@ async function handleSubmit() {
 
     <form v-else class="compare-form" @submit.prevent="handleSubmit">
       <div class="form-group">
-        <label class="form-label" for="decision-context">政策の説明</label>
+        <label class="form-label" for="decision-context">比べたいテーマ</label>
         <input
           id="decision-context"
           v-model="decisionContext"
           class="form-input"
           type="text"
-          placeholder="例: 住宅補助金制度の導入"
+          placeholder="例: 住宅補助金制度を導入したらどうなるか"
           data-testid="compare-decision-context"
         />
       </div>
 
       <fieldset class="form-fieldset">
-        <legend class="form-legend">介入パラメータ</legend>
+        <legend class="form-legend">介入ありの条件</legend>
         <div class="param-grid">
           <div class="form-group">
-            <label class="form-label" for="policy-type">政策タイプ</label>
+            <label class="form-label" for="policy-type">施策の種類</label>
             <input
               id="policy-type"
               v-model="policyType"
@@ -117,7 +117,7 @@ async function handleSubmit() {
             />
           </div>
           <div class="form-group">
-            <label class="form-label" for="amount">金額・規模</label>
+            <label class="form-label" for="amount">規模・金額</label>
             <input
               id="amount"
               v-model="amount"
@@ -196,7 +196,7 @@ async function handleSubmit() {
         data-testid="compare-submit-button"
       >
         <span v-if="isLoading" class="spinner"></span>
-        {{ isLoading ? '作成中...' : 'シナリオ比較を開始' }}
+        {{ isLoading ? '作成中...' : 'この条件で比較する' }}
       </button>
     </form>
   </div>

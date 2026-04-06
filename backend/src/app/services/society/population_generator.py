@@ -240,19 +240,71 @@ def _generate_demographics(pop_config: dict) -> dict:
     }
 
 
-def _generate_big_five(pop_config: dict) -> dict:
-    """Big Five パーソナリティ特性を生成する。"""
-    bf_cfg = pop_config.get("big_five", {})
-    mean = bf_cfg.get("mean", 0.5)
-    std = bf_cfg.get("std", 0.2)
+# 日本人 Big Five ノルム（Oshio et al. 2012 TIPI-J ベース）
+_BIG_FIVE_MEANS = [0.45, 0.55, 0.50, 0.58, 0.50]  # O, C, E, A, N
+_BIG_FIVE_STD = 0.18
+# 相関行列（meta-analysis 由来の近似値）
+#              O     C     E     A     N
+_BIG_FIVE_CORR = [
+    [1.0,  0.1,  0.3,  0.1, -0.2],  # O
+    [0.1,  1.0,  0.1,  0.2, -0.3],  # C
+    [0.3,  0.1,  1.0,  0.1, -0.2],  # E
+    [0.1,  0.2,  0.1,  1.0, -0.2],  # A
+    [-0.2, -0.3, -0.2, -0.2,  1.0],  # N
+]
 
-    return {
-        "O": round(_sample_normal_clamped(mean, std), 3),  # Openness
-        "C": round(_sample_normal_clamped(mean, std), 3),  # Conscientiousness
-        "E": round(_sample_normal_clamped(mean, std), 3),  # Extraversion
-        "A": round(_sample_normal_clamped(mean, std), 3),  # Agreeableness
-        "N": round(_sample_normal_clamped(mean, std), 3),  # Neuroticism
-    }
+
+def _cholesky_decompose(corr: list[list[float]]) -> list[list[float]]:
+    """相関行列のコレスキー分解（下三角行列）。numpy 不要。"""
+    n = len(corr)
+    L = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1):
+            s = sum(L[i][k] * L[j][k] for k in range(j))
+            if i == j:
+                L[i][j] = (corr[i][i] - s) ** 0.5
+            else:
+                L[i][j] = (corr[i][j] - s) / L[j][j]
+    return L
+
+
+# キャッシュ（1回だけ計算）
+_CHOLESKY_L: list[list[float]] | None = None
+
+
+def _get_cholesky() -> list[list[float]]:
+    global _CHOLESKY_L
+    if _CHOLESKY_L is None:
+        _CHOLESKY_L = _cholesky_decompose(_BIG_FIVE_CORR)
+    return _CHOLESKY_L
+
+
+def _generate_big_five(pop_config: dict) -> dict:
+    """Big Five パーソナリティ特性を多変量正規分布で生成する。
+
+    日本人ノルム（Oshio et al. 2012）に基づく非対称平均と特性間相関を反映。
+    """
+    bf_cfg = pop_config.get("big_five", {})
+    std = bf_cfg.get("std", _BIG_FIVE_STD)
+
+    # 独立標準正規乱数を5つ生成
+    z = [random.gauss(0, 1) for _ in range(5)]
+
+    # コレスキー分解で相関を付与: x = L @ z
+    L = _get_cholesky()
+    correlated = [
+        sum(L[i][j] * z[j] for j in range(i + 1))
+        for i in range(5)
+    ]
+
+    # 平均とスケールを適用し [0, 1] にクランプ
+    traits = {}
+    labels = ["O", "C", "E", "A", "N"]
+    for k, label in enumerate(labels):
+        raw = _BIG_FIVE_MEANS[k] + std * correlated[k]
+        traits[label] = round(max(0.0, min(1.0, raw)), 3)
+
+    return traits
 
 
 def _generate_values() -> dict:

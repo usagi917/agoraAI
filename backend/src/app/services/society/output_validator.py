@@ -96,6 +96,44 @@ def _is_high_quality_response(response: dict) -> tuple[bool, list[str]]:
     return len(issues) == 0, issues
 
 
+def classify_response_quality(response: dict) -> str:
+    """レスポンスを3段階の品質 tier に分類する。
+
+    Returns:
+        "high" — 全チェックパス (長さ100+, 具体性あり, 非デフォルトパターン, confidence≠0.5)
+        "medium" — 長さOKだが具体性不足、または confidence=0.5 ちょうど
+        "low" — 長さ不足、デフォルトパターン、_failed フラグ
+    """
+    # _failed フラグ → 即 low
+    if response.get("_failed"):
+        return "low"
+
+    reason = response.get("reason", "")
+    stance = response.get("stance", "中立")
+    confidence = response.get("confidence", 0.5)
+
+    # デフォルトパターン (stance=中立 + confidence=0.5) → low
+    if stance == "中立" and confidence == 0.5:
+        return "low"
+
+    # reason が短すぎる → low
+    if len(reason) < _MIN_REASON_LENGTH:
+        return "low"
+
+    # ここから medium vs high の判定
+    has_specific = any(pat.search(reason) for pat in _SPECIFICITY_PATTERNS)
+
+    # 具体性なし → medium
+    if not has_specific:
+        return "medium"
+
+    # confidence が 0.5 ちょうど → medium（LLM のデフォルト出力の疑い）
+    if confidence == 0.5:
+        return "medium"
+
+    return "high"
+
+
 # ---------------------------------------------------------------------------
 # 公開 API
 # ---------------------------------------------------------------------------

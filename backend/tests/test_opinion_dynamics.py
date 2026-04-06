@@ -153,12 +153,12 @@ class TestFriedkinJohnsen:
         assert result.updated_opinions[1][0] == pytest.approx(0.5, abs=1e-9)
 
     def test_stubbornness_from_big_five(self):
-        """Stubbornness derived from Big Five C: s = 0.3 + 0.4 * C."""
+        """Stubbornness derived from Big Five C: s = 0.4 + 0.45 * C (range [0.4, 0.85])."""
         from src.app.services.society.opinion_dynamics import stubbornness_from_big_five
 
-        assert stubbornness_from_big_five(0.0) == pytest.approx(0.3)
-        assert stubbornness_from_big_five(0.5) == pytest.approx(0.5)
-        assert stubbornness_from_big_five(1.0) == pytest.approx(0.7)
+        assert stubbornness_from_big_five(0.0) == pytest.approx(0.4)
+        assert stubbornness_from_big_five(0.5) == pytest.approx(0.625)
+        assert stubbornness_from_big_five(1.0) == pytest.approx(0.85)
 
 
 # ===========================================================================
@@ -424,3 +424,33 @@ class TestFullRun:
         assert len(clusters) == 2
         sizes = sorted([c.size for c in clusters])
         assert sizes == [5, 5]
+
+
+# ===========================================================================
+# Phase G: Variance-based early stopping
+# ===========================================================================
+
+class TestVarianceBasedStopping:
+    """Phase G: 分散ベースの早期停止テスト。"""
+
+    def test_detect_variance_plateau(self):
+        """意見分散が安定したら detect_variance_plateau が True を返す。"""
+        # 全員同意見 → 分散変化なし → plateau 検出
+        agents = _make_agents([0.5, 0.5, 0.5, 0.5], stubbornness=[1.0] * 4)
+        edges = _make_edges([(0, 1), (1, 0), (1, 2), (2, 1), (2, 3), (3, 2)])
+        engine = OpinionDynamicsEngine(agents, edges, confidence_threshold=0.5)
+
+        for t in range(4):
+            engine.propagation_step(timestep=t)
+
+        assert engine.detect_variance_plateau(window=3, tolerance=0.01) is True
+
+    def test_no_plateau_when_opinions_shifting(self):
+        """意見が大きく変化中は plateau を検出しない。"""
+        agents = _make_agents([0.0, 1.0], stubbornness=[0.3, 0.3])
+        edges = _make_edges([(0, 1), (1, 0)])
+        engine = OpinionDynamicsEngine(agents, edges, confidence_threshold=1.0)
+
+        engine.propagation_step(timestep=0)
+
+        assert engine.detect_variance_plateau(window=3, tolerance=0.01) is False

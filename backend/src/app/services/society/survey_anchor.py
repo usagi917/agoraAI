@@ -141,22 +141,62 @@ def _jaccard(left: set[str], right: set[str]) -> float:
     return len(left & right) / len(union)
 
 
+# 日本語政策用語の同義語テーブル
+_SYNONYMS: dict[str, list[str]] = {
+    "インフレ": ["物価上昇", "インフレーション"],
+    "物価上昇": ["インフレ", "インフレーション"],
+    "景気後退": ["リセッション", "不景気"],
+    "リセッション": ["景気後退", "不景気"],
+    "増税": ["税率引き上げ", "税負担増"],
+    "税率引き上げ": ["増税", "税負担増"],
+    "少子化": ["出生率低下", "人口減少"],
+    "高齢化": ["超高齢社会", "老齢化"],
+    "円安": ["通貨安", "為替下落"],
+    "賃上げ": ["賃金上昇", "ベースアップ"],
+}
+
+_MIN_MATCH_THRESHOLD = 0.05
+
+
+def _expand_synonyms(text: str) -> str:
+    """テキスト中のキーワードを同義語で展開する。"""
+    expanded = text
+    for keyword, synonyms in _SYNONYMS.items():
+        if keyword in text:
+            expanded += " " + " ".join(synonyms)
+    return expanded
+
+
 def find_relevant_surveys(
     theme: str,
     surveys: list[SurveyRecord],
     top_k: int = 5,
+    theme_category: str | None = None,
 ) -> list[SurveyRecord]:
-    """テーマキーワードでの関連調査検索。n-gram Jaccard によるマッチング。"""
-    theme_ngrams = _ngrams(theme)
+    """テーマキーワードでの関連調査検索。
+
+    改善点:
+    - theme_category によるプレフィルタ
+    - 同義語展開
+    - 最低マッチ閾値 (Jaccard > 0.15)
+    """
+    # カテゴリプレフィルタ
+    candidates = surveys
+    if theme_category is not None:
+        candidates = [s for s in surveys if s.get("theme_category") == theme_category]
+
+    # 同義語展開
+    expanded_theme = _expand_synonyms(theme)
+    theme_ngrams = _ngrams(expanded_theme)
     if not theme_ngrams:
         return []
 
     scored: list[tuple[float, SurveyRecord]] = []
-    for survey in surveys:
-        # テーマ名とキーワードを結合してマッチング
+    for survey in candidates:
         searchable = survey["theme"] + " " + " ".join(survey["relevance_keywords"])
-        score = _jaccard(theme_ngrams, _ngrams(searchable))
-        if score > 0:
+        expanded_searchable = _expand_synonyms(searchable)
+        score = _jaccard(theme_ngrams, _ngrams(expanded_searchable))
+        if score >= _MIN_MATCH_THRESHOLD:
             scored.append((score, survey))
 
     scored.sort(key=lambda x: x[0], reverse=True)

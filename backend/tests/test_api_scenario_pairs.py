@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.app.api.deps import get_session
+from src.app.api.routes import scenario_pairs as scenario_pairs_route
 from src.app.database import Base
 from src.app.main import app
 from src.app.models import _import_all_models
@@ -50,6 +51,17 @@ async def client(session_factory):
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def mock_spawn_simulation(monkeypatch):
+    calls: list[str] = []
+
+    def fake_spawn_simulation(simulation_id: str) -> None:
+        calls.append(simulation_id)
+
+    monkeypatch.setattr(scenario_pairs_route, "spawn_simulation", fake_spawn_simulation)
+    return calls
+
+
 async def _seed_population(session_factory) -> str:
     """Create a Population record and return its id."""
     async with session_factory() as session:
@@ -90,7 +102,7 @@ async def _seed_simulation_with_audit_events(session_factory) -> str:
 
 
 @pytest.mark.asyncio
-async def test_create_scenario_pair_endpoint(client, session_factory):
+async def test_create_scenario_pair_endpoint(client, session_factory, mock_spawn_simulation):
     """POST /scenario-pairs -> 201 + correct response."""
     population_id = await _seed_population(session_factory)
 
@@ -114,6 +126,10 @@ async def test_create_scenario_pair_endpoint(client, session_factory):
     assert payload["decision_context"] == "Youth employment subsidy policy"
     assert payload["status"] == "created"
     assert payload["created_at"]
+    assert mock_spawn_simulation == [
+        payload["baseline_simulation_id"],
+        payload["intervention_simulation_id"],
+    ]
 
 
 @pytest.mark.asyncio
@@ -140,6 +156,7 @@ async def test_get_scenario_pair_endpoint(client, session_factory):
     assert payload["id"] == pair_id
     assert payload["intervention_params"]["tax_rate"] == 0.15
     assert payload["decision_context"] == "Tax policy change"
+    assert payload["status"] == "running"
 
 
 @pytest.mark.asyncio

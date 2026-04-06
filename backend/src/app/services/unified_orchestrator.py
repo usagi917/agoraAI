@@ -10,12 +10,13 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from src.app.database import async_session
-from src.app.models.simulation import Simulation
 from src.app.models.kg_node import KGNode
 from src.app.models.kg_edge import KGEdge
+from src.app.models.simulation import Simulation
 from src.app.services.phases.society_pulse import run_society_pulse
 from src.app.services.phases.council_deliberation import run_council
 from src.app.services.phases.synthesis import run_synthesis
+from src.app.services.scenario_pair_status import refresh_scenario_pair_status
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,7 @@ async def run_unified(simulation_id: str) -> None:
             }
             sim.status = "completed"
             sim.completed_at = datetime.now(timezone.utc)
+            await refresh_scenario_pair_status(session, sim.scenario_pair_id)
             await session.commit()
 
             await sse_manager.publish(simulation_id, "simulation_completed", {
@@ -190,6 +192,7 @@ async def run_unified(simulation_id: str) -> None:
             await session.rollback()
             sim.status = "failed"
             sim.error_message = f"{type(e).__name__}: {e}"[:500]
+            await refresh_scenario_pair_status(session, sim.scenario_pair_id)
             await session.commit()
 
             await sse_manager.publish(simulation_id, "simulation_failed", {

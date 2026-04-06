@@ -1,9 +1,10 @@
-"""Simulation Dispatcher v2: プリセット駆動
+"""Simulation Dispatcher v2: プリセット駆動.
 
 旧9モードを normalize_mode() で5プリセットに正規化し、
 baseline は専用オーケストレータ、それ以外は unified に委譲する。
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -14,11 +15,21 @@ from src.app.database import async_session
 from src.app.models.project import Project
 from src.app.models.scenario_pair import ScenarioPair
 from src.app.models.simulation import Simulation, normalize_mode
+from src.app.services.scenario_pair_status import refresh_scenario_pair_status
 from src.app.services.baseline_orchestrator import run_baseline
 from src.app.services.unified_orchestrator import run_unified
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
+
+_background_tasks: set[asyncio.Task] = set()
+
+
+def spawn_simulation(simulation_id: str) -> None:
+    """Launch a simulation in the background and keep a strong task reference."""
+    task = asyncio.create_task(dispatch_simulation(simulation_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 async def dispatch_simulation(simulation_id: str) -> None:
@@ -36,6 +47,7 @@ async def dispatch_simulation(simulation_id: str) -> None:
             sim.mode = normalize_mode(sim.mode)
             sim.status = "running"
             sim.started_at = datetime.now(timezone.utc)
+            await refresh_scenario_pair_status(session, sim.scenario_pair_id)
             await session.commit()
 
             # Decision Lab: scenario_pair_id があれば intervention_params を取得
@@ -68,6 +80,7 @@ async def dispatch_simulation(simulation_id: str) -> None:
                 if sim:
                     sim.status = "failed"
                     sim.error_message = error_msg[:500]
+                    await refresh_scenario_pair_status(session, sim.scenario_pair_id)
                     await session.commit()
             except Exception as db_err:
                 logger.error("Failed to update simulation status: %s", db_err)

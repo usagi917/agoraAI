@@ -50,9 +50,10 @@ class ClusterInfo:
 def stubbornness_from_big_five(conscientiousness: float) -> float:
     """Derive stubbornness from Big Five Conscientiousness score.
 
-    s = 0.3 + 0.4 * C, yielding range [0.3, 0.7].
+    s = 0.4 + 0.45 * C, yielding range [0.4, 0.85].
+    Higher range preserves stronger initial convictions.
     """
-    return 0.3 + 0.4 * conscientiousness
+    return 0.4 + 0.45 * conscientiousness
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +150,27 @@ class OpinionDynamicsEngine:
         for k in range(1, window):
             diff = np.max(np.abs(self._history[-k] - self._history[-k - 1]))
             if diff > epsilon:
+                return False
+        return True
+
+    def detect_variance_plateau(self, window: int = 3, tolerance: float = 0.01) -> bool:
+        """意見分散が安定（plateau）したかを検出する。
+
+        直近 window ステップで分散の変化率が tolerance 以内なら True。
+        """
+        if len(self._history) < window + 1:
+            return False
+
+        variances = [
+            float(np.var(self._history[-(i + 1)]))
+            for i in range(window + 1)
+        ]
+        # 最新 window ステップの分散変化が tolerance 以内か
+        for i in range(window):
+            if variances[0] == 0 and variances[i + 1] == 0:
+                continue
+            ref = max(variances[i + 1], 1e-10)
+            if abs(variances[i] - variances[i + 1]) / ref > tolerance:
                 return False
         return True
 

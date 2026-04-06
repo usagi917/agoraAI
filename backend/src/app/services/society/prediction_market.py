@@ -26,12 +26,26 @@ class MarketPosition:
 class PredictionMarket:
     """LMSR-based prediction market for outcome probability aggregation."""
 
-    def __init__(self, outcomes: list[str], liquidity: float = 10.0) -> None:
+    def __init__(self, outcomes: list[str], liquidity: float = 10.0, adaptive_b: bool = False) -> None:
         self._outcomes = outcomes
-        self._liquidity = liquidity  # LMSR 'b' parameter
+        self._liquidity = liquidity  # LMSR 'b' base parameter
+        self._adaptive_b = adaptive_b
         # Quantity per outcome (starts at 0 for uniform prior)
         self._quantities: dict[str, float] = {o: 0.0 for o in outcomes}
         self._positions: list[MarketPosition] = []
+
+    @property
+    def effective_liquidity(self) -> float:
+        """現在のベット数に応じた実効 liquidity を返す。
+
+        adaptive_b=True の場合: b = base_b * sqrt(n_bets / 10)
+        n_bets < 10 では b が縮小し個々のベットの影響が大きくなり、
+        n_bets > 10 では b が拡大し市場が安定化する。
+        """
+        if not self._adaptive_b:
+            return self._liquidity
+        n_bets = len(self._positions)
+        return self._liquidity * math.sqrt(max(1, n_bets) / 10.0)
 
     def submit_bet(self, agent_id: str, outcome: str, confidence: float, weight: float = 1.0) -> None:
         """Agent bets confidence on an outcome, scaled by independence weight."""
@@ -47,7 +61,7 @@ class PredictionMarket:
         Uses log-sum-exp trick for numerical stability: subtract max(q)
         before exponentiation to prevent overflow with large quantities.
         """
-        b = self._liquidity
+        b = self.effective_liquidity
         max_q = max(self._quantities.values())
         exp_vals = {o: math.exp((q - max_q) / b) for o, q in self._quantities.items()}
         total = sum(exp_vals.values())

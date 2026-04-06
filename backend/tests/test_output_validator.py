@@ -3,6 +3,7 @@
 import pytest
 
 from src.app.services.society.output_validator import (
+    classify_response_quality,
     validate_activation_meeting_consistency,
     validate_minority_preservation,
     validate_response_quality,
@@ -284,3 +285,87 @@ class TestMinorityPreservation:
         )
         assert "status" in result
         assert "missing_minorities" in result
+
+
+# ---------------------------------------------------------------------------
+# Phase B: classify_response_quality (3段階品質分類)
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyResponseQuality:
+    """Phase B: レスポンス品質を high/medium/low の3段階に分類するテスト。"""
+
+    def test_high_quality(self):
+        """長さ十分 + 具体性あり + 非デフォルト → 'high'"""
+        response = {
+            "stance": "反対",
+            "confidence": 0.85,
+            "reason": (
+                "私の職場では2023年以降、この政策の影響を直接受けてきました。"
+                "東京都内の中小企業に勤める者として、具体的なコストは月額30万円程度増加しており、"
+                "現場の声を無視した推進には強く反対します。地域の経済状況を鑑みると、慎重な議論が必要だと痛感しています。"
+            ),
+        }
+        tier = classify_response_quality(response)
+        assert tier == "high"
+
+    def test_low_quality_short_reason(self):
+        """reason が短すぎる → 'low'"""
+        response = {
+            "stance": "賛成",
+            "confidence": 0.8,
+            "reason": "良いと思います。",
+        }
+        tier = classify_response_quality(response)
+        assert tier == "low"
+
+    def test_low_quality_default_pattern(self):
+        """stance=中立 + confidence=0.5 → 'low' (デフォルトパターン)"""
+        response = {
+            "stance": "中立",
+            "confidence": 0.5,
+            "reason": "特に意見はありませんが、社会にとっては重要な問題であると考えます。何か具体的な影響が見えてくれば、改めて考えたいと思います。慎重に見守りたいです。",
+        }
+        tier = classify_response_quality(response)
+        assert tier == "low"
+
+    def test_medium_quality_no_specificity(self):
+        """長さOKだが具体性（数字・地名・個人言及）なし → 'medium'"""
+        response = {
+            "stance": "賛成",
+            "confidence": 0.7,
+            "reason": (
+                "この政策は社会全体にとって有益であると考えます。"
+                "経済的な影響も大きく、今後の展開に期待しています。"
+                "国民全体が恩恵を受ける可能性があり、慎重かつ前向きな議論が求められます。"
+                "将来の世代にとっても重要な意味を持つでしょう。早期の実現を望みます。"
+            ),
+        }
+        tier = classify_response_quality(response)
+        assert tier == "medium"
+
+    def test_medium_quality_exact_default_confidence(self):
+        """長さ・具体性OKだが confidence=0.5 ちょうど → 'medium'"""
+        response = {
+            "stance": "賛成",
+            "confidence": 0.5,
+            "reason": (
+                "私の職場の近くの東京都内では、この政策の影響で月額20万円のコスト増があると聞きました。"
+                "しかし一方で長期的な経済効果も見込まれるため、慎重に判断したいと思います。"
+                "今後の具体的なデータが出てくるまでは様子を見るのが賢明だと考えています。"
+            ),
+        }
+        tier = classify_response_quality(response)
+        assert tier == "medium"
+
+    def test_missing_reason_key(self):
+        """reason キーが欠落 → 'low'"""
+        response = {"stance": "賛成", "confidence": 0.9}
+        tier = classify_response_quality(response)
+        assert tier == "low"
+
+    def test_failed_response(self):
+        """_failed フラグ付き → 'low'"""
+        response = {"stance": "", "confidence": 0.0, "reason": "", "_failed": True}
+        tier = classify_response_quality(response)
+        assert tier == "low"

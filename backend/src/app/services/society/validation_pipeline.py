@@ -21,6 +21,10 @@ from src.app.services.society.survey_anchor import (
     ComparisonReport,
     compare_with_surveys,
 )
+from src.app.services.society.calibration import (
+    brier_external,
+    extremeness_aversion_correction,
+)
 from src.app.services.society.transfer_calibrator import (
     BiasProfile,
     compute_bias_profile,
@@ -135,3 +139,107 @@ async def update_bias_profile(
             })
 
     return compute_bias_profile(comparisons)
+
+
+class GammaSearchResult(TypedDict):
+    best_gamma: float
+    gamma_scores: list[dict]
+    theme_category: str | None
+
+
+async def find_optimal_gamma(
+    session: AsyncSession,
+    theme_category: str | None = None,
+    gamma_range: tuple[float, float] = (0.3, 1.5),
+    gamma_step: float = 0.1,
+) -> GammaSearchResult:
+    """検証済みレコードから最適な extremeness aversion γ をグリッドサーチで発見する。
+
+    各 γ 候補に対して extremeness_aversion_correction を適用し、
+    actual_distribution との Brier スコアが最小になる γ を返す。
+
+    Args:
+        session: DB セッション
+        theme_category: フィルタ用のテーマカテゴリ（None で全カテゴリ）
+        gamma_range: γ の探索範囲 (min, max)
+        gamma_step: γ のステップ幅
+
+    Returns:
+        best_gamma, gamma_scores, theme_category を含む辞書
+    """
+    _DEFAULT_GAMMA = 0.7
+
+    repo = ValidationRepository(session)
+    records = await repo.list_validated()
+
+    # カテゴリフィルタ
+    if theme_category:
+        records = [r for r in records if r.theme_category == theme_category]
+
+    if not records:
+        return GammaSearchResult(
+            best_gamma=_DEFAULT_GAMMA,
+            gamma_scores=[],
+            theme_category=theme_category,
+        )
+
+    # γ 候補を生成
+    gammas: list[float] = []
+    g = gamma_range[0]
+    while g <= gamma_range[1] + 1e-9:
+        gammas.append(round(g, 2))
+        g += gamma_step
+
+    # 各 γ について平均 Brier スコアを計算
+    gamma_scores: list[dict] = []
+    for gamma in gammas:
+        brier_sum = 0.0
+        count = 0
+        for record in records:
+            if not record.simulated_distribution or not record.actual_distribution:
+                continue
+            corrected = extremeness_aversion_correction(record.simulated_distribution, gamma)
+            # actual の最大確率スタンスを observed_outcome として使用
+            observed = max(record.actual_distribution, key=record.actual_distribution.get)
+            brier_sum += brier_external(corrected, observed)
+            count += 1
+        avg_brier = brier_sum / count if count > 0 else float("inf")
+        gamma_scores.append({"gamma": gamma, "avg_brier": avg_brier})
+
+    # 最小 Brier の γ を選択
+    best = min(gamma_scores, key=lambda x: x["avg_brier"])
+
+    return GammaSearchResult(
+        best_gamma=best["gamma"],
+        gamma_scores=gamma_scores,
+        theme_category=theme_category,
+    )
+
+
+class CategoryGammaResult(TypedDict):
+    by_category: dict[str, GammaSearchResult]
+
+
+async def find_optimal_gamma_by_category(
+    session: AsyncSession,
+) -> CategoryGammaResult:
+    """全カテゴリについて個別に最適 γ をグリッドサーチする。
+
+    Returns:
+        by_category: カテゴリ名 → GammaSearchResult のマッピング
+    """
+    repo = ValidationRepository(session)
+    records = await repo.list_validated()
+
+    # カテゴリの収集
+    categories: set[str] = set()
+    for r in records:
+        if r.theme_category:
+            categories.add(r.theme_category)
+
+    by_category: dict[str, GammaSearchResult] = {}
+    for cat in categories:
+        result = await find_optimal_gamma(session, theme_category=cat)
+        by_category[cat] = result
+
+    return CategoryGammaResult(by_category=by_category)
