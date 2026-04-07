@@ -7,7 +7,6 @@ import ComparisonBrief from '../components/ComparisonBrief.vue'
 import CoalitionMap from '../components/CoalitionMap.vue'
 import OpinionShiftTable from '../components/OpinionShiftTable.vue'
 import AuditTimeline from '../components/AuditTimeline.vue'
-import SimulationProgress from '../components/SimulationProgress.vue'
 import type { OpinionShift } from '../components/OpinionShiftTable.vue'
 import type { AuditEvent } from '../components/AuditTimeline.vue'
 
@@ -30,6 +29,25 @@ const isFailed = computed(() =>
   baselineStatus.value === 'failed' ||
   interventionStatus.value === 'failed',
 )
+
+const eventLabels: Record<string, string> = {
+  run_started: 'シミュレーション開始',
+  phase_changed: 'フェーズ移行',
+  round_completed: 'ラウンド完了',
+  colony_started: 'Colony 開始',
+  colony_completed: 'Colony 完了',
+  society_activation_progress: '社会反応を分析中',
+  meeting_dialogue: '評議会で議論中',
+  report_started: 'レポート生成開始',
+  report_completed: 'レポート完了',
+}
+
+function latestEventLabel(role: 'baseline' | 'intervention'): string {
+  const roleEvents = events.value.filter(e => e.role === role)
+  if (roleEvents.length === 0) return '接続中...'
+  const last = roleEvents[roleEvents.length - 1]
+  return eventLabels[last.event_type] || last.event_type
+}
 
 function formatStatus(status: string): string {
   switch (status) {
@@ -155,7 +173,10 @@ onMounted(async () => {
               <span class="status-dot" :class="'dot-' + baselineStatus" />
               {{ formatStatus(baselineStatus) }}
             </div>
-            <SimulationProgress />
+            <div class="sse-progress">
+              <div class="sse-progress-bar"><div class="sse-progress-fill" /></div>
+              <p class="sse-progress-label">{{ latestEventLabel('baseline') }}</p>
+            </div>
           </div>
           <div class="card">
             <h3 class="progress-label">介入あり</h3>
@@ -163,7 +184,10 @@ onMounted(async () => {
               <span class="status-dot" :class="'dot-' + interventionStatus" />
               {{ formatStatus(interventionStatus) }}
             </div>
-            <SimulationProgress />
+            <div class="sse-progress">
+              <div class="sse-progress-bar"><div class="sse-progress-fill" /></div>
+              <p class="sse-progress-label">{{ latestEventLabel('intervention') }}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -351,6 +375,41 @@ onMounted(async () => {
 .dot-running { background: var(--accent); animation: pulse-dot 1.5s infinite; }
 .dot-completed { background: var(--success); }
 .dot-failed { background: var(--danger); }
+
+/* SSE Progress */
+.sse-progress {
+  padding: 0.75rem 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.sse-progress-bar {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.sse-progress-fill {
+  height: 100%;
+  width: 40%;
+  background: linear-gradient(90deg, var(--accent), var(--highlight));
+  border-radius: 2px;
+  animation: indeterminate 1.5s ease-in-out infinite;
+}
+
+.sse-progress-label {
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+@keyframes indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
 
 /* Sections */
 .section {
