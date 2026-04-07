@@ -1,7 +1,7 @@
 import { ref, onMounted, onUnmounted, watch, type Ref } from 'vue'
 import ForceGraph3D, { type ForceGraph3DInstance } from '3d-force-graph'
 import * as THREE from 'three'
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import type { GraphNode, GraphEdge } from '../stores/graphStore'
 import {
   createSwimMotionState,

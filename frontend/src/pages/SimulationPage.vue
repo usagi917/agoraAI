@@ -1505,6 +1505,29 @@ function goToResults() {
     align-items: stretch;
   }
 
+  .status-left {
+    font-size: 0.65rem;
+    gap: 0.35rem;
+  }
+
+  .status-mono {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 9rem;
+  }
+
+  .phase-label {
+    font-size: 0.6rem;
+    white-space: normal;
+    text-align: center;
+    max-width: 10rem;
+  }
+
+  .graph-pill {
+    font-size: 0.52rem;
+    padding: 0.18rem 0.38rem;
+  }
+
   .status-right {
     width: 100%;
   }
