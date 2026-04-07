@@ -79,7 +79,11 @@ test('launches a simulation from the launchpad', async ({ page }) => {
   await page.goto('/')
   await page.getByLabel('分析プロンプト').fill('EV battery market analysis')
   await expect(page.getByTestId('launch-button')).toBeEnabled()
+  const createSimulationResponse = page.waitForResponse((response) => {
+    return response.url().endsWith('/api/simulations') && response.request().method() === 'POST'
+  })
   await page.getByTestId('launch-button').click()
+  await createSimulationResponse
 
-  await expect(page).toHaveURL(/\/sim\/sim-e2e-1$/)
+  await page.waitForURL(/\/sim\/sim-e2e-1$/, { timeout: 15_000 })
 })

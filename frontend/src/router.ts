@@ -58,7 +58,7 @@ const router = createRouter({
   ],
 })
 
-if (import.meta.env.DEV) {
+if (import.meta.env.DEV || import.meta.env.MODE === 'e2e') {
   router.addRoute({
     path: '/__e2e__/sse',
     name: 'sse-probe',
