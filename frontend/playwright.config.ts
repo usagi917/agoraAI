@@ -1,8 +1,11 @@
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
+  outputDir: join(tmpdir(), 'agentai-playwright-results'),
   retries: 0,
   use: {
     baseURL: 'http://127.0.0.1:4173',
