@@ -7,13 +7,15 @@ from src.app.models.simulation import Simulation
 
 # ステータスのランク定義: 高いほど進んだ状態。
 # refresh_scenario_pair_status はこのランクを使って後退（regression）を防ぐ。
-# 例: completed(4) -> running(2) への書き戻しを防ぐ。
+# 例: completed(3) -> running(2) への書き戻しを防ぐ。
+# completed と failed は同ランク: どちらも終端状態であり、
+# リラン後に failed -> completed への復旧を可能にする。
 _STATUS_RANK: dict[str, int] = {
     "created": 0,
     "queued": 1,
     "running": 2,
     "completed": 3,
-    "failed": 4,
+    "failed": 3,
 }
 
 

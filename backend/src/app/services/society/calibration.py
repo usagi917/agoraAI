@@ -147,6 +147,57 @@ def extremeness_aversion_correction(
     return dict(distribution)
 
 
+class TopicShrinkCalibrator:
+    """トピック別 shrink factor でキャリブレーションする。
+
+    train() でカテゴリ別に最適な shrink factor を学習し、
+    recalibrate() でトピック別に confidence を補正する。
+    未知カテゴリは global shrink factor (デフォルト 0.8) にフォールバック。
+    """
+
+    def __init__(self, global_shrink: float = 0.8) -> None:
+        self._global_shrink = global_shrink
+        self._topic_factors: dict[str, float] = {}
+
+    def recalibrate(self, confidence: float, category: str) -> float:
+        """トピック別 shrink factor で confidence を再キャリブレーション."""
+        shrink = self._topic_factors.get(category, self._global_shrink)
+        calibrated = 0.5 + shrink * (confidence - 0.5)
+        return max(0.0, min(1.0, calibrated))
+
+    def train(self, comparisons: list[dict]) -> None:
+        """カテゴリ別 shrink factor を学習する.
+
+        各 comparison は {"category", "predicted_confidence", "actual_accuracy"} を持つ。
+        カテゴリごとに、predicted_confidence と actual_accuracy の乖離から
+        最適な shrink factor を推定する。
+        """
+        from collections import defaultdict
+
+        by_category: dict[str, list[tuple[float, float]]] = defaultdict(list)
+        for comp in comparisons:
+            cat = comp["category"]
+            by_category[cat].append(
+                (comp["predicted_confidence"], comp["actual_accuracy"])
+            )
+
+        for cat, pairs in by_category.items():
+            # 簡易推定: shrink = mean(actual - 0.5) / mean(predicted - 0.5)
+            pred_devs = [p - 0.5 for p, _ in pairs]
+            actual_devs = [a - 0.5 for _, a in pairs]
+
+            mean_pred = sum(pred_devs) / len(pred_devs) if pred_devs else 0.0
+            mean_actual = sum(actual_devs) / len(actual_devs) if actual_devs else 0.0
+
+            if abs(mean_pred) > 1e-8:
+                shrink = mean_actual / mean_pred
+                shrink = max(0.1, min(1.0, shrink))
+            else:
+                shrink = self._global_shrink
+
+            self._topic_factors[cat] = round(shrink, 4)
+
+
 def apply_transfer_calibration(
     raw_distribution: dict[str, float],
     bias_profile: BiasProfile,

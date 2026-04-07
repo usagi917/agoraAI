@@ -46,6 +46,26 @@ def _occupation_to_category(occupation: str) -> str:
     return _OCCUPATION_CATEGORY_MAP.get(occupation, "other")
 
 
+# population_generator の細分化地域 → ターゲット分布の親カテゴリへのマッピング
+_REGION_NORMALIZE_MAP: dict[str, str] = {
+    "関東（都市部）": "関東",
+    "関東（郊外）": "関東",
+    "関西（都市部）": "関西",
+    "関西（郊外）": "関西",
+    "沖縄": "その他",
+}
+
+# ターゲット分布に直接存在する地域
+_TARGET_REGIONS = {"関東", "関西", "中部", "東北", "九州", "北海道", "四国", "中国", "その他"}
+
+
+def _normalize_region(region: str) -> str:
+    """population_generator の地域名をターゲット分布のカテゴリに正規化する。"""
+    if region in _TARGET_REGIONS:
+        return region
+    return _REGION_NORMALIZE_MAP.get(region, "その他")
+
+
 def effective_sample_size(weights: list[float]) -> float:
     """実効標本サイズを計算する (Kish 1965).
 
@@ -205,6 +225,7 @@ def compute_poststratification_weights(
     cap: float = 5.0,
     max_iter: int = 50,
     tol: float = 1e-6,
+    joint_targets: dict[tuple[str, str], dict[tuple[str, str], float]] | None = None,
 ) -> list[float]:
     """事後層化ウェイトをレーキング（反復比例フィッティング）で計算する.
 
@@ -247,6 +268,8 @@ def compute_poststratification_weights(
                     value = _age_bracket(age)
             elif dim == "occupation_category" and value in ("", None):
                 value = _occupation_to_category(demographics.get("occupation", ""))
+            elif dim == "region":
+                value = _normalize_region(str(value))
             dim_to_values[dim].append(str(value))
 
     for iteration in range(max_iter):
@@ -281,6 +304,36 @@ def compute_poststratification_weights(
 
         if max_change < tol:
             break
+
+    # 結合分布調整（joint_targets が指定されている場合）
+    if joint_targets:
+        for (dim_a, dim_b), joint_dist in joint_targets.items():
+            vals_a = dim_to_values.get(dim_a, [])
+            vals_b = dim_to_values.get(dim_b, [])
+            if not vals_a or not vals_b:
+                continue
+
+            # 各エージェントの (dim_a, dim_b) ペアを取得
+            for target_pair, target_prop in joint_dist.items():
+                cat_a, cat_b = target_pair
+                # このペアに属するエージェントのインデックスを収集
+                pair_indices = [
+                    i for i in range(n)
+                    if vals_a[i] == cat_a and vals_b[i] == cat_b
+                ]
+                if not pair_indices:
+                    continue
+
+                # 現在のペアのウェイト合計
+                pair_weight_sum = sum(weights[i] for i in pair_indices)
+                total_w = sum(weights)
+                if total_w == 0 or pair_weight_sum == 0:
+                    continue
+
+                current_prop = pair_weight_sum / total_w
+                ratio = target_prop / current_prop
+                for i in pair_indices:
+                    weights[i] *= ratio
 
     # 正規化 + cap を収束するまで反復（cap でクリップ後も mean=1.0 を保証）
     for _ in range(10):
@@ -442,4 +495,228 @@ def load_target_marginals() -> dict[str, dict[str, float]]:
             "not_working": 0.20,       # 学生・主婦/主夫・退職者
             "other": 0.10,             # サービス・その他
         },
+    }
+
+
+def mrp_estimate(
+    agents: list[dict],
+    responses: list[dict],
+    target_marginals: dict[str, dict[str, float]] | None = None,
+    grouping_dims: list[str] | None = None,
+) -> dict:
+    """MrP (Multilevel Regression + Post-stratification) でスタンス分布を推定する.
+
+    各人口統計セル（age_bracket × region × gender）ごとにスタンス分布を推定し、
+    ターゲット人口の周辺分布で重み付けて全体分布を算出する。
+
+    マルチレベルモデルの簡易実装:
+    - セル内のサンプルが十分（>=3）ならセル内分布をそのまま使用
+    - セル内サンプルが不足なら、同じ次元の上位カテゴリの分布で縮約（shrinkage）
+    - 全体平均を global prior として使用
+
+    Args:
+        agents: エージェントリスト（demographics 含む）
+        responses: 各エージェントの応答（stance 含む）
+        target_marginals: ターゲット周辺分布（None なら load_target_marginals() を使用）
+        grouping_dims: グルーピングに使う次元（デフォルト ["age_bracket", "region", "gender"]）
+
+    Returns:
+        {
+            "distribution": {stance: proportion},
+            "cell_estimates": {cell_key: {stance: proportion}},
+            "effective_sample_size": float,
+        }
+    """
+    if not agents or not responses:
+        return {"distribution": {}, "cell_estimates": {}, "effective_sample_size": 0.0}
+
+    if len(agents) != len(responses):
+        raise ValueError("agents and responses must have the same length")
+
+    if target_marginals is None:
+        target_marginals = load_target_marginals()
+
+    if grouping_dims is None:
+        grouping_dims = ["age_bracket", "region", "gender"]
+
+    n = len(agents)
+
+    # Step 1: 全体のスタンス分布（global prior）
+    all_stances: dict[str, int] = defaultdict(int)
+    for resp in responses:
+        stance = resp.get("stance", "")
+        if stance:
+            all_stances[stance] += 1
+    total_responses = sum(all_stances.values())
+    global_prior: dict[str, float] = {
+        s: c / total_responses for s, c in all_stances.items()
+    } if total_responses > 0 else {}
+
+    # Step 2: セルごとのスタンス分布を計算
+    cell_counts: dict[tuple[str, ...], dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    cell_totals: dict[tuple[str, ...], int] = defaultdict(int)
+
+    for agent, resp in zip(agents, responses):
+        demographics = agent.get("demographics", {})
+        stance = resp.get("stance", "")
+        if not stance:
+            continue
+
+        cell_key_parts = []
+        for dim in grouping_dims:
+            val = demographics.get(dim, "")
+            if dim == "age_bracket" and val in ("", None):
+                age = demographics.get("age")
+                if age is not None:
+                    val = _age_bracket(age)
+            elif dim == "region":
+                val = _normalize_region(str(val))
+            cell_key_parts.append(str(val))
+
+        cell_key = tuple(cell_key_parts)
+        cell_counts[cell_key][stance] += 1
+        cell_totals[cell_key] += 1
+
+    # Step 3: マルチレベル縮約（shrinkage）
+    # セル内サンプルが少ないセルは global prior に向かって縮約
+    min_cell_size = 3
+    cell_estimates: dict[str, dict[str, float]] = {}
+
+    for cell_key, counts in cell_counts.items():
+        cell_n = cell_totals[cell_key]
+        cell_dist: dict[str, float] = {}
+
+        if cell_n >= min_cell_size:
+            # 十分なサンプル: セル内分布をベースに、global prior で軽く縮約
+            shrink_weight = min_cell_size / (cell_n + min_cell_size)
+            for stance in set(list(counts.keys()) + list(global_prior.keys())):
+                cell_prop = counts.get(stance, 0) / cell_n
+                prior_prop = global_prior.get(stance, 0.0)
+                cell_dist[stance] = (1 - shrink_weight) * cell_prop + shrink_weight * prior_prop
+        else:
+            # サンプル不足: global prior を主体にセル内観測で微調整
+            shrink_weight = cell_n / (cell_n + min_cell_size)
+            for stance in set(list(counts.keys()) + list(global_prior.keys())):
+                cell_prop = counts.get(stance, 0) / cell_n if cell_n > 0 else 0.0
+                prior_prop = global_prior.get(stance, 0.0)
+                cell_dist[stance] = shrink_weight * cell_prop + (1 - shrink_weight) * prior_prop
+
+        # 正規化
+        total = sum(cell_dist.values())
+        if total > 0:
+            cell_dist = {s: v / total for s, v in cell_dist.items()}
+
+        cell_estimates["|".join(cell_key)] = cell_dist
+
+    # Step 4: ターゲット人口での事後層化
+    # 各セルのターゲット比率 = 各次元のターゲット周辺分布の積（独立性仮定）
+    aggregated: dict[str, float] = defaultdict(float)
+    total_cell_weight = 0.0
+
+    for cell_key, cell_dist in cell_estimates.items():
+        parts = cell_key.split("|")
+
+        # セルのターゲットウェイト = 各次元の周辺比率の積
+        cell_weight = 1.0
+        for dim_idx, dim in enumerate(grouping_dims):
+            if dim_idx < len(parts):
+                val = parts[dim_idx]
+                marginal = target_marginals.get(dim, {})
+                cell_weight *= marginal.get(val, 0.0)
+
+        if cell_weight <= 0:
+            continue
+
+        total_cell_weight += cell_weight
+        for stance, prop in cell_dist.items():
+            aggregated[stance] += cell_weight * prop
+
+    # 正規化
+    if total_cell_weight > 0:
+        distribution = {s: v / total_cell_weight for s, v in aggregated.items()}
+    else:
+        distribution = dict(global_prior)
+
+    # 実効標本サイズ（重み付きサンプルの Kish ESS）
+    weights = []
+    for agent in agents:
+        demographics = agent.get("demographics", {})
+        w = 1.0
+        for dim in grouping_dims:
+            val = demographics.get(dim, "")
+            if dim == "age_bracket" and val in ("", None):
+                age = demographics.get("age")
+                if age is not None:
+                    val = _age_bracket(age)
+            elif dim == "region":
+                val = _normalize_region(str(val))
+            marginal = target_marginals.get(dim, {})
+            w *= marginal.get(str(val), 1.0 / max(len(marginal), 1))
+        weights.append(w)
+
+    n_eff = effective_sample_size(weights) if weights and sum(weights) > 0 else 0.0
+
+    return {
+        "distribution": distribution,
+        "cell_estimates": cell_estimates,
+        "effective_sample_size": round(n_eff, 2),
+    }
+
+
+def conformal_prediction_intervals(
+    predicted_values: dict[str, float],
+    calibration_residuals: list[float],
+    alpha: float = 0.1,
+    weights: list[float] | None = None,
+) -> dict[str, tuple[float, float]]:
+    """Split Conformal Prediction で信頼区間を算出する.
+
+    Tibshirani et al. (2019) の重み付き分位点を採用。
+    独立性重みにより、密クラスター内のエージェントの影響を低減する。
+
+    **保証の限界:** conformal guarantee は交換可能性を仮定する。
+    LLM エージェントの応答は厳密には交換可能でないため、
+    本手法はヒューリスティックな信頼区間として使用すべき。
+
+    Args:
+        predicted_values: スタンス → 予測確率
+        calibration_residuals: キャリブレーションセットの残差 (|predicted - actual|)
+        alpha: 有意水準（デフォルト 0.1 → 90% 信頼区間）
+        weights: 各残差に対する独立性重み（None の場合は均等重み）
+
+    Returns:
+        スタンス → (下限, 上限) の辞書
+    """
+    if not calibration_residuals:
+        # フォールバック: ±0.1 の固定区間
+        return {
+            k: (max(0.0, v - 0.1), min(1.0, v + 0.1))
+            for k, v in predicted_values.items()
+        }
+
+    n = len(calibration_residuals)
+
+    if weights is None:
+        # 均等重みの場合: ceil((n+1)(1-alpha)) / n 番目の残差
+        sorted_residuals = sorted(calibration_residuals)
+        quantile_idx = min(int(math.ceil((n + 1) * (1 - alpha))) - 1, n - 1)
+        q_hat = sorted_residuals[max(0, quantile_idx)]
+    else:
+        # 重み付き分位点 (Tibshirani et al. 2019)
+        paired = sorted(zip(calibration_residuals, weights), key=lambda x: x[0])
+        total_weight = sum(w for _, w in paired)
+        if total_weight == 0:
+            total_weight = 1.0
+
+        cumulative = 0.0
+        q_hat = paired[-1][0]
+        for residual, w in paired:
+            cumulative += w / total_weight
+            if cumulative >= 1 - alpha:
+                q_hat = residual
+                break
+
+    return {
+        k: (max(0.0, v - q_hat), min(1.0, v + q_hat))
+        for k, v in predicted_values.items()
     }

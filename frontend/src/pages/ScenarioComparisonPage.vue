@@ -35,6 +35,8 @@ function formatStatus(status: string): string {
   switch (status) {
     case 'created':
       return '作成済み'
+    case 'queued':
+      return '準備中'
     case 'pending':
       return '待機中'
     case 'running':

@@ -192,10 +192,29 @@ def _apply_independence_re_aggregation(
     return independence_weights
 
 
+def _get_prediction_market_config(mix_config: dict) -> dict:
+    """予測市場のコンフィグを返す。
+
+    Design Decision:
+        デフォルトでは pre-propagation stance を使用する。
+        ネットワーク伝播前のエージェント初期意見が、各エージェントの独立した判断を
+        より正確に反映するため。post-propagation は社会的影響を受けた後の意見であり、
+        独立性の低い（＝予測市場の情報集約効果が薄い）データとなる。
+
+        use_post_propagation=True に切り替えると、ネットワーク伝播後の
+        （社会的影響を反映した）スタンスで予測市場のベットを行う。
+    """
+    pm_config = mix_config.get("prediction_market", {})
+    return {
+        "use_post_propagation": bool(pm_config.get("use_post_propagation", False)),
+    }
+
+
 async def _get_or_create_population(
     session,
     population_id: str | None = None,
     count: int | None = None,
+    seed: int | None = None,
 ) -> tuple[str, list[dict]]:
     """既存の Population を取得するか、新規生成する。"""
     resolved_count = get_default_population_size() if count is None else validate_population_size(count)
@@ -240,7 +259,7 @@ async def _get_or_create_population(
     session.add(population)
     await session.commit()
 
-    agents = await generate_population(pop_id, resolved_count)
+    agents = await generate_population(pop_id, resolved_count, seed=seed)
 
     # DB に保存
     for agent_data in agents:
@@ -289,7 +308,7 @@ async def run_society(simulation_id: str) -> None:
             })
 
             pop_id, agents = await _get_or_create_population(
-                session, sim.population_id, pop_count,
+                session, sim.population_id, pop_count, seed=sim.seed,
             )
             sim.population_id = pop_id
             await session.commit()
@@ -446,7 +465,7 @@ async def run_society(simulation_id: str) -> None:
                 )
 
                 # Stigmergy: extract topics from agent concerns
-                for resp in activation_result["responses"]:
+                for resp in responses_with_ids:
                     concern = resp.get("concern", "")
                     if concern:
                         # Simple topic extraction from concerns
@@ -474,9 +493,12 @@ async def run_society(simulation_id: str) -> None:
                 )
 
                 # Prediction Market (with independence-weighted bets + adaptive liquidity)
-                # Phase H: LMSR 前キャリブレーション — confidence を Platt shrinkage で補正
+                # Design Decision: デフォルトでは pre-propagation stance を使用。
+                # 各エージェントの独立した判断を予測市場に反映するため。
+                # use_post_propagation=True で社会的影響後のスタンスに切替可能。
+                pm_config = _get_prediction_market_config(settings.load_population_mix_config())
                 outcomes = list(activation_result["aggregation"]["stance_distribution"].keys())
-                if outcomes:
+                if outcomes and not pm_config["use_post_propagation"]:
                     prediction_market = PredictionMarket(outcomes=outcomes, adaptive_b=True)
                     for agent, resp in zip(selected_agents, activation_result["responses"]):
                         stance = resp.get("stance", "中立")
@@ -542,6 +564,17 @@ async def run_society(simulation_id: str) -> None:
                                     "agent_id": selected_agents[i]["id"],
                                     "stance": new_stance,
                                 })
+
+                # Post-propagation prediction market (use_post_propagation=True の場合のみ)
+                if outcomes and pm_config["use_post_propagation"]:
+                    prediction_market = PredictionMarket(outcomes=outcomes, adaptive_b=True)
+                    for agent, resp in zip(selected_agents, activation_result["responses"]):
+                        stance = resp.get("propagated_stance", resp.get("stance", "中立"))
+                        raw_confidence = resp.get("confidence", 0.5)
+                        calibrated_confidence = platt_recalibrate(raw_confidence)
+                        ind_w = independence_weights.get(agent["id"], 1.0)
+                        if stance in outcomes:
+                            prediction_market.submit_bet(agent["id"], stance, calibrated_confidence, weight=ind_w)
 
                 await sse_manager.publish(simulation_id, "network_propagation_completed", {
                     "converged": propagation_result.converged,

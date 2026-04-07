@@ -25,11 +25,18 @@ logger = logging.getLogger(__name__)
 _background_tasks: set[asyncio.Task] = set()
 
 
+def _on_task_done(task: asyncio.Task) -> None:
+    """Log unhandled exceptions from background simulation tasks."""
+    _background_tasks.discard(task)
+    if not task.cancelled() and task.exception() is not None:
+        logger.error("Background simulation task failed: %s", task.exception())
+
+
 def spawn_simulation(simulation_id: str) -> None:
     """Launch a simulation in the background and keep a strong task reference."""
     task = asyncio.create_task(dispatch_simulation(simulation_id))
     _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    task.add_done_callback(_on_task_done)
 
 
 async def dispatch_simulation(simulation_id: str) -> None:

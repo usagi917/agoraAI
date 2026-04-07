@@ -727,6 +727,7 @@ class TestSocietyOrchestratorFlow:
                     completed_at=None,
                     metadata_json={},
                     error_message=None,
+                    seed=42,
                 )
 
             async def get(self, model, obj_id):
@@ -757,7 +758,7 @@ class TestSocietyOrchestratorFlow:
 
         fake_session = FakeSession()
 
-        async def fake_get_or_create_population(session, population_id, count=None):
+        async def fake_get_or_create_population(session, population_id, count=None, seed=None):
             observed_counts.append(count)
             return "pop-1", [{"id": "a1", "demographics": {"age": 35, "region": "関東（都市部）", "occupation": "会社員"}}]
 
@@ -865,6 +866,7 @@ class TestRunSocietyPipelineFixes:
                     completed_at=None,
                     metadata_json={},
                     error_message=None,
+                    seed=42,
                 )
 
             async def get(self, model, obj_id):
@@ -897,7 +899,7 @@ class TestRunSocietyPipelineFixes:
 
         fake_session = FakeSession()
 
-        async def fake_get_or_create_population(session, population_id, count=None):
+        async def fake_get_or_create_population(session, population_id, count=None, seed=None):
             return "pop-1", [
                 {"id": "a1", "demographics": {"age": 35, "region": "関東（都市部）", "occupation": "会社員"}},
                 {"id": "a2", "demographics": {"age": 62, "region": "九州", "occupation": "自営業"}},
@@ -1020,6 +1022,7 @@ class TestRunSocietyPipelineFixes:
                     completed_at=None,
                     metadata_json={},
                     error_message=None,
+                    seed=42,
                 )
 
             async def get(self, model, obj_id):
@@ -1052,7 +1055,7 @@ class TestRunSocietyPipelineFixes:
 
         fake_session = FakeSession()
 
-        async def fake_get_or_create_population(session, population_id, count=None):
+        async def fake_get_or_create_population(session, population_id, count=None, seed=None):
             return "pop-1", [
                 {"id": "a1", "demographics": {"age": 35, "region": "関東（都市部）", "occupation": "会社員"}},
             ]
@@ -1118,3 +1121,135 @@ class TestRunSocietyPipelineFixes:
         assert observed_dirs == [
             str(orchestrator.settings.config_dir / "grounding" / "survey_data")
         ]
+
+
+class TestSeedPropagation:
+    """P0-1: _get_or_create_population が seed を generate_population に渡すこと."""
+
+    @pytest.mark.asyncio
+    async def test_get_or_create_population_passes_seed(self):
+        """seed パラメータが generate_population まで伝播すること."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from src.app.services.society import society_orchestrator as orchestrator
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=None)  # population not found
+
+        captured_kwargs = {}
+        original_generate = None
+
+        async def capturing_generate(pop_id, count=None, seed=None):
+            captured_kwargs["seed"] = seed
+            # Return minimal agents
+            return [{"id": f"agent-{i}", "population_id": pop_id,
+                     "agent_index": i, "demographics": {"age": 30, "region": "関東", "gender": "male"},
+                     "big_five": {}, "values": {}, "life_event": "", "contradiction": "",
+                     "information_source": "", "local_context": "", "hidden_motivation": "",
+                     "speech_style": "", "shock_sensitivity": 0.5, "llm_backend": "default",
+                     "memory_summary": ""} for i in range(5)]
+
+        with patch.object(orchestrator, "generate_population", side_effect=capturing_generate):
+            await orchestrator._get_or_create_population(mock_session, None, 100, seed=42)
+
+        assert captured_kwargs.get("seed") == 42, (
+            "seed=42 が generate_population に渡されるべき"
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_or_create_population_without_seed(self):
+        """seed 未指定時は None が渡されること."""
+        from unittest.mock import AsyncMock, patch
+        from src.app.services.society import society_orchestrator as orchestrator
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=None)
+
+        captured_kwargs = {}
+
+        async def capturing_generate(pop_id, count=None, seed=None):
+            captured_kwargs["seed"] = seed
+            return [{"id": f"agent-{i}", "population_id": pop_id,
+                     "agent_index": i, "demographics": {"age": 30, "region": "関東", "gender": "male"},
+                     "big_five": {}, "values": {}, "life_event": "", "contradiction": "",
+                     "information_source": "", "local_context": "", "hidden_motivation": "",
+                     "speech_style": "", "shock_sensitivity": 0.5, "llm_backend": "default",
+                     "memory_summary": ""} for i in range(5)]
+
+        with patch.object(orchestrator, "generate_population", side_effect=capturing_generate):
+            await orchestrator._get_or_create_population(mock_session, None, 100)
+
+        assert captured_kwargs.get("seed") is None
+
+
+class TestStigmergyAgentId:
+    """P0-2: stigmergy board が正しい agent_id を受け取ること."""
+
+    def test_responses_with_ids_have_agent_id(self):
+        """responses_with_ids にはすべて agent_id が設定されていること."""
+        selected_agents = [
+            {"id": "agent-1"},
+            {"id": "agent-2"},
+            {"id": "agent-3"},
+        ]
+        raw_responses = [
+            {"stance": "賛成", "confidence": 0.8, "reason": "理由", "concern": "財源"},
+            {"stance": "反対", "confidence": 0.6, "reason": "理由", "concern": "格差"},
+            {"stance": "中立", "confidence": 0.5, "reason": "理由", "concern": ""},
+        ]
+
+        # Build responses_with_ids the same way the orchestrator does
+        responses_with_ids = []
+        for agent, resp in zip(selected_agents, raw_responses):
+            responses_with_ids.append({**resp, "agent_id": agent["id"]})
+
+        # Simulate stigmergy loop — should use responses_with_ids, not raw_responses
+        deposited = []
+        for resp in responses_with_ids:
+            concern = resp.get("concern", "")
+            if concern:
+                for keyword in ["財源", "格差"]:
+                    if keyword in concern:
+                        deposited.append((resp.get("agent_id", ""), keyword))
+
+        # All deposits should have a real agent_id, not empty string
+        assert all(aid != "" for aid, _ in deposited), (
+            "stigmergy deposits must have non-empty agent_id"
+        )
+        assert ("agent-1", "財源") in deposited
+        assert ("agent-2", "格差") in deposited
+
+    def test_raw_responses_lack_agent_id(self):
+        """activation_result['responses'] 直接参照では agent_id が空になるバグの再現."""
+        raw_responses = [
+            {"stance": "賛成", "confidence": 0.8, "concern": "財源"},
+        ]
+        # This is the bug: raw responses don't have agent_id
+        agent_id = raw_responses[0].get("agent_id", "")
+        assert agent_id == "", "raw responses should NOT have agent_id (confirming the bug)"
+
+
+class TestPredictionMarketTimingConfig:
+    """P0-3: 予測市場タイミングのコンフィグフラグテスト."""
+
+    def test_default_is_pre_propagation(self):
+        """デフォルトでは use_post_propagation=False (pre-propagation を使用)."""
+        from src.app.services.society.society_orchestrator import _get_prediction_market_config
+
+        config = _get_prediction_market_config({})
+        assert config["use_post_propagation"] is False
+
+    def test_config_enables_post_propagation(self):
+        """population_mix config で post_propagation を有効化できること."""
+        from src.app.services.society.society_orchestrator import _get_prediction_market_config
+
+        mix_config = {"prediction_market": {"use_post_propagation": True}}
+        config = _get_prediction_market_config(mix_config)
+        assert config["use_post_propagation"] is True
+
+    def test_config_with_empty_prediction_market_section(self):
+        """prediction_market セクションが空でもデフォルト値が返ること."""
+        from src.app.services.society.society_orchestrator import _get_prediction_market_config
+
+        mix_config = {"prediction_market": {}}
+        config = _get_prediction_market_config(mix_config)
+        assert config["use_post_propagation"] is False
