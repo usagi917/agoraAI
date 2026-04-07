@@ -32,9 +32,13 @@ def _spawn_simulation(run_id: str) -> None:
 
 
 @router.get("")
-async def list_runs(session: AsyncSession = Depends(get_session)):
+async def list_runs(
+    skip: int = 0,
+    limit: int = 20,
+    session: AsyncSession = Depends(get_session),
+):
     result = await session.execute(
-        select(Run).order_by(Run.created_at.desc()).limit(50)
+        select(Run).order_by(Run.created_at.desc()).offset(skip).limit(min(limit, 100))
     )
     runs = result.scalars().all()
     return [

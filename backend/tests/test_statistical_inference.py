@@ -372,3 +372,54 @@ class TestComputePoststratificationWeights:
         assert math.isclose(mean_w, 1.0, abs_tol=0.05), (
             f"Mean weight after cap should be ≈ 1.0, got {mean_w:.4f}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase F: 5D Post-Stratification
+# ---------------------------------------------------------------------------
+
+
+class TestFiveDimensionalPostStratification:
+    """Phase F: income_bracket + occupation_category を追加した5次元 raking。"""
+
+    def _make_responses(self, n: int) -> list[dict]:
+        return [{"stance": "賛成", "confidence": 0.8}] * n
+
+    def test_load_target_marginals_has_5_dimensions(self):
+        """load_target_marginals() が5次元を返すこと。"""
+        from src.app.services.society.statistical_inference import load_target_marginals
+        marginals = load_target_marginals()
+        assert "age_bracket" in marginals
+        assert "region" in marginals
+        assert "gender" in marginals
+        assert "income_bracket" in marginals
+        assert "occupation_category" in marginals
+
+    def test_5d_raking_runs_without_error(self):
+        """5次元ターゲットマージナルで raking がエラーなく動作すること。"""
+        from src.app.services.society.statistical_inference import load_target_marginals
+        marginals = load_target_marginals()
+        agents = [
+            {"demographics": {
+                "age": 35, "age_bracket": "30-49", "region": "関東",
+                "gender": "male", "income_bracket": "upper_middle",
+                "occupation": "会社員",
+            }}
+            for _ in range(30)
+        ]
+        responses = self._make_responses(30)
+        weights = compute_poststratification_weights(agents, responses, marginals, cap=8.0)
+        assert len(weights) == 30
+        assert all(w >= 0 for w in weights)
+
+    def test_income_bracket_marginals_sum_to_one(self):
+        """income_bracket マージナルの合計が1.0。"""
+        from src.app.services.society.statistical_inference import load_target_marginals
+        marginals = load_target_marginals()
+        assert abs(sum(marginals["income_bracket"].values()) - 1.0) < 0.01
+
+    def test_occupation_category_marginals_sum_to_one(self):
+        """occupation_category マージナルの合計が1.0。"""
+        from src.app.services.society.statistical_inference import load_target_marginals
+        marginals = load_target_marginals()
+        assert abs(sum(marginals["occupation_category"].values()) - 1.0) < 0.01

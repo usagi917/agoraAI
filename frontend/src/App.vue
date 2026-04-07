@@ -14,10 +14,10 @@
         </router-link>
         <nav class="header-nav">
           <router-link to="/" class="nav-link" active-class="active">
-            シミュレーション
+            1件分析
           </router-link>
           <router-link to="/compare" class="nav-link" active-class="active">
-            比較
+            2条件比較
           </router-link>
           <router-link to="/populations" class="nav-link" active-class="active">
             母集団

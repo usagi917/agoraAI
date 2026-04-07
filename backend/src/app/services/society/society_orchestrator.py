@@ -49,6 +49,7 @@ from src.app.services.society.stigmergy_service import StigmergyBoard
 from src.app.services.society.prediction_market import PredictionMarket
 from src.app.services.society.statistical_inference import compute_independence_weights
 from src.app.services.society.activation_layer import _aggregate_opinions
+from src.app.services.society.calibration import platt_recalibrate
 from src.app.services.society.emergence_tracker import EmergenceTracker
 from src.app.services.society.output_validator import explain_activation_meeting_gap
 from src.app.sse.manager import sse_manager
@@ -439,8 +440,8 @@ async def run_society(simulation_id: str) -> None:
                     initial_responses=responses_with_ids,
                     edges=edges,
                     theme=theme,
-                    max_timesteps=20,
-                    confidence_threshold=0.4,
+                    max_timesteps=12,
+                    confidence_threshold=0.5,
                     on_timestep=on_propagation_timestep,
                 )
 
@@ -472,16 +473,18 @@ async def run_society(simulation_id: str) -> None:
                     individual_responses=individual_responses,
                 )
 
-                # Prediction Market (with independence-weighted bets)
+                # Prediction Market (with independence-weighted bets + adaptive liquidity)
+                # Phase H: LMSR 前キャリブレーション — confidence を Platt shrinkage で補正
                 outcomes = list(activation_result["aggregation"]["stance_distribution"].keys())
                 if outcomes:
-                    prediction_market = PredictionMarket(outcomes=outcomes)
+                    prediction_market = PredictionMarket(outcomes=outcomes, adaptive_b=True)
                     for agent, resp in zip(selected_agents, activation_result["responses"]):
                         stance = resp.get("stance", "中立")
-                        confidence = resp.get("confidence", 0.5)
+                        raw_confidence = resp.get("confidence", 0.5)
+                        calibrated_confidence = platt_recalibrate(raw_confidence)
                         ind_w = independence_weights.get(agent["id"], 1.0)
                         if stance in outcomes:
-                            prediction_market.submit_bet(agent["id"], stance, confidence, weight=ind_w)
+                            prediction_market.submit_bet(agent["id"], stance, calibrated_confidence, weight=ind_w)
 
                 # Emergence tracking from propagation history
                 for ts_record in propagation_result.timestep_history:
@@ -787,7 +790,7 @@ async def run_society(simulation_id: str) -> None:
             if propagation_result:
                 provenance["network_propagation"] = {
                     "model": "Bounded Confidence (Hegselmann-Krause) + Friedkin-Johnsen",
-                    "max_timesteps": 20,
+                    "max_timesteps": 12,
                     "actual_timesteps": propagation_result.total_timesteps,
                     "converged": propagation_result.converged,
                     "cluster_count": len(propagation_result.clusters),

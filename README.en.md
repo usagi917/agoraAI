@@ -19,6 +19,16 @@
 - Decision Lab runs two scenarios against the same population side-by-side, comparing opinion shifts, coalition changes, and audit trails.
 - Theater UI shows debate cards, live dialogue streams, and real-time stance shifts during simulation.
 
+## Frontend And Backend At A Glance
+
+| Area | Implementation | What matters for this README |
+| --- | --- | --- |
+| `frontend/` | Vue 3 + TypeScript + Vite + Pinia + Axios | The default API base path is `/api` when `VITE_API_BASE_URL` is unset. Local development uses the Vite proxy, and Docker uses the Nginx proxy. |
+| `frontend/` | `3d-force-graph` / `three` / `html2canvas` / `jspdf` | Live graph views and report-oriented UI live in the same SPA. |
+| `backend/` | FastAPI + async SQLAlchemy + LiteLLM | REST APIs and SSE streams are served from the same app. |
+| `backend/` | SQLite (local default) / PostgreSQL (Compose) / Redis (optional) | The smallest local setup only needs SQLite, while Compose uses PostgreSQL and Redis. |
+| `backend/` | `templates/ja/*.yaml` seeded on startup | LaunchPad templates ultimately come from YAML definitions loaded into the database. |
+
 ## Screens And Workflow
 
 | Route | Purpose | Main contents |
@@ -27,6 +37,7 @@
 | `/sim/:id` | Live Simulation | SSE progress, activity feed, social response views, conversations, live graph, Theater UI (debate cards, dialogue stream) |
 | `/sim/:id/results` | Results | Decision Brief, scenario comparison, propagation, transcript, follow-up |
 | `/populations` | Populations | generation, listing, detail view, forking |
+| `/compare` | Compare Setup | intervention parameters, population selection, and preset selection for pairwise comparison |
 | `/scenario/:id` | Decision Lab | scenario pair comparison, opinion shift table, coalition map, audit timeline |
 
 The main execution flow has three stages:
@@ -37,6 +48,11 @@ Build a large synthetic population from config and aggregate reactions from sele
 Pick citizen representatives and experts, then run a structured multi-round debate.
 3. `Synthesis`
 Combine social signals, debate output, and quality metadata into a Decision Brief and comparable scenarios.
+
+Notes:
+
+- Legacy routes such as `/run/:id`, `/report/:id`, and `/swarm*` redirect into the unified `/sim/*` routes.
+- In development only, `/__e2e__/sse` is added for Playwright SSE checks.
 
 ### Presets
 
@@ -95,6 +111,14 @@ Notes:
 - The Docker `frontend` is served by Nginx and proxies `/api` to `backend:8000`.
 - The `backend` seeds templates from `templates/ja/*.yaml` on startup.
 - Local minimal development assumes SQLite. Docker Compose uses PostgreSQL and Redis.
+
+## Prerequisites
+
+- Node.js 20+
+- `pnpm` 10.x
+- Python 3.11+
+- `uv`
+- Docker / Docker Compose when using the container stack
 
 ## Quick Start
 
@@ -164,7 +188,7 @@ pnpm dev
 
 - Frontend dev server: `http://localhost:5173`
 - Vite proxies `/api` to `http://localhost:8000`
-- Only set `VITE_API_BASE_URL` when you want to override that default
+- Only set `VITE_API_BASE_URL` when you want to override that default, using `frontend/.env.local` or a shell environment variable
 
 ### 3. With PostgreSQL And Redis
 
@@ -225,6 +249,7 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/simulations/{sim_id}/report` | final report |
 | `POST` | `/simulations/{sim_id}/followups` | ask follow-up questions against the result |
 | `POST` | `/simulations/{sim_id}/rerun` | rerun with the same conditions |
+| `GET` | `/simulations/{sim_id}/audit-trail` | fetch per-agent audit events |
 
 ### Society and operational endpoints
 
@@ -241,6 +266,15 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/society/simulations/{sim_id}/transcript` | transcript data |
 | `GET` | `/admin/costs` | token and cost aggregation |
 | `GET` | `/admin/quality-metrics` | quality and fallback aggregation |
+
+### Scenario comparison
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/scenario-pairs` | create baseline and intervention simulations together |
+| `GET` | `/scenario-pairs/{scenario_pair_id}` | fetch scenario pair status and metadata |
+| `GET` | `/scenario-pairs/{scenario_pair_id}/comparison` | retrieve the comparison Decision Brief and deltas |
+| `POST` | `/populations/{population_id}/snapshot` | create a population snapshot for comparison work |
 
 Notes:
 

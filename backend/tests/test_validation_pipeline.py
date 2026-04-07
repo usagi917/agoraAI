@@ -352,3 +352,89 @@ class TestValidationPipeline:
         profile = await update_bias_profile(db_session, FIXTURES_DIR)
         # プロファイルが返される（データが1件しかないので中身はシンプル）
         assert isinstance(profile, dict)
+
+
+# ===== Phase J: γ グリッドサーチ =====
+
+
+class TestFindOptimalGamma:
+    @pytest.mark.asyncio
+    async def test_returns_best_gamma(self, db_session):
+        """最適な γ (Brier スコア最小) を返す。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma
+
+        # 検証済みレコードを作成
+        r1 = await register_result(db_session, "sim-G1", "t1", "economy", SIM_DIST)
+        await resolve_with_actual(db_session, r1.id, ACTUAL_DIST, "src", "2024-01")
+        r2 = await register_result(db_session, "sim-G2", "t2", "economy", SIM_DIST)
+        await resolve_with_actual(db_session, r2.id, ACTUAL_DIST, "src", "2024-01")
+
+        result = await find_optimal_gamma(db_session)
+        assert "best_gamma" in result
+        assert isinstance(result["best_gamma"], float)
+        assert 0.3 <= result["best_gamma"] <= 1.5
+
+    @pytest.mark.asyncio
+    async def test_returns_gamma_scores(self, db_session):
+        """各 γ 候補の Brier スコアを返す。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma
+
+        r1 = await register_result(db_session, "sim-G3", "t1", "economy", SIM_DIST)
+        await resolve_with_actual(db_session, r1.id, ACTUAL_DIST, "src", "2024-01")
+
+        result = await find_optimal_gamma(db_session)
+        assert "gamma_scores" in result
+        assert len(result["gamma_scores"]) > 0
+        for entry in result["gamma_scores"]:
+            assert "gamma" in entry
+            assert "avg_brier" in entry
+
+    @pytest.mark.asyncio
+    async def test_category_filter(self, db_session):
+        """theme_category でフィルタできる。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma
+
+        r1 = await register_result(db_session, "sim-G4", "t1", "economy", SIM_DIST)
+        await resolve_with_actual(db_session, r1.id, ACTUAL_DIST, "src", "2024-01")
+        r2 = await register_result(db_session, "sim-G5", "t2", "social", SIM_DIST)
+        await resolve_with_actual(db_session, r2.id, ACTUAL_DIST, "src", "2024-01")
+
+        result = await find_optimal_gamma(db_session, theme_category="economy")
+        assert result["best_gamma"] is not None
+        assert result.get("theme_category") == "economy"
+
+    @pytest.mark.asyncio
+    async def test_no_data_returns_default(self, db_session):
+        """検証済みデータがない場合はデフォルト γ=0.7 を返す。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma
+
+        result = await find_optimal_gamma(db_session)
+        assert result["best_gamma"] == 0.7
+
+
+class TestFindOptimalGammaByCategory:
+    @pytest.mark.asyncio
+    async def test_returns_per_category_gammas(self, db_session):
+        """カテゴリ別に最適 γ を返す。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma_by_category
+
+        r1 = await register_result(db_session, "sim-GC1", "t1", "economy", SIM_DIST)
+        await resolve_with_actual(db_session, r1.id, ACTUAL_DIST, "src", "2024-01")
+        r2 = await register_result(db_session, "sim-GC2", "t2", "social", SIM_DIST)
+        await resolve_with_actual(db_session, r2.id, ACTUAL_DIST, "src", "2024-01")
+
+        result = await find_optimal_gamma_by_category(db_session)
+        assert "by_category" in result
+        assert "economy" in result["by_category"]
+        assert "social" in result["by_category"]
+        for cat_result in result["by_category"].values():
+            assert "best_gamma" in cat_result
+            assert 0.3 <= cat_result["best_gamma"] <= 1.5
+
+    @pytest.mark.asyncio
+    async def test_empty_categories_use_default(self, db_session):
+        """データなしカテゴリはデフォルト γ。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma_by_category
+
+        result = await find_optimal_gamma_by_category(db_session)
+        assert result["by_category"] == {}

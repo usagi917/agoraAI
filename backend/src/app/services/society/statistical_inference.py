@@ -19,6 +19,33 @@ from typing import Optional
 from src.app.services.society.age_utils import age_bracket_4 as _age_bracket
 
 
+# 職業→5区分マッピング
+_OCCUPATION_CATEGORY_MAP: dict[str, str] = {
+    # white_collar: 事務・専門・管理
+    "会社員": "white_collar", "公務員": "white_collar", "教師": "white_collar",
+    "医師": "white_collar", "看護師": "white_collar", "エンジニア": "white_collar",
+    "研究者": "white_collar", "営業職": "white_collar", "事務職": "white_collar",
+    "弁護士": "white_collar", "会計士": "white_collar", "薬剤師": "white_collar",
+    "コンサルタント": "white_collar", "記者": "white_collar",
+    # blue_collar: 生産・運輸・建設
+    "建設作業員": "blue_collar", "運転手": "blue_collar", "農業": "blue_collar",
+    "漁業": "blue_collar",
+    # self_employed: 自営業・フリーランス
+    "自営業": "self_employed", "フリーランス": "self_employed",
+    "経営者": "self_employed",
+    # not_working: 学生・主婦/主夫・退職者
+    "学生": "not_working", "主婦/主夫": "not_working", "退職者": "not_working",
+    # other: サービス・その他
+    "販売員": "other", "飲食店員": "other", "介護士": "other",
+    "デザイナー": "other", "芸術家": "other", "パート/アルバイト": "other",
+}
+
+
+def _occupation_to_category(occupation: str) -> str:
+    """職業名を5区分カテゴリに変換する。"""
+    return _OCCUPATION_CATEGORY_MAP.get(occupation, "other")
+
+
 def effective_sample_size(weights: list[float]) -> float:
     """実効標本サイズを計算する (Kish 1965).
 
@@ -218,6 +245,8 @@ def compute_poststratification_weights(
                 age = demographics.get("age")
                 if age is not None:
                     value = _age_bracket(age)
+            elif dim == "occupation_category" and value in ("", None):
+                value = _occupation_to_category(demographics.get("occupation", ""))
             dim_to_values[dim].append(str(value))
 
     for iteration in range(max_iter):
@@ -396,5 +425,21 @@ def load_target_marginals() -> dict[str, dict[str, float]]:
             "male": 0.485,
             "female": 0.510,
             "other": 0.005,
+        },
+        "income_bracket": {
+            # 国税庁「民間給与実態統計調査」(2021) ベース
+            "low": 0.25,
+            "lower_middle": 0.30,
+            "upper_middle": 0.28,
+            "high": 0.12,
+            "very_high": 0.05,
+        },
+        "occupation_category": {
+            # 総務省「労働力調査」(2020) ベース、5区分に折り畳み
+            "white_collar": 0.40,      # 事務・専門・管理
+            "blue_collar": 0.20,       # 生産・運輸・建設
+            "self_employed": 0.10,     # 自営業・フリーランス
+            "not_working": 0.20,       # 学生・主婦/主夫・退職者
+            "other": 0.10,             # サービス・その他
         },
     }

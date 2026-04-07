@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from src.app.database import async_session
 from src.app.llm.client import LLMClient
 from src.app.models.simulation import Simulation
+from src.app.services.scenario_pair_status import refresh_scenario_pair_status
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -101,6 +102,7 @@ async def run_baseline(simulation_id: str) -> None:
             }
             sim.status = "completed"
             sim.completed_at = datetime.now(timezone.utc)
+            await refresh_scenario_pair_status(session, sim.scenario_pair_id)
             await session.commit()
 
             await sse_manager.publish(simulation_id, "simulation_completed", {
@@ -115,6 +117,7 @@ async def run_baseline(simulation_id: str) -> None:
             await session.rollback()
             sim.status = "failed"
             sim.error_message = f"{type(e).__name__}: {e}"[:500]
+            await refresh_scenario_pair_status(session, sim.scenario_pair_id)
             await session.commit()
 
             await sse_manager.publish(simulation_id, "simulation_failed", {

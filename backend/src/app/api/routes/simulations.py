@@ -1,11 +1,10 @@
 """統一 Simulation API エンドポイント"""
 
-import asyncio
 import json
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,20 +38,12 @@ from src.app.services.quality import (
     normalize_evidence_mode,
     supports_evidence_mode,
 )
-from src.app.services.simulation_dispatcher import dispatch_simulation
+from src.app.services.simulation_dispatcher import spawn_simulation
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-_background_tasks: set[asyncio.Task] = set()
-
-
-def _spawn_simulation(simulation_id: str) -> None:
-    task = asyncio.create_task(dispatch_simulation(simulation_id))
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
 
 
 class SimulationCreate(BaseModel):
@@ -130,7 +121,7 @@ async def create_simulation(
     await session.commit()
     await session.refresh(sim)
 
-    _spawn_simulation(sim.id)
+    spawn_simulation(sim.id)
 
     return {
         "id": sim.id,
@@ -145,10 +136,14 @@ async def create_simulation(
 
 
 @router.get("")
-async def list_simulations(session: AsyncSession = Depends(get_session)):
+async def list_simulations(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1),
+    session: AsyncSession = Depends(get_session),
+):
     """Simulation 一覧を取得する。"""
     result = await session.execute(
-        select(Simulation).order_by(Simulation.created_at.desc()).limit(50)
+        select(Simulation).order_by(Simulation.created_at.desc()).offset(skip).limit(min(limit, 100))
     )
     sims = result.scalars().all()
     return [
@@ -580,6 +575,6 @@ async def rerun_simulation(sim_id: str, session: AsyncSession = Depends(get_sess
     session.add(new_sim)
     await session.commit()
 
-    _spawn_simulation(new_sim.id)
+    spawn_simulation(new_sim.id)
 
     return {"id": new_sim.id, "status": "queued"}

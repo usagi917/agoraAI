@@ -19,6 +19,16 @@
 - Decision Lab では2つのシナリオを同一人口で並行実行し、意見シフト・連合変動・監査証跡を比較できます。
 - Theater UI ではディベートカード、ライブ対話ストリーム、スタンス変化をリアルタイムに可視化します。
 
+## Frontend / Backend の実装要点
+
+| 領域 | 実装 | README に反映しておくポイント |
+| --- | --- | --- |
+| `frontend/` | Vue 3 + TypeScript + Vite + Pinia + Axios | API の基準パスは `VITE_API_BASE_URL` 未指定時 `/api`。ローカル開発では Vite proxy、Docker では Nginx proxy を使います。 |
+| `frontend/` | `3d-force-graph` / `three` / `html2canvas` / `jspdf` | ライブグラフ表示とレポート系 UI を同じ SPA で扱います。 |
+| `backend/` | FastAPI + async SQLAlchemy + LiteLLM | REST API と SSE を同じアプリから配信します。 |
+| `backend/` | SQLite（ローカル既定）/ PostgreSQL（Compose）/ Redis（任意） | ローカル最小構成は SQLite のみで動作し、Compose は PostgreSQL + Redis を使います。 |
+| `backend/` | `templates/ja/*.yaml` を起動時 seed | LaunchPad のテンプレート一覧は DB ではなく YAML 定義から供給されます。 |
+
 ## 画面と実行フロー
 
 | Route | 役割 | 主な内容 |
@@ -27,6 +37,7 @@
 | `/sim/:id` | Live Simulation | SSE 進捗、Activity Feed、社会反応、会話、ライブグラフ、Theater UI（ディベートカード・対話ストリーム） |
 | `/sim/:id/results` | Results | Decision Brief、シナリオ比較、Propagation、Transcript、Follow-up |
 | `/populations` | Populations | 人口生成、人口一覧、詳細表示、fork |
+| `/compare` | Compare Setup | 比較用の政策介入条件、母集団、プリセットの入力 |
 | `/scenario/:id` | Decision Lab | シナリオペア比較、意見シフト表、連合マップ、監査タイムライン |
 
 実行時の大まかな流れは次の3段です。
@@ -37,6 +48,11 @@
 市民代表と専門家を選び、複数ラウンドの構造化議論を行います。
 3. `Synthesis`
 社会反応、議論、品質情報をまとめて Decision Brief と比較可能なシナリオを生成します。
+
+補足:
+
+- 旧ルート `/run/:id`、`/report/:id`、`/swarm*` は新しい `/sim/*` 系にリダイレクトされます。
+- 開発時のみ `/__e2e__/sse` が有効になり、Playwright から SSE 動作確認に使われます。
 
 ### プリセット
 
@@ -95,6 +111,14 @@ flowchart TB
 - Docker の `frontend` は Nginx で配信され、`/api` を `backend:8000` にプロキシします。
 - `backend` 起動時に `templates/ja/*.yaml` を読み込み、テンプレートを DB に seed します。
 - ローカル最小構成は SQLite 前提、Docker Compose は PostgreSQL + Redis 前提です。
+
+## Prerequisites
+
+- Node.js 20+
+- `pnpm` 10 系
+- Python 3.11+
+- `uv`
+- Docker / Docker Compose（Compose 起動を使う場合）
 
 ## Quick Start
 
@@ -164,7 +188,7 @@ pnpm dev
 
 - Frontend dev server: `http://localhost:5173`
 - Vite は `/api` を `http://localhost:8000` に proxy します。
-- `VITE_API_BASE_URL` を明示したい場合だけ `.env` で上書きしてください。
+- `VITE_API_BASE_URL` を明示したい場合だけ、`frontend/.env.local` か起動時のシェル変数で上書きしてください。
 
 ### 3. PostgreSQL / Redis を使う場合
 
@@ -225,6 +249,7 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/simulations/{sim_id}/report` | 最終レポート取得 |
 | `POST` | `/simulations/{sim_id}/followups` | 結果に対する follow-up 質問 |
 | `POST` | `/simulations/{sim_id}/rerun` | 同条件で再実行 |
+| `GET` | `/simulations/{sim_id}/audit-trail` | エージェントごとの監査イベント取得 |
 
 ### Society / 運用系
 
@@ -241,6 +266,15 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/society/simulations/{sim_id}/transcript` | 発話 Transcript |
 | `GET` | `/admin/costs` | トークン・コスト集計 |
 | `GET` | `/admin/quality-metrics` | 品質・fallback 集計 |
+
+### Scenario comparison
+
+| Method | Endpoint | 役割 |
+| --- | --- | --- |
+| `POST` | `/scenario-pairs` | ベースラインと介入シナリオを同時作成 |
+| `GET` | `/scenario-pairs/{scenario_pair_id}` | シナリオ比較ジョブの状態確認 |
+| `GET` | `/scenario-pairs/{scenario_pair_id}/comparison` | 比較 Decision Brief と差分取得 |
+| `POST` | `/populations/{population_id}/snapshot` | 比較用の母集団スナップショット作成 |
 
 補足:
 

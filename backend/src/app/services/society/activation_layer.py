@@ -7,6 +7,7 @@ from typing import Any
 
 from src.app.llm.multi_client import multi_llm_client
 from src.app.services.society.activation_prompts import build_activation_prompt
+from src.app.services.society.output_validator import classify_response_quality
 from src.app.services.society.statistical_inference import (
     bootstrap_confidence_intervals,
     compute_poststratification_weights,
@@ -53,6 +54,7 @@ _STANCE_PATTERNS: list[tuple[str, str]] = [
 ]
 
 _CONFIDENCE_PATTERN = re.compile(r"(?:confidence|信頼度|確信度)[:\s]*([01]\.?\d*)")
+_QUALITY_WEIGHT: dict[str, float] = {"high": 1.0, "medium": 0.7, "low": 0.3}
 
 
 def _extract_stance_from_text(text: str) -> dict | None:
@@ -239,6 +241,11 @@ def _aggregate_opinions(
             logger.warning("Poststratification weight computation failed: %s", exc)
             weights = [1.0] * len(valid_responses)
             weighting_applied = False
+
+        # 品質重みを乗算（medium は 0.7 倍、low は 0.3 倍）
+        for i, resp in enumerate(valid_responses):
+            tier = classify_response_quality(resp)
+            weights[i] = weights[i] * _QUALITY_WEIGHT.get(tier, 1.0)
 
         # 独立性重みを乗算（クラスター相関の割引）
         independence_weighting_applied = False

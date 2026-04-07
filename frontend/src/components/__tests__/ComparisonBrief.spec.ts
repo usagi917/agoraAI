@@ -107,6 +107,6 @@ describe('ComparisonBrief', () => {
         }),
       },
     })
-    expect(wrapper.text()).toContain('Baseline')
+    expect(wrapper.text()).toContain('介入なし')
   })
 })

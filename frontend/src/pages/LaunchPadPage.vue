@@ -151,7 +151,7 @@ const launchDisabled = computed(() => {
   if (!canLaunchLive.value) return true
   const hasWizardInput = wizardComplete.value
   const hasManualInput = promptText.value.trim() || files.value.length > 0
-  return (!hasWizardInput && !hasManualInput) || isLoading.value
+  return !hasWizardInput && !hasManualInput
 })
 // launchLabel は inline で処理
 
@@ -171,7 +171,9 @@ onMounted(async () => {
 })
 
 async function handleLaunch() {
-  if (!canLaunchLive.value) return
+  // Keep duplicate submission protection in the handler so the native
+  // disabled attribute does not flip during the click action itself.
+  if (isLoading.value || !canLaunchLive.value) return
 
   // Build final prompt: wizard prompt takes priority, then manual input
   const wizardPrompt = buildPromptFromWizard()

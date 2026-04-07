@@ -23,6 +23,12 @@ vi.mock('../../api/client', () => apiMocks)
 describe('LaunchPadPage', () => {
   beforeEach(() => {
     push.mockReset()
+    apiMocks.getHealth.mockReset()
+    apiMocks.getTemplates.mockReset()
+    apiMocks.listSimulations.mockReset()
+    apiMocks.createProject.mockReset()
+    apiMocks.uploadDocument.mockReset()
+    apiMocks.createSimulation.mockReset()
     apiMocks.getHealth.mockResolvedValue({
       status: 'ok',
       version: '1.0.0',
@@ -119,6 +125,42 @@ describe('LaunchPadPage', () => {
     const completedBadge = badges.find(b => b.classes().includes('status-completed'))
     expect(completedBadge).toBeDefined()
     expect(completedBadge!.text()).toBe('完了')
+  })
+
+  it('keeps the launch button clickable-state stable while a launch is pending', async () => {
+    let resolveSimulation!: (value: { id: string }) => void
+    const pendingSimulation = new Promise<{ id: string }>((resolve) => {
+      resolveSimulation = resolve
+    })
+    apiMocks.createSimulation.mockReturnValueOnce(pendingSimulation)
+
+    const wrapper = mount(LaunchPadPage, {
+      global: {
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('.prompt-textarea').setValue('EV battery market analysis')
+
+    const launchButton = wrapper.get('[data-testid="launch-button"]')
+    await launchButton.trigger('click')
+    await flushPromises()
+
+    expect(apiMocks.createSimulation).toHaveBeenCalledTimes(1)
+    expect(launchButton.attributes('disabled')).toBeUndefined()
+
+    await launchButton.trigger('click')
+    await flushPromises()
+
+    expect(apiMocks.createSimulation).toHaveBeenCalledTimes(1)
+
+    resolveSimulation({ id: 'sim-1' })
+    await flushPromises()
+
+    expect(push).toHaveBeenCalledWith('/sim/sim-1')
   })
 
   it('highlights Standard preset card with recommended badge', async () => {

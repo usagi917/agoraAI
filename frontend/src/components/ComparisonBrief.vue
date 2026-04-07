@@ -45,24 +45,24 @@ function formatChange(value: number): string {
     <div class="comparison-grid">
       <div class="comparison-column" data-testid="baseline-panel">
         <div class="column-header">
-          <span class="column-badge column-badge-baseline">Baseline</span>
+          <span class="column-badge column-badge-baseline">介入なし</span>
         </div>
         <div v-if="baselineBrief" class="card column-body">
           <DecisionBrief :brief="baselineBrief" />
         </div>
         <div v-else class="card column-body column-empty">
-          <p class="empty-text">Baseline データなし</p>
+          <p class="empty-text">介入なしのデータはまだありません</p>
         </div>
       </div>
       <div class="comparison-column" data-testid="intervention-panel">
         <div class="column-header">
-          <span class="column-badge column-badge-intervention">Intervention</span>
+          <span class="column-badge column-badge-intervention">介入あり</span>
         </div>
         <div v-if="interventionBrief" class="card column-body">
           <DecisionBrief :brief="interventionBrief" />
         </div>
         <div v-else class="card column-body column-empty">
-          <p class="empty-text">Intervention データなし</p>
+          <p class="empty-text">介入ありのデータはまだありません</p>
         </div>
       </div>
     </div>
@@ -74,33 +74,33 @@ function formatChange(value: number): string {
         :class="{ 'tab-btn-active': activeTab === 'baseline' }"
         @click="activeTab = 'baseline'"
       >
-        Baseline
+        介入なし
       </button>
       <button
         class="tab-btn"
         :class="{ 'tab-btn-active': activeTab === 'intervention' }"
         @click="activeTab = 'intervention'"
       >
-        Intervention
+        介入あり
       </button>
     </div>
     <div class="comparison-tab-content">
       <div v-if="activeTab === 'baseline'" class="card">
         <DecisionBrief v-if="baselineBrief" :brief="baselineBrief" />
-        <p v-else class="empty-text">Baseline データなし</p>
+        <p v-else class="empty-text">介入なしのデータはまだありません</p>
       </div>
       <div v-if="activeTab === 'intervention'" class="card">
         <DecisionBrief v-if="interventionBrief" :brief="interventionBrief" />
-        <p v-else class="empty-text">Intervention データなし</p>
+        <p v-else class="empty-text">介入ありのデータはまだありません</p>
       </div>
     </div>
 
     <!-- Delta summary -->
     <div class="delta-summary card" data-testid="delta-summary">
-      <h3 class="delta-title">Delta Summary</h3>
+      <h3 class="delta-title">違いの要約</h3>
       <div class="delta-grid">
         <div class="delta-metric">
-          <span class="delta-label">Support Change</span>
+          <span class="delta-label">支持の変化</span>
           <span
             class="delta-value"
             :class="delta.support_change >= 0 ? 'delta-positive' : 'delta-negative'"
@@ -109,13 +109,13 @@ function formatChange(value: number): string {
           </span>
         </div>
         <div v-if="delta.new_concerns.length" class="delta-section">
-          <span class="delta-label">New Concerns</span>
+          <span class="delta-label">新しく増えた懸念</span>
           <ul class="delta-list">
             <li v-for="(concern, i) in delta.new_concerns" :key="i">{{ concern }}</li>
           </ul>
         </div>
         <div v-if="delta.key_differences.length" class="delta-section">
-          <span class="delta-label">Key Differences</span>
+          <span class="delta-label">主な違い</span>
           <ul class="delta-list">
             <li v-for="(diff, i) in delta.key_differences" :key="i">{{ diff }}</li>
           </ul>
