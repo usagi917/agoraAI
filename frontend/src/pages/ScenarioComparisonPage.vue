@@ -93,7 +93,12 @@ onMounted(async () => {
       startSSE()
     }
   } catch (err: any) {
-    fetchError.value = err.message || '比較データの読み込みに失敗しました'
+    const status = err.response?.status
+    if (status === 404) {
+      fetchError.value = '比較データが見つかりません'
+    } else {
+      fetchError.value = '比較データの読み込みに失敗しました'
+    }
   } finally {
     loading.value = false
   }
