@@ -4,7 +4,7 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -137,8 +137,8 @@ async def create_simulation(
 
 @router.get("")
 async def list_simulations(
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1),
     session: AsyncSession = Depends(get_session),
 ):
     """Simulation 一覧を取得する。"""

@@ -35,14 +35,9 @@ def _make_correct_activation_fn(provider_dists: dict[str, dict]):
     run_activation は provider 引数を受け取らない。
     stance_distribution は aggregation キーの中に入っている。
     """
-    call_count = 0
-
     async def activation_fn(agents, theme, **kwargs):
-        nonlocal call_count
-        # provider は kwargs に含まれてはいけない — 実際の run_activation は受け取らない
-        providers_list = list(provider_dists.keys())
-        dist = provider_dists[providers_list[call_count % len(providers_list)]]
-        call_count += 1
+        provider = agents[0].get("llm_backend", "default")
+        dist = provider_dists[provider]
         return {
             "responses": [],
             "aggregation": {
@@ -96,14 +91,14 @@ async def test_ensemble_uses_aggregation_structure():
 
 
 @pytest.mark.asyncio
-async def test_ensemble_does_not_pass_provider_kwarg_to_activation_fn():
-    """activation_fn は provider kwarg なしで呼び出される (run_activation の実際シグネチャ)。"""
+async def test_ensemble_uses_provider_specific_agent_backends():
+    """各 provider run は agents.llm_backend を対象 provider に揃えて呼び出される。"""
     from src.app.services.society.sensitivity_analysis import run_provider_ensemble
 
-    received_kwargs: list[dict] = []
+    received_backends: list[list[str]] = []
 
     async def spy_activation_fn(agents, theme, **kwargs):
-        received_kwargs.append(dict(kwargs))
+        received_backends.append([agent.get("llm_backend") for agent in agents])
         return {
             "responses": [],
             "aggregation": {"stance_distribution": {"賛成": 0.5, "反対": 0.5}},
@@ -118,11 +113,10 @@ async def test_ensemble_does_not_pass_provider_kwarg_to_activation_fn():
         activation_fn=spy_activation_fn,
     )
 
-    # provider kwarg が渡されていないことを確認
-    for call_kwargs in received_kwargs:
-        assert "provider" not in call_kwargs, (
-            f"activation_fn should not receive 'provider' kwarg, but got: {call_kwargs}"
-        )
+    assert received_backends == [
+        ["openai", "openai"],
+        ["anthropic", "anthropic"],
+    ]
 
 
 @pytest.mark.asyncio

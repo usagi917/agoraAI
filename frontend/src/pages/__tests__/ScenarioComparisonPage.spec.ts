@@ -226,6 +226,16 @@ describe('ScenarioComparisonPage', () => {
     expect(wrapper.text()).toContain('2つの分析が終わると、ここに違いが表示されます。')
   })
 
+  it('starts SSE for queued scenario pairs', async () => {
+    const queuedPair = { ...MOCK_PAIR, status: 'queued' }
+    mockApi.get.mockResolvedValueOnce({ data: queuedPair })
+
+    createWrapper()
+    await flushPromises()
+
+    expect(mockStart).toHaveBeenCalledTimes(1)
+  })
+
   it('does not render comparison components when no comparison data', async () => {
     const pendingPair = { ...MOCK_PAIR, status: 'created' }
     mockApi.get.mockResolvedValueOnce({ data: pendingPair })

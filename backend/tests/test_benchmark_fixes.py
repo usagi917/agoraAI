@@ -286,6 +286,16 @@ async def test_list_simulations_limit_capped_at_100(client, session_factory):
     assert len(data) == 100, f"Expected limit capped at 100, got {len(data)}"
 
 
+@pytest.mark.asyncio
+async def test_list_simulations_rejects_negative_limit(client, session_factory):
+    """GET /simulations?limit=-1 should fail validation instead of disabling LIMIT."""
+    await _seed_simulations(session_factory, count=10)
+
+    response = await client.get("/simulations?limit=-1")
+
+    assert response.status_code == 422
+
+
 # ===========================================================================
 # 3. Cache-Control header – GET /templates
 # ===========================================================================

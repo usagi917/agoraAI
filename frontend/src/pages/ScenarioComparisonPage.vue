@@ -87,7 +87,7 @@ onMounted(async () => {
 
     if (pair.status === 'completed') {
       await store.fetchComparison(scenarioId)
-    } else if (pair.status === 'running' || pair.status === 'created') {
+    } else if (pair.status !== 'failed') {
       startSSE()
     }
   } catch (err: any) {

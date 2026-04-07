@@ -92,7 +92,8 @@ async def run_provider_ensemble(
         agents: エージェントのリスト。
         theme: シミュレーションのテーマ。
         providers: プロバイダ名のリスト。None の場合は ["default"]。
-        activation_fn: アクティベーション関数。provider kwarg でプロバイダを指定される。
+        activation_fn: アクティベーション関数。各 run では agents の llm_backend を
+                       対象 provider に揃えた上で呼び出される。
 
     Returns:
         {
@@ -112,7 +113,11 @@ async def run_provider_ensemble(
     # 各プロバイダでアクティベーションを並列実行
     async def _run_one(provider: str) -> tuple[str, dict]:
         logger.info("provider_ensemble: running provider=%s", provider)
-        result = await activation_fn(agents, theme)
+        provider_agents = [
+            {**agent, "llm_backend": provider}
+            for agent in agents
+        ]
+        result = await activation_fn(provider_agents, theme)
         dist = result.get("aggregation", {}).get("stance_distribution", {})
         return (provider, dist)
 
