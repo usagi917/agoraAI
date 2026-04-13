@@ -12,6 +12,13 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
+from src.app.services.society.theme_category import (
+    ThemeCategoryEstimate,
+    MVP_CATEGORIES,
+    ANCHOR_MIN_CONFIDENCE,
+    CONFIDENCE_PER_KEYWORD,
+)
+
 from sqlalchemy import func, select
 
 from src.app.config import settings
@@ -52,6 +59,11 @@ from src.app.services.society.activation_layer import _aggregate_opinions
 from src.app.services.society.calibration import platt_recalibrate
 from src.app.services.society.emergence_tracker import EmergenceTracker
 from src.app.services.society.output_validator import explain_activation_meeting_gap
+from src.app.services.society.survey_anchor import (
+    apply_survey_anchor,
+    get_anchor_distribution,
+    load_survey_data,
+)
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -65,17 +77,38 @@ _CATEGORY_KEYWORDS: dict[str, list[str]] = {
 }
 
 
-def _estimate_theme_category(theme: str, grounding_facts: list[dict] | None = None) -> str:
-    """テーマ文やグラウンディングファクトからテーマカテゴリを推定する。"""
-    # grounding_facts にカテゴリ情報があればそれを優先
+def _estimate_theme_category(
+    theme: str,
+    grounding_facts: list[dict] | None = None,
+    override: str | None = None,
+) -> ThemeCategoryEstimate:
+    """テーマ文やグラウンディングファクトからテーマカテゴリを推定する。
+
+    優先順位: override > grounding_facts > keyword_match > fallback(unknown)
+    """
+    # 1. override 最優先
+    if override is not None and override in _CATEGORY_KEYWORDS:
+        return ThemeCategoryEstimate(
+            category=override,
+            confidence=1.0,
+            source="override",
+            is_anchor_eligible=True,
+        )
+
+    # 2. grounding_facts にカテゴリ情報があればキーワードより優先
     if grounding_facts:
         for fact in grounding_facts:
             cat = fact.get("theme_category") or fact.get("category")
             if cat and cat in _CATEGORY_KEYWORDS:
-                return cat
+                return ThemeCategoryEstimate(
+                    category=cat,
+                    confidence=0.8,
+                    source="grounding_facts",
+                    is_anchor_eligible=True,
+                )
 
-    # テーマ文からキーワードマッチでカテゴリを推定
-    best_category = "social"
+    # 3. テーマ文からキーワードマッチでカテゴリを推定
+    best_category: str | None = None
     best_count = 0
     for category, keywords in _CATEGORY_KEYWORDS.items():
         count = sum(1 for kw in keywords if kw in theme)
@@ -83,7 +116,26 @@ def _estimate_theme_category(theme: str, grounding_facts: list[dict] | None = No
             best_count = count
             best_category = category
 
-    return best_category
+    # キーワード 0 件 → unknown
+    if best_count == 0:
+        return ThemeCategoryEstimate(
+            category="unknown",
+            confidence=0.0,
+            source="fallback",
+            is_anchor_eligible=False,
+        )
+
+    confidence = min(1.0, best_count * CONFIDENCE_PER_KEYWORD)
+    # MVP カテゴリで confidence が閾値未満の場合はアンカリング禁止
+    is_anchor_eligible = not (
+        best_category in MVP_CATEGORIES and confidence < ANCHOR_MIN_CONFIDENCE
+    )
+    return ThemeCategoryEstimate(
+        category=best_category,
+        confidence=confidence,
+        source="keyword_match",
+        is_anchor_eligible=is_anchor_eligible,
+    )
 
 
 def _build_activation_phase_data(
@@ -354,6 +406,31 @@ async def run_society(simulation_id: str) -> None:
                 for agent in selected_agents:
                     agent["grounding_facts"] = []
 
+            # === Phase 2.8: theme_category 推定とアンカー事前準備 ===
+            # activation 前に推定を確定させ、アンカー適用タイミングを固定する
+            survey_data_dir = settings.config_dir / "grounding" / "survey_data"
+            theme_estimate = _estimate_theme_category(theme, grounding_facts)
+            logger.info(
+                "Theme category estimated: category=%s confidence=%.2f source=%s anchor_eligible=%s",
+                theme_estimate.category, theme_estimate.confidence,
+                theme_estimate.source, theme_estimate.is_anchor_eligible,
+            )
+
+            anchor_distribution: dict[str, float] | None = None
+            if theme_estimate.is_anchor_eligible:
+                try:
+                    anchor_surveys = load_survey_data(str(survey_data_dir))
+                    anchor_distribution = get_anchor_distribution(
+                        theme, theme_estimate.category, anchor_surveys
+                    )
+                    if anchor_distribution:
+                        logger.info(
+                            "Anchor distribution pre-loaded for category=%s",
+                            theme_estimate.category,
+                        )
+                except Exception as exc:
+                    logger.warning("Anchor distribution pre-load failed: %s", exc)
+
             # === Phase 3: Activation ===
             await sse_manager.publish(simulation_id, "society_activation_started", {
                 "agent_count": len(selected_agents),
@@ -386,6 +463,20 @@ async def run_society(simulation_id: str) -> None:
                     "concern": (resp.get("concern") or "")[:300],
                     "priority": resp.get("priority", ""),
                 })
+
+            # === Phase 3.1: Survey アンカリング（activation 後・propagation 前）===
+            # anchor_distribution が None（not eligible or 調査なし）の場合はスキップ
+            stance_dist_pre_anchor = activation_result["aggregation"].get("stance_distribution", {})
+            anchored_stance_dist = apply_survey_anchor(stance_dist_pre_anchor, anchor_distribution)
+            anchor_applied = anchor_distribution is not None and anchored_stance_dist != stance_dist_pre_anchor
+            if anchor_applied:
+                activation_result["aggregation"]["stance_distribution_pre_anchor"] = stance_dist_pre_anchor
+                activation_result["aggregation"]["stance_distribution"] = anchored_stance_dist
+                logger.info(
+                    "Survey anchor applied: category=%s alpha=0.3 emd_shift=%s",
+                    theme_estimate.category,
+                    anchor_applied,
+                )
 
             activation_record = SocietyResult(
                 id=str(uuid.uuid4()),
@@ -645,16 +736,15 @@ async def run_society(simulation_id: str) -> None:
             survey_comparison = None
             try:
                 from src.app.services.society.validation_pipeline import register_result, auto_compare
-                survey_data_dir = settings.config_dir / "grounding" / "survey_data"
+                # theme_estimate と survey_data_dir は Phase 2.8 で確定済み
                 stance_dist = activation_result["aggregation"].get("stance_distribution", {})
-                # テーマカテゴリを推定（grounding_facts からカテゴリを取得、なければテーマから推定）
-                theme_category = _estimate_theme_category(theme, grounding_facts)
                 validation_record = await register_result(
                     session,
                     simulation_id=simulation_id,
                     theme=theme,
-                    theme_category=theme_category,
+                    theme_category=theme_estimate.category,
                     distribution=stance_dist,
+                    theme_category_estimate=theme_estimate,
                 )
                 survey_comparison = await auto_compare(
                     session, validation_record, str(survey_data_dir)
@@ -818,6 +908,15 @@ async def run_society(simulation_id: str) -> None:
                 seed=sim.seed,
                 survey_comparison=survey_comparison,
             )
+
+            # Augment provenance with theme_category anchoring provenance
+            provenance["theme_category_anchoring"] = {
+                "category": theme_estimate.category,
+                "confidence": theme_estimate.confidence,
+                "source": theme_estimate.source,
+                "is_anchor_eligible": theme_estimate.is_anchor_eligible,
+                "anchor_applied": anchor_applied,
+            }
 
             # Augment provenance with network propagation data
             if propagation_result:

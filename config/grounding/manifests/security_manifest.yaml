@@ -1,0 +1,97 @@
+# Security preset — トレーニング/評価マニフェスト
+# このファイルは security カテゴリの調査データを train/eval に分割し、
+# holdout 境界・設問正規化ルール・品質ランクを定義する。
+
+preset_id: security
+version: "1.0"
+created: "2026-04-11"
+description: "Security preset の survey train/eval マニフェスト"
+
+# ホールドアウト境界
+holdout_boundary:
+  method: "topic_stratified"
+  description: >
+    自衛隊・防衛費・同盟という 3 テーマを 2:1 で train/eval に分割する。
+    国際条約・同盟関係テーマ（日米安全保障）は外交的繊細さが高いため eval に配置。
+    train/eval のテーマキーワードが重複しないことを必須とする。
+  eval_criteria:
+    - "国際条約・同盟関係に関するテーマ（外交的繊細さが高い）"
+    - "他のカテゴリ（politics）と重複キーワードを持つテーマ"
+
+# 品質ランク定義
+quality_rank_definitions:
+  A: "国家機関・中央銀行による全国調査、サンプル数 n≥2000、標準化手法"
+  B: "地域調査または n=500-1999、標準化手法"
+  C: "オンライン調査、ボランティアサンプル、非標準化手法"
+
+# 設問正規化ルール
+normalization_rules:
+  stance_scale: 5point_likert
+  stance_labels:
+    - "賛成"
+    - "条件付き賛成"
+    - "中立"
+    - "条件付き反対"
+    - "反対"
+  distribution_tolerance: 0.01
+  direction_convention: >
+    テーマについて「現状の安全保障体制・方針を支持する」方向を「賛成」とする。
+    防衛費増額のような政策賛否テーマは「増額賛成」を「賛成」とする。
+  steps:
+    - name: "分布合計検証"
+      description: "stance_distribution の合計が 1.0 ±0.01 であることを確認"
+    - name: "欠損カテゴリ補完"
+      description: "5段階のいずれかが欠損する場合は 0.0 を補完"
+    - name: "賛否方向注釈"
+      description: "normalization_notes に賛否フレームの方向を明記"
+    - name: "politics/security 境界チェック"
+      description: "日米外交・安保条約テーマは politics との重複キーワードを確認し注釈"
+
+# トレーニングセット
+train_surveys:
+  - survey_id: "cabinet_defense_2024_security_自衛隊の役割"
+    file: "cabinet_office/defense_2024.yaml"
+    theme: "自衛隊の役割"
+    survey_date: "2024-01"
+    sample_size: 2761
+    method: "個別面接聴取"
+    source: "内閣府「自衛隊・防衛問題に関する世論調査」2024年"
+    quality_rank: "A"
+    normalization_notes: "賛否方向=正（自衛隊の安全保障上の役割を肯定）。支持層が多数（賛成+条件付き賛成 ≈0.73）。"
+
+  - survey_id: "cabinet_defense_2024_security_防衛費増額"
+    file: "cabinet_office/defense_2024.yaml"
+    theme: "防衛費増額"
+    survey_date: "2024-01"
+    sample_size: 2761
+    method: "個別面接聴取"
+    source: "内閣府「自衛隊・防衛問題に関する世論調査」2024年"
+    quality_rank: "A"
+    normalization_notes: "賛否方向=正（防衛費増額を肯定）。意見が分散しており中立層が多い。"
+
+# 評価セット（ホールドアウト）
+eval_surveys:
+  - survey_id: "cabinet_defense_2024_security_日米安全保障"
+    file: "cabinet_office/defense_2024.yaml"
+    theme: "日米安全保障"
+    survey_date: "2024-01"
+    sample_size: 2761
+    method: "個別面接聴取"
+    source: "内閣府「自衛隊・防衛問題に関する世論調査」2024年"
+    quality_rank: "A"
+    holdout_reason: >
+      日米安保条約は外交的繊細さが高く politics カテゴリとの境界に位置するため、
+      汎化性評価テーマとして eval に配置。
+    normalization_notes: >
+      賛否方向=正（日米安保が安全に役立つことを肯定）。
+      politics/security キーワード重複に注意（同盟・アメリカ）。
+    gate_eligible: true
+
+# leakage 防止
+leakage_prevention:
+  exclude_survey_ids_from_training:
+    - "cabinet_defense_2024_security_日米安全保障"
+  validation_checks:
+    - "eval survey_id がトレーニングセットに含まれないこと"
+    - "train と eval のキーワード（同盟・アメリカ）が訓練時に漏洩しないこと"
+    - "パラメータ推定（Optuna TPE）に eval データを使用しないこと"

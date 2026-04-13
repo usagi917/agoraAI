@@ -1,0 +1,37 @@
+# IssueParams: 意見更新モデルの定数定義
+#
+# これらの定数は opinion_dynamics.py および event_exposure.py でハードコードされている値と一致している。
+# 将来的にカテゴリ別チューニングをサポートする場合、このファイルを基準に差分を定義する。
+#
+# 参考文献:
+#   - FJ-MM (arXiv:2504.06731, 2025): MEMORY_WINDOW, MEMORY_DECAY
+#   - Gestefeld & Lorenz (2023, JASSS): CONFIRMATION_BIAS
+#   - Kahneman & Tversky (1979): LOSS_AVERSION_LAMBDA
+#   - Candia et al. (2019, Nature Comm): EVENT_DECAY_TAU1, EVENT_DECAY_TAU2
+
+# 会話ステップあたりの最大意見変化量（Hegselmann-Krause クランプ）
+MAX_CONV_DELTA: 0.15
+
+# 外部イベントの最大意見変化量（tanh 飽和の上限値）
+MAX_EVENT_DELTA: 0.25
+
+# 1 ステップあたりの信念減衰率（意見がアンカーへ戻る速度）
+BASE_DECAY: 0.02
+
+# FJ-MM 記憶アンカーの参照ステップ数（4 週間相当）
+MEMORY_WINDOW: 4
+
+# FJ-MM 記憶アンカーの指数減衰率
+MEMORY_DECAY: 0.3
+
+# 確証バイアス強度（同方向近傍エージェントへの受容増幅率）
+CONFIRMATION_BIAS: 0.3
+
+# Prospect Theory: 損失回避係数（ネガティブイベントの影響倍率）
+LOSS_AVERSION_LAMBDA: 2.25
+
+# Two-phase Event Decay: Phase 1 時定数（急速減衰 0–7 日）
+EVENT_DECAY_TAU1: 0.5
+
+# Two-phase Event Decay: Phase 2 時定数（緩慢減衰 7 日以降）
+EVENT_DECAY_TAU2: 4.0

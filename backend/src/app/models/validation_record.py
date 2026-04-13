@@ -24,5 +24,11 @@ class ValidationRecord(Base):
     brier_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     kl_divergence: Mapped[float | None] = mapped_column(Float, nullable=True)
     emd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Step 2: 新カラム（validation 基盤 / theme_category 拡張）
+    jsd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    validation_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    theme_category_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    theme_category_source: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    survey_manifest_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
     validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)

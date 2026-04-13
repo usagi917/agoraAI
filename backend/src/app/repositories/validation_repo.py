@@ -34,6 +34,8 @@ class ValidationRepository:
         theme_category: str,
         simulated_distribution: dict,
         calibrated_distribution: dict | None = None,
+        theme_category_confidence: float | None = None,
+        theme_category_source: str | None = None,
     ) -> ValidationRecord:
         record = ValidationRecord(
             simulation_id=simulation_id,
@@ -41,6 +43,8 @@ class ValidationRepository:
             theme_category=theme_category,
             simulated_distribution=simulated_distribution,
             calibrated_distribution=calibrated_distribution,
+            theme_category_confidence=theme_category_confidence,
+            theme_category_source=theme_category_source,
         )
         self.session.add(record)
         await self.session.commit()

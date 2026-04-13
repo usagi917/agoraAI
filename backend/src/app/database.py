@@ -62,6 +62,8 @@ async def _get_existing_tables(conn: AsyncConnection) -> set[str]:
 
 
 async def _apply_sqlite_compatibility_migrations(conn: AsyncConnection) -> None:
+    import json as _json
+
     existing_tables = await _get_existing_tables(conn)
 
     if "projects" in existing_tables:
@@ -93,6 +95,43 @@ async def _apply_sqlite_compatibility_migrations(conn: AsyncConnection) -> None:
             await conn.execute(
                 text("ALTER TABLE simulations ADD COLUMN scenario_pair_id VARCHAR(36)")
             )
+
+    # --- agent_profiles: Step 2 スキーマ拡張 ---
+    if "agent_profiles" in existing_tables:
+        ap_columns = await _get_sqlite_columns(conn, "agent_profiles")
+        if "information_sources" not in ap_columns:
+            await conn.execute(
+                text("ALTER TABLE agent_profiles ADD COLUMN information_sources JSON")
+            )
+            # データマイグレーション: 空でない information_source → information_sources
+            result = await conn.execute(
+                text(
+                    "SELECT id, information_source FROM agent_profiles "
+                    "WHERE information_source IS NOT NULL AND information_source != ''"
+                )
+            )
+            rows = result.fetchall()
+            for row_id, src in rows:
+                await conn.execute(
+                    text(
+                        "UPDATE agent_profiles SET information_sources = :val WHERE id = :id"
+                    ),
+                    {"val": _json.dumps([src], ensure_ascii=False), "id": row_id},
+                )
+
+    # --- validation_records: Step 2 スキーマ拡張 ---
+    if "validation_records" in existing_tables:
+        vr_columns = await _get_sqlite_columns(conn, "validation_records")
+        for col_ddl in [
+            ("jsd", "ALTER TABLE validation_records ADD COLUMN jsd FLOAT"),
+            ("validation_status", "ALTER TABLE validation_records ADD COLUMN validation_status VARCHAR(50)"),
+            ("theme_category_confidence", "ALTER TABLE validation_records ADD COLUMN theme_category_confidence FLOAT"),
+            ("theme_category_source", "ALTER TABLE validation_records ADD COLUMN theme_category_source VARCHAR(50)"),
+            ("survey_manifest_status", "ALTER TABLE validation_records ADD COLUMN survey_manifest_status VARCHAR(50)"),
+        ]:
+            col_name, ddl = col_ddl
+            if col_name not in vr_columns:
+                await conn.execute(text(ddl))
 
 
 async def _get_postgres_columns(conn: AsyncConnection, table_name: str) -> set[str]:
@@ -131,6 +170,35 @@ async def _apply_postgres_compatibility_migrations(conn: AsyncConnection) -> Non
                 await conn.execute(
                     text(f"ALTER TABLE simulations ALTER COLUMN {legacy_col} DROP NOT NULL")
                 )
+
+    # --- agent_profiles: Step 2 スキーマ拡張 ---
+    if "agent_profiles" in existing_tables:
+        ap_columns = await _get_postgres_columns(conn, "agent_profiles")
+        if "information_sources" not in ap_columns:
+            await conn.execute(
+                text("ALTER TABLE agent_profiles ADD COLUMN information_sources JSON")
+            )
+            # データマイグレーション: 空でない information_source → information_sources
+            await conn.execute(
+                text(
+                    "UPDATE agent_profiles "
+                    "SET information_sources = to_json(ARRAY[information_source]) "
+                    "WHERE information_source IS NOT NULL AND information_source != ''"
+                )
+            )
+
+    # --- validation_records: Step 2 スキーマ拡張 ---
+    if "validation_records" in existing_tables:
+        vr_columns = await _get_postgres_columns(conn, "validation_records")
+        for col_name, col_ddl in [
+            ("jsd", "ALTER TABLE validation_records ADD COLUMN jsd FLOAT"),
+            ("validation_status", "ALTER TABLE validation_records ADD COLUMN validation_status VARCHAR(50)"),
+            ("theme_category_confidence", "ALTER TABLE validation_records ADD COLUMN theme_category_confidence FLOAT"),
+            ("theme_category_source", "ALTER TABLE validation_records ADD COLUMN theme_category_source VARCHAR(50)"),
+            ("survey_manifest_status", "ALTER TABLE validation_records ADD COLUMN survey_manifest_status VARCHAR(50)"),
+        ]:
+            if col_name not in vr_columns:
+                await conn.execute(text(col_ddl))
 
     if "conversation_logs" not in existing_tables:
         return

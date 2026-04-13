@@ -271,6 +271,125 @@ class TestRunNetworkPropagation:
 
 
 # ===========================================================================
+# Test: Phase 3 Belief Decay Integration (Step 8)
+# ===========================================================================
+
+class TestBeliefDecayIntegration:
+    """Phase 3 (belief decay) が run_network_propagation() で適用されることを確認する。"""
+
+    @pytest.mark.asyncio
+    async def test_apply_belief_decay_called_per_agent_per_timestep(self):
+        """各タイムステップで各エージェントに apply_belief_decay が呼ばれること。
+
+        apply_belief_decay をモックしてコール回数を計測する。
+        実装が正しければ: total_calls == n_agents * total_timesteps
+        """
+        from src.app.services.society.opinion_dynamics import apply_belief_decay as real_decay
+        call_args: list[tuple[float, float]] = []
+
+        def tracking_decay(current: float, initial: float) -> float:
+            call_args.append((current, initial))
+            return real_decay(current, initial)
+
+        n_agents = 3
+        n_steps = 5
+        agents = [_make_agent(i) for i in range(n_agents)]
+        responses = [
+            _make_response(0, "賛成", 0.8),
+            _make_response(1, "中立", 0.5),
+            _make_response(2, "反対", 0.8),
+        ]
+        edges = [_make_edge(0, 1), _make_edge(1, 0), _make_edge(1, 2), _make_edge(2, 1)]
+
+        with patch(
+            "src.app.services.society.network_propagation.apply_belief_decay",
+            tracking_decay,
+        ):
+            result = await run_network_propagation(
+                agents=agents,
+                initial_responses=responses,
+                edges=edges,
+                theme="経済政策",
+                max_timesteps=n_steps,
+                convergence_threshold=0.000001,  # 収束させない
+            )
+
+        total_ts = result.total_timesteps
+        expected_min_calls = n_agents * total_ts
+        assert len(call_args) == expected_min_calls, (
+            f"apply_belief_decay コール数: {len(call_args)} != {expected_min_calls} "
+            f"(n_agents={n_agents}, total_timesteps={total_ts})"
+        )
+
+    @pytest.mark.asyncio
+    async def test_belief_decay_pulls_opinion_toward_initial(self):
+        """decay が initial 方向へ引き戻すことを数値的に確認する。
+
+        1 ステップ後の final_opinion が TimestepRecord の opinion (会話後の raw 値)
+        より initial に近いことを確認する。
+
+        実装:
+          - propagation_step() の結果を TimestepRecord に記録
+          - その後 apply_belief_decay を engine._opinions に適用
+          - final_opinions は decay 済みの engine._opinions から取得
+
+        したがって: abs(final - initial) < abs(step_record - initial) がデケイ適用の証拠。
+        """
+        from src.app.services.society.opinion_dynamics import (
+            apply_belief_decay,
+            BASE_DECAY,
+            stubbornness_from_big_five,
+        )
+
+        # confidence_threshold=0.8 で 2 エージェントが相互作用できる距離に設定
+        # 賛成(0.8): opinion = 0.5 + 0.4*0.8 = 0.82
+        # 反対(0.8): opinion = 0.5 - 0.4*0.8 = 0.18
+        # 距離 = 0.64 → threshold=0.8 > 0.64 なので相互作用する
+        agents = [_make_agent(0, big_five_c=0.5), _make_agent(1, big_five_c=0.5)]
+        responses = [_make_response(0, "賛成", 0.8), _make_response(1, "反対", 0.8)]
+        edges = [_make_edge(0, 1, 1.0), _make_edge(1, 0, 1.0)]
+
+        result = await run_network_propagation(
+            agents=agents,
+            initial_responses=responses,
+            edges=edges,
+            theme="経済政策",
+            max_timesteps=1,
+            convergence_threshold=0.000001,
+            confidence_threshold=0.8,  # 相互作用できるよう広くする
+        )
+
+        # TimestepRecord に記録された opinion (propagation_step の raw 出力)
+        step_op0 = result.timestep_history[0].opinions[0][0]
+        # final_opinions (apply_belief_decay 適用後の engine._opinions)
+        final_op0 = result.final_opinions[0][0]
+
+        # 初期 opinion (engine 生成時)
+        initial_op0 = 0.5 + (0.9 - 0.5) * 0.8  # = 0.82
+
+        # 賛成エージェントは会話で引き下げられる (step_op0 < initial_op0)
+        # decay 適用後: final_op0 = apply_belief_decay(step_op0, initial_op0)
+        #                          = step_op0 - BASE_DECAY * (step_op0 - initial_op0)
+        #                          = step_op0 + BASE_DECAY * (initial_op0 - step_op0)
+        # つまり final_op0 > step_op0 (decay で initial 方向, i.e. 上方向へ戻る)
+        # これは abs(final_op0 - initial_op0) < abs(step_op0 - initial_op0) と同義
+
+        # まず会話で意見が変化することを確認 (もし変化しなければ decay の効果も 0)
+        if abs(step_op0 - initial_op0) < 1e-6:
+            pytest.skip("会話による意見変化がなく decay 効果を確認できない")
+
+        # decay が適用されているなら: final は step より initial に近い
+        dist_final_to_initial = abs(final_op0 - initial_op0)
+        dist_step_to_initial = abs(step_op0 - initial_op0)
+
+        assert dist_final_to_initial < dist_step_to_initial, (
+            f"decay 適用後は initial により近いはず: "
+            f"final_gap={dist_final_to_initial:.6f}, step_gap={dist_step_to_initial:.6f}, "
+            f"initial={initial_op0:.4f}, step_op0={step_op0:.4f}, final_op0={final_op0:.4f}"
+        )
+
+
+# ===========================================================================
 # Test: Echo Chamber Metrics
 # ===========================================================================
 

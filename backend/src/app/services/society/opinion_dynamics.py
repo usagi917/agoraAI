@@ -4,24 +4,62 @@ Implements network-based opinion propagation where agents update their opinions
 based on neighbors within a confidence threshold, anchored by individual stubbornness.
 
 Mathematical model per agent i at timestep t:
-    x_i(t+1) = s_i * x_i(0) + (1 - s_i) * weighted_mean(neighbors)
+    x_i(t+1) = s_i * memory_anchor_i + (1 - s_i) * biased_neighbor_mean(neighbors)
 
 Where:
-    s_i = stubbornness (derived from Big Five C: 0.3 + 0.4 * C)
+    s_i = stubbornness (derived from Big Five C: 0.4 + 0.45 * C)
     neighbors = {j in N_i : ||x_j(t) - x_i(t)|| < confidence_threshold}
-    weighted_mean uses edge strength as weights
+    biased_neighbor_mean uses confirmation-bias-weighted edge strengths
+    memory_anchor_i = exponentially decayed mean of recent opinion history (FJ-MM)
+
+Update phases per timestep (applied in order):
+    1. External event injection  (event_delta via tanh saturation)
+    2. Conversation / propagation (HK + FJ with memory anchor + confirmation bias)
+    3. Belief decay               (opinion drifts back toward memory anchor)
 
 References:
     - Hegselmann & Krause (2002): Opinion Dynamics and Bounded Confidence
     - Friedkin & Johnsen (1990): Social Influence and Opinions
+    - FJ-MM (arXiv:2504.06731, 2025): Memory effects in opinion dynamics
+    - Gestefeld & Lorenz (2023, JASSS): Motivated cognition / confirmation bias
+    - Dyer et al. (2024, JEDC): Bayesian Optimization for ABM parameter estimation
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
 
 import numpy as np
+import optuna
 from sklearn.cluster import DBSCAN
+
+optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+# ---------------------------------------------------------------------------
+# Step 8 constants
+# ---------------------------------------------------------------------------
+
+#: Maximum opinion shift per conversation step (clamp)
+MAX_CONV_DELTA: float = 0.15
+
+#: Maximum opinion shift from external event (tanh saturation upper bound)
+MAX_EVENT_DELTA: float = 0.25
+
+#: Base belief decay rate per step (opinion drifts back toward memory anchor)
+BASE_DECAY: float = 0.02
+
+#: Number of past steps used in FJ-MM memory anchor
+MEMORY_WINDOW: int = 4
+
+#: Exponential decay rate for memory anchor weights (k=0 is most recent)
+MEMORY_DECAY: float = 0.3
+
+#: Confirmation bias strength (same-direction neighbor weight amplifier)
+CONFIRMATION_BIAS: float = 0.3
 
 
 # ---------------------------------------------------------------------------
@@ -170,11 +208,303 @@ def compute_filter_bubble_thresholds(
 
 
 # ---------------------------------------------------------------------------
+# Step 8: New standalone helper functions
+# ---------------------------------------------------------------------------
+
+
+def apply_belief_decay(current: float, initial: float) -> float:
+    """Apply one step of belief decay toward the initial (anchor) opinion.
+
+    The opinion drifts back toward *initial* by BASE_DECAY fraction of the gap:
+        new = current - BASE_DECAY * (current - initial)
+           = (1 - BASE_DECAY) * current + BASE_DECAY * initial
+
+    Args:
+        current: Current opinion value in [0, 1].
+        initial: Initial (anchor) opinion value in [0, 1].
+
+    Returns:
+        Decayed opinion value.
+    """
+    return current - BASE_DECAY * (current - initial)
+
+
+def compute_memory_anchor(
+    opinion_history: list[float],
+    initial_opinion: float,
+) -> float:
+    """Compute the FJ-MM memory anchor from recent opinion history.
+
+    Uses the last MEMORY_WINDOW steps with exponential decay weights:
+        weight_k = exp(-MEMORY_DECAY * k)   where k=0 is the most recent step.
+
+    If history has <= 1 entries (only initial), returns initial_opinion directly.
+
+    Args:
+        opinion_history: List of past opinion values (oldest first, most recent last).
+        initial_opinion: The agent's initial opinion (used as fallback).
+
+    Returns:
+        Weighted average anchor opinion.
+    """
+    if len(opinion_history) <= 1:
+        return initial_opinion
+
+    # Take the last MEMORY_WINDOW values
+    window = opinion_history[-MEMORY_WINDOW:]
+
+    # k=0 is the most recent (last element), k=len-1 is oldest in window
+    weights = [math.exp(-MEMORY_DECAY * k) for k in range(len(window))]
+    total = sum(weights)
+
+    # reversed(window): window[-1] (most recent) gets weight k=0
+    anchor = sum(w * o for w, o in zip(weights, reversed(window))) / total
+    return anchor
+
+
+def compute_confirmation_bias_weight(
+    agent_opinion: float,
+    neighbor_opinion: float,
+    base_weight: float,
+) -> float:
+    """Compute the confirmation-bias-adjusted neighbor weight.
+
+    Amplifies same-direction neighbors by (1 + CONFIRMATION_BIAS),
+    attenuates opposite-direction by (1 - CONFIRMATION_BIAS * 0.5).
+    Neutral agents (opinion == 0.5) receive no bias.
+
+    Direction is determined relative to the midpoint 0.5:
+        same direction   if (neighbor - agent) * (agent - 0.5) > 0
+        opposite direction if (neighbor - agent) * (agent - 0.5) < 0
+
+    Args:
+        agent_opinion: The agent's current opinion in [0, 1].
+        neighbor_opinion: The neighbor's current opinion in [0, 1].
+        base_weight: The raw edge weight.
+
+    Returns:
+        Bias-adjusted weight.
+    """
+    if abs(agent_opinion - 0.5) < 1e-9:
+        # Neutral agent: no bias
+        return base_weight
+
+    same_direction = (neighbor_opinion - agent_opinion) * (agent_opinion - 0.5) > 0
+    if same_direction:
+        return base_weight * (1.0 + CONFIRMATION_BIAS)
+    else:
+        return base_weight * (1.0 - CONFIRMATION_BIAS * 0.5)
+
+
+def _apply_event_delta_tanh(magnitude: float, direction: int) -> float:
+    """Apply tanh saturation to an event impact delta.
+
+    The output is bounded by MAX_EVENT_DELTA:
+        delta = MAX_EVENT_DELTA * tanh(magnitude / MAX_EVENT_DELTA) * sign(direction)
+
+    Args:
+        magnitude: Non-negative raw magnitude of the event impact.
+        direction: +1 for positive direction, -1 for negative direction.
+
+    Returns:
+        Saturated delta in [-MAX_EVENT_DELTA, MAX_EVENT_DELTA].
+    """
+    delta = MAX_EVENT_DELTA * math.tanh(magnitude / MAX_EVENT_DELTA)
+    return delta * math.copysign(1.0, direction)
+
+
+def apply_three_phase_update(
+    current_opinion: float,
+    initial_opinion: float,
+    event_delta: float,
+    neighbor_mean: float,
+    stubbornness: float,
+    event_fn: Callable[[float, float], float] | None = None,
+    conversation_fn: Callable[[float, float, float], float] | None = None,
+    decay_fn: Callable[[float, float], float] | None = None,
+) -> float:
+    """Apply the three-phase opinion update in order: event → conversation → decay.
+
+    Phase 1 (event): Skipped if event_delta == 0.
+    Phase 2 (conversation): FJ-MM weighted neighbor mean.
+    Phase 3 (decay): Belief decay toward initial opinion.
+
+    Default implementations use module-level functions when callables are not provided.
+
+    Args:
+        current_opinion: Current opinion in [0, 1].
+        initial_opinion: Initial anchor opinion in [0, 1].
+        event_delta: External event delta (pre-computed, already tanh-saturated).
+        neighbor_mean: Weighted mean of qualifying neighbors.
+        stubbornness: Agent stubbornness s_i.
+        event_fn: Optional override for event phase.
+        conversation_fn: Optional override for conversation phase.
+        decay_fn: Optional override for decay phase.
+
+    Returns:
+        Updated opinion in [0, 1].
+    """
+    opinion = current_opinion
+
+    # Phase 1: External event injection (skip if no event)
+    if event_delta != 0.0:
+        if event_fn is not None:
+            opinion = event_fn(opinion, event_delta)
+        else:
+            opinion = opinion + event_delta
+        opinion = float(np.clip(opinion, 0.0, 1.0))
+
+    # Phase 2: Conversation / propagation (FJ-MM)
+    if conversation_fn is not None:
+        opinion = conversation_fn(opinion, neighbor_mean, stubbornness)
+    else:
+        opinion = stubbornness * initial_opinion + (1.0 - stubbornness) * neighbor_mean
+
+    opinion = float(np.clip(opinion, 0.0, 1.0))
+
+    # Phase 3: Belief decay
+    if decay_fn is not None:
+        opinion = decay_fn(opinion, initial_opinion)
+    else:
+        opinion = apply_belief_decay(opinion, initial_opinion)
+
+    return float(np.clip(opinion, 0.0, 1.0))
+
+
+def optimize_opinion_dynamics_params(
+    target_distribution: dict[str, float],
+    initial_opinions: list[float],
+    n_trials: int = 200,
+    seed: int | None = None,
+) -> tuple[dict, float]:
+    """Optimize opinion dynamics parameters using Optuna TPE to minimize EMD.
+
+    Explores:
+        confidence_threshold in [0.05, 1.0]
+        base_stubbornness in [0.1, 0.9]
+
+    Args:
+        target_distribution: The reference stance distribution to match.
+        initial_opinions: Initial opinion values for a small simulated population.
+        n_trials: Number of Optuna trials (default 200; use 50 for tests).
+        seed: Random seed for reproducibility.
+
+    Returns:
+        (best_params dict, best_emd float)
+    """
+    from src.app.utils.distribution_metrics import earth_movers_distance
+
+    _STANCE_THRESHOLDS_LOCAL: list[tuple[float, str]] = [
+        (0.8, "賛成"),
+        (0.6, "条件付き賛成"),
+        (0.4, "中立"),
+        (0.2, "条件付き反対"),
+        (0.0, "反対"),
+    ]
+
+    def _opinion_to_stance(val: float) -> str:
+        for threshold, label in _STANCE_THRESHOLDS_LOCAL:
+            if val >= threshold:
+                return label
+        return "反対"
+
+    def _simulate_and_compute_emd(confidence_threshold: float, base_stubbornness: float) -> float:
+        n = len(initial_opinions)
+        opinions = list(initial_opinions)
+
+        # Build a ring topology for the mini simulation
+        for _ in range(5):  # 5 timesteps
+            new_opinions = []
+            for i in range(n):
+                s_i = base_stubbornness
+                x_i = opinions[i]
+                x_i_0 = initial_opinions[i]
+
+                # Find qualifying neighbors
+                neighbors = [opinions[j] for j in range(n) if j != i and abs(opinions[j] - x_i) <= confidence_threshold]
+                if neighbors:
+                    neighbor_mean = sum(neighbors) / len(neighbors)
+                    new_x = s_i * x_i_0 + (1.0 - s_i) * neighbor_mean
+                    delta = new_x - x_i
+                    # Clamp to MAX_CONV_DELTA
+                    if abs(delta) > MAX_CONV_DELTA:
+                        delta = math.copysign(MAX_CONV_DELTA, delta)
+                    new_x = x_i + delta
+                else:
+                    new_x = x_i
+                new_opinions.append(float(np.clip(new_x, 0.0, 1.0)))
+            opinions = new_opinions
+
+        # Compute simulated distribution
+        stances: dict[str, int] = {}
+        for op in opinions:
+            stance = _opinion_to_stance(op)
+            stances[stance] = stances.get(stance, 0) + 1
+        total = len(opinions)
+        simulated = {k: v / total for k, v in stances.items()}
+
+        return earth_movers_distance(simulated, target_distribution)
+
+    sampler = optuna.samplers.TPESampler(seed=seed)
+    study = optuna.create_study(direction="minimize", sampler=sampler)
+
+    def objective(trial: optuna.Trial) -> float:
+        ct = trial.suggest_float("confidence_threshold", 0.05, 1.0)
+        st = trial.suggest_float("base_stubbornness", 0.1, 0.9)
+        return _simulate_and_compute_emd(ct, st)
+
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+
+    best_params = study.best_params
+    best_emd = study.best_value
+    return best_params, best_emd
+
+
+def save_estimated_params(
+    params: dict[str, Any],
+    best_emd: float,
+    path: Path | str,
+    category: str | None = None,
+) -> None:
+    """Optuna 推定パラメータを YAML ファイルに保存する。
+
+    Args:
+        params: optimize_opinion_dynamics_params() が返す best_params 辞書。
+        best_emd: 最良 EMD スコア。
+        path: 保存先ファイルパス（親ディレクトリは自動生成）。
+        category: テーマカテゴリ名（"economy", "security" 等）。省略可。
+    """
+    import yaml
+
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    data: dict[str, Any] = {
+        "params": {k: float(v) for k, v in params.items()},
+        "best_emd": float(best_emd),
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if category is not None:
+        data["category"] = category
+
+    with open(out, "w", encoding="utf-8") as f:
+        yaml.safe_dump(data, f, allow_unicode=True, sort_keys=True)
+
+
+# ---------------------------------------------------------------------------
 # Engine
 # ---------------------------------------------------------------------------
 
 class OpinionDynamicsEngine:
-    """Bounded Confidence + Friedkin-Johnsen opinion dynamics on a weighted graph."""
+    """Bounded Confidence + Friedkin-Johnsen opinion dynamics on a weighted graph.
+
+    Step 8 enhancements:
+    - MAX_CONV_DELTA clamp on conversation update
+    - FJ-MM memory anchor (compute_memory_anchor) replaces x_i(0)
+    - Confirmation bias asymmetric weights (compute_confirmation_bias_weight)
+    - Per-agent opinion history tracking (_per_agent_history)
+    - Deterministic seed support
+    """
 
     def __init__(
         self,
@@ -182,10 +512,12 @@ class OpinionDynamicsEngine:
         edges: list[dict],
         confidence_threshold: float | np.ndarray = 0.3,
         edge_weight_decay: float = 0.0,
+        seed: int | None = None,
     ) -> None:
         self.n = len(agents)
         self.agent_ids = [a["id"] for a in agents]
         self._id_to_idx = {a["id"]: i for i, a in enumerate(agents)}
+        self._rng = np.random.default_rng(seed)
 
         # Store initial opinions (anchors for Friedkin-Johnsen)
         self._initial_opinions = np.array(
@@ -220,6 +552,16 @@ class OpinionDynamicsEngine:
         # History for convergence detection
         self._history: list[np.ndarray] = []
 
+        # Per-agent opinion history for FJ-MM memory anchor (1D only)
+        # Initialise with the agent's explicit history if provided, else just initial opinion
+        self._per_agent_history: list[list[float]] = []
+        for agent in agents:
+            provided_history = agent.get("opinion_history")
+            if provided_history:
+                self._per_agent_history.append(list(provided_history))
+            else:
+                self._per_agent_history.append([agent["opinion_vector"][0]])
+
     # ----- propagation step ------------------------------------------------
 
     def propagation_step(self, timestep: int) -> PropagationStepResult:
@@ -233,9 +575,20 @@ class OpinionDynamicsEngine:
         for i in range(self.n):
             s_i = self._stubbornness[i]
             x_i = self._opinions[i]
-            x_i_0 = self._initial_opinions[i]
 
-            # Collect qualifying neighbors (within per-agent confidence bound)
+            # FJ-MM: use memory anchor instead of fixed x_i(0)
+            # For multi-dimensional opinions we use the first dimension for memory anchor
+            if self._dim == 1:
+                memory_anchor_val = compute_memory_anchor(
+                    self._per_agent_history[i],
+                    initial_opinion=self._initial_opinions[i][0],
+                )
+                x_anchor = np.array([memory_anchor_val], dtype=np.float64)
+            else:
+                # Multi-dim: fall back to initial opinion
+                x_anchor = self._initial_opinions[i].copy()
+
+            # Collect qualifying neighbors with confirmation bias weighting
             weighted_sum = np.zeros(self._dim, dtype=np.float64)
             total_weight = 0.0
 
@@ -243,23 +596,46 @@ class OpinionDynamicsEngine:
                 x_j = self._opinions[j]
                 dist = np.linalg.norm(x_j - x_i)
                 if dist <= self._thresholds[i]:
-                    effective_w = w * decay_factor
+                    base_w = w * decay_factor
+                    # Apply confirmation bias (1D only; multi-dim keeps base weight)
+                    if self._dim == 1:
+                        effective_w = compute_confirmation_bias_weight(
+                            agent_opinion=float(x_i[0]),
+                            neighbor_opinion=float(x_j[0]),
+                            base_weight=base_w,
+                        )
+                    else:
+                        effective_w = base_w
                     weighted_sum += effective_w * x_j
                     total_weight += effective_w
 
             if total_weight > 0.0:
                 neighbor_mean = weighted_sum / total_weight
-                new_x = s_i * x_i_0 + (1.0 - s_i) * neighbor_mean
+                unclamped_x = s_i * x_anchor + (1.0 - s_i) * neighbor_mean
+
+                # MAX_CONV_DELTA clamp: limit the conversation-driven shift
+                raw_delta = unclamped_x - x_i
+                clamped_delta = np.clip(raw_delta, -MAX_CONV_DELTA, MAX_CONV_DELTA)
+                new_x = x_i + clamped_delta
             else:
                 # No qualifying neighbors: opinion unchanged
                 new_x = x_i.copy()
 
+            # Clip to [0, 1]
+            new_x = np.clip(new_x, 0.0, 1.0)
             new_opinions[i] = new_x
-            delta = np.linalg.norm(new_x - x_i)
-            if delta > max_delta:
-                max_delta = delta
+
+            step_delta = float(np.linalg.norm(new_x - x_i))
+            if step_delta > max_delta:
+                max_delta = step_delta
 
         self._opinions = new_opinions
+
+        # Update per-agent history (1D)
+        if self._dim == 1:
+            for i in range(self.n):
+                self._per_agent_history[i].append(float(new_opinions[i][0]))
+
         self._history.append(new_opinions.copy())
 
         return PropagationStepResult(

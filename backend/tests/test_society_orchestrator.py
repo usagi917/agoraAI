@@ -989,7 +989,7 @@ class TestRunSocietyPipelineFixes:
 
         from src.app.services.society import validation_pipeline
 
-        async def fake_register_result(session, simulation_id, theme, theme_category, distribution):
+        async def fake_register_result(session, simulation_id, theme, theme_category, distribution, **kwargs):
             return {"id": "validation-1"}
 
         async def fake_auto_compare(session, validation_record, survey_data_dir):
@@ -1106,7 +1106,7 @@ class TestRunSocietyPipelineFixes:
 
         from src.app.services.society import validation_pipeline
 
-        async def fake_register_result(session, simulation_id, theme, theme_category, distribution):
+        async def fake_register_result(session, simulation_id, theme, theme_category, distribution, **kwargs):
             return {"id": "validation-1"}
 
         async def fake_auto_compare(session, validation_record, survey_data_dir):

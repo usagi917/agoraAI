@@ -2,17 +2,23 @@
 
 シミュレーション実行→記録→事後検証のフローを自動化する。
 
-- register_result       : シミュレーション結果を ValidationRecord に登録
-- auto_compare          : 関連する過去調査との自動比較
-- resolve_with_actual   : 実績データ投入と精度指標算出
-- generate_accuracy_report: テーマカテゴリ別の精度レポート
-- update_bias_profile   : バイアスプロファイルの再構築
+- register_result           : シミュレーション結果を ValidationRecord に登録
+- auto_compare              : 関連する過去調査との自動比較
+- resolve_with_actual       : 実績データ投入と精度指標算出
+- generate_accuracy_report  : テーマカテゴリ別の精度レポート
+- update_bias_profile       : バイアスプロファイルの再構築
+- run_full_validation       : 全レコードの validation 分類（Step 4）
+- build_validation_summary  : ゲート判定サマリー生成（Step 4）
 """
 
 from __future__ import annotations
 
-from typing import TypedDict
+import logging
+import os
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, TypedDict
 
+import yaml
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.models.validation_record import ValidationRecord
@@ -28,8 +34,88 @@ from src.app.services.society.transfer_calibrator import (
     BiasProfile,
     compute_bias_profile,
 )
+from src.app.services.society.theme_category import ThemeCategoryEstimate
+
+if TYPE_CHECKING:
+    pass
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_GAMMA = 0.7
+
+# =============================================
+# Step 4: validation 基盤定数
+# =============================================
+
+# ゲート判定閾値（EMD 主指標、JSD 副指標）
+GATE_EMD_THRESHOLD: float = 0.15   # EMD < 0.15 でパス
+GATE_JSD_THRESHOLD: float = 0.10   # JSD < 0.10 でパス
+GATE_BRIER_THRESHOLD: float = 0.30  # Brier < 0.30 でパス
+
+# カバレッジ基準
+MIN_VALIDATED_COUNT: int = 3         # 全体で必要な最低 validated 件数
+MIN_VALIDATED_PER_CATEGORY: int = 2  # カテゴリ別の最低 validated 件数
+MIN_COVERAGE_RATIO: float = 0.5      # validated / total >= 0.5 が必要
+
+# manifest ファイルが置かれているディレクトリ
+# __file__ = backend/src/app/services/society/validation_pipeline.py
+# → ../../../../../config/grounding/manifests = /config/grounding/manifests
+MANIFEST_DIR: str = os.path.join(
+    os.path.dirname(__file__),
+    "../../../../..",  # agentAI/
+    "config/grounding/manifests",
+)
+
+
+def _load_manifest_surveys() -> list[dict]:
+    """manifests/ 以下の YAML を読み、全 survey エントリの辞書リストを返す。
+
+    train_surveys と eval_surveys の両方を収集する。
+    各エントリには source, quality_rank 等が含まれる。
+    """
+    all_surveys: list[dict] = []
+    manifest_path = Path(MANIFEST_DIR).resolve()
+
+    if not manifest_path.exists():
+        logger.warning("Manifest directory not found: %s", manifest_path)
+        return all_surveys
+
+    for yaml_file in manifest_path.glob("*.yaml"):
+        try:
+            with open(yaml_file, encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except (yaml.YAMLError, OSError) as exc:
+            logger.warning("Failed to load manifest %s: %s", yaml_file, exc)
+            continue
+
+        if not data:
+            continue
+
+        for section in ("train_surveys", "eval_surveys"):
+            for survey in data.get(section, []):
+                if isinstance(survey, dict) and "source" in survey:
+                    all_surveys.append(survey)
+
+    return all_surveys
+
+
+def _load_manifested_sources() -> set[str]:
+    """manifests/ から全 survey source 名の集合を返す。"""
+    return {s["source"] for s in _load_manifest_surveys()}
+
+
+def _determine_manifest_status(
+    survey_source: str | None,
+    manifested_sources: set[str],
+) -> str | None:
+    """survey_source が manifest に含まれるか判定する。
+
+    Returns:
+        "manifested" | "unmanifested" | None (survey_source が None の場合)
+    """
+    if survey_source is None:
+        return None
+    return "manifested" if survey_source in manifested_sources else "unmanifested"
 
 
 class AccuracyReport(TypedDict):
@@ -47,8 +133,25 @@ async def register_result(
     theme_category: str,
     distribution: dict[str, float],
     calibrated_distribution: dict[str, float] | None = None,
+    theme_category_estimate: ThemeCategoryEstimate | None = None,
 ) -> ValidationRecord:
-    """シミュレーション結果を validation_record に登録する。"""
+    """シミュレーション結果を validation_record に登録する。
+
+    theme_category_estimate が渡された場合は provenance をログに記録する。
+    confidence / source の DB 永続化は Step 2 の DB マイグレーション完了後に行う。
+    """
+    theme_category_confidence: float | None = None
+    theme_category_source: str | None = None
+    if theme_category_estimate is not None:
+        logger.debug(
+            "theme_category provenance: category=%s confidence=%.2f source=%s anchor_eligible=%s",
+            theme_category_estimate.category,
+            theme_category_estimate.confidence,
+            theme_category_estimate.source,
+            theme_category_estimate.is_anchor_eligible,
+        )
+        theme_category_confidence = theme_category_estimate.confidence
+        theme_category_source = theme_category_estimate.source
     repo = ValidationRepository(session)
     return await repo.save(
         simulation_id=simulation_id,
@@ -56,6 +159,8 @@ async def register_result(
         theme_category=theme_category,
         simulated_distribution=distribution,
         calibrated_distribution=calibrated_distribution,
+        theme_category_confidence=theme_category_confidence,
+        theme_category_source=theme_category_source,
     )
 
 
@@ -64,11 +169,25 @@ async def auto_compare(
     record: ValidationRecord,
     survey_data_dir: str,
 ) -> ComparisonReport | None:
-    """関連する調査データと自動比較し、比較結果をレコードへ反映して返す。"""
+    """関連する調査データと自動比較し、比較結果をレコードへ反映して返す。
+
+    ValidationRecord の theme_category を compare_with_surveys へパススルーし、
+    異カテゴリ調査との誤マッチを防ぐ。
+
+    theme_category="unknown" の場合は survey 比較をスキップして None を返す。
+    """
+    if record.theme_category == "unknown":
+        logger.debug(
+            "auto_compare: skipping survey comparison for unknown category (sim=%s)",
+            record.simulation_id,
+        )
+        return None
+
     report = compare_with_surveys(
         record.simulated_distribution,
         record.theme_text,
         survey_data_dir,
+        theme_category=record.theme_category,
     )
     if report is None:
         return None
@@ -253,3 +372,225 @@ async def find_optimal_gamma_by_category(
         by_category[cat] = result
 
     return CategoryGammaResult(by_category=by_category)
+
+
+# =============================================
+# Step 4: run_full_validation / build_validation_summary
+# =============================================
+
+
+class ValidationResultItem(TypedDict):
+    simulation_id: str
+    record_id: str
+    theme_category: str
+    status: str                        # "validated" | "report_only"
+    gate_eligible: bool
+    survey_manifest_status: str | None  # "manifested" | "unmanifested" | None
+    survey_source: str | None
+    emd: float | None
+    jsd: float | None
+    brier_score: float | None
+
+
+async def run_full_validation(
+    session: AsyncSession,
+    theme_category: str | None = None,
+    exclude_quality_ranks: list[str] | None = None,
+) -> list[ValidationResultItem]:
+    """全 ValidationRecord を取得し、各レコードを validation 状態で分類する。
+
+    各レコードに対して以下を決定する:
+    - status: "validated"（actual_distribution あり）/ "report_only"（なし）
+    - gate_eligible: exclude_quality_ranks に含まれるソースは False
+    - survey_manifest_status: manifest に登録された source かどうか
+
+    Args:
+        session: DB セッション
+        theme_category: カテゴリフィルタ（None で全件）
+        exclude_quality_ranks: 除外するランク指定（現在は survey_source ベースで判定）
+
+    Returns:
+        ValidationResultItem のリスト
+    """
+    from sqlalchemy import select
+
+    stmt = select(ValidationRecord)
+    if theme_category:
+        stmt = stmt.where(ValidationRecord.theme_category == theme_category)
+
+    result = await session.execute(stmt)
+    records = list(result.scalars().all())
+
+    if not records:
+        return []
+
+    manifested_sources = _load_manifested_sources()
+
+    items: list[ValidationResultItem] = []
+    for record in records:
+        # status 判定
+        if record.actual_distribution is not None:
+            status = "validated"
+        else:
+            status = "report_only"
+
+        # manifest status 判定
+        manifest_status = _determine_manifest_status(
+            record.survey_source,
+            manifested_sources,
+        )
+
+        # gate_eligible: unknown カテゴリは survey 比較対象外のため常に False
+        # exclude_quality_ranks による除外も確認する
+        gate_eligible = record.theme_category != "unknown"
+        if gate_eligible and exclude_quality_ranks and record.survey_source:
+            # manifest から quality_rank を取得して判定
+            quality_rank = _get_survey_quality_rank(record.survey_source)
+            if quality_rank in (exclude_quality_ranks or []):
+                gate_eligible = False
+
+        items.append(
+            ValidationResultItem(
+                simulation_id=record.simulation_id,
+                record_id=record.id,
+                theme_category=record.theme_category or "",
+                status=status,
+                gate_eligible=gate_eligible,
+                survey_manifest_status=manifest_status,
+                survey_source=record.survey_source,
+                emd=record.emd,
+                jsd=record.jsd,
+                brier_score=record.brier_score,
+            )
+        )
+
+    return items
+
+
+def _get_survey_quality_rank(survey_source: str) -> str | None:
+    """manifest から survey_source の quality_rank を返す。
+
+    manifest に登録されていないソースは None を返す。
+    _load_manifest_surveys() の結果を線形探索する。
+    """
+    for survey in _load_manifest_surveys():
+        if survey.get("source") == survey_source:
+            return survey.get("quality_rank")
+    return None
+
+
+class ValidationSummary(TypedDict):
+    gate: str                  # "pass" | "fail" | "inconclusive"
+    avg_emd: float | None
+    avg_jsd: float | None
+    avg_brier: float | None
+    total_count: int
+    validated_count: int
+    gate_eligible_count: int
+    theme_category: str | None
+
+
+def build_validation_summary(
+    records_data: list[dict[str, Any]],
+    theme_category: str | None = None,
+) -> ValidationSummary:
+    """validation 結果リストからゲート判定サマリーを生成する。
+
+    ゲート基準:
+    - EMD < 0.15 (主指標)
+    - JSD < 0.10 (副指標)
+    - Brier < 0.30
+
+    カバレッジ基準:
+    - gate_eligible かつ validated なレコードが MIN_VALIDATED_COUNT 以上
+    - カテゴリ指定時は MIN_VALIDATED_PER_CATEGORY 以上
+    - validated / total >= MIN_COVERAGE_RATIO
+
+    Args:
+        records_data: ValidationResultItem 相当の辞書リスト
+        theme_category: カテゴリ情報（サマリーに付与するのみ）
+
+    Returns:
+        ValidationSummary
+    """
+    # unknown カテゴリは survey 比較対象外のため gate 判定不可
+    if theme_category == "unknown":
+        return ValidationSummary(
+            gate="inconclusive",
+            avg_emd=None,
+            avg_jsd=None,
+            avg_brier=None,
+            total_count=len(records_data),
+            validated_count=0,
+            gate_eligible_count=0,
+            theme_category=theme_category,
+        )
+
+    total_count = len(records_data)
+
+    # gate_eligible かつ validated なレコードを gate 判定対象にする
+    gate_records = [
+        r for r in records_data
+        if r.get("status") == "validated" and r.get("gate_eligible", True)
+    ]
+    validated_count = len([r for r in records_data if r.get("status") == "validated"])
+    gate_eligible_count = len(gate_records)
+
+    # カバレッジ基準チェック
+    # 1) gate 判定可能なレコードが MIN_VALIDATED_COUNT 未満
+    min_required = MIN_VALIDATED_PER_CATEGORY if theme_category else MIN_VALIDATED_COUNT
+    if gate_eligible_count < min_required:
+        return ValidationSummary(
+            gate="inconclusive",
+            avg_emd=None,
+            avg_jsd=None,
+            avg_brier=None,
+            total_count=total_count,
+            validated_count=validated_count,
+            gate_eligible_count=gate_eligible_count,
+            theme_category=theme_category,
+        )
+
+    # 2) coverage ratio チェック（total が 0 の場合は inconclusive 済）
+    if total_count > 0:
+        coverage_ratio = validated_count / total_count
+        if coverage_ratio < MIN_COVERAGE_RATIO:
+            return ValidationSummary(
+                gate="inconclusive",
+                avg_emd=None,
+                avg_jsd=None,
+                avg_brier=None,
+                total_count=total_count,
+                validated_count=validated_count,
+                gate_eligible_count=gate_eligible_count,
+                theme_category=theme_category,
+            )
+
+    # 平均メトリクス計算（gate 対象レコードのみ）
+    emds = [r["emd"] for r in gate_records if r.get("emd") is not None]
+    jsds = [r["jsd"] for r in gate_records if r.get("jsd") is not None]
+    briers = [r["brier_score"] for r in gate_records if r.get("brier_score") is not None]
+
+    avg_emd = sum(emds) / len(emds) if emds else None
+    avg_jsd = sum(jsds) / len(jsds) if jsds else None
+    avg_brier = sum(briers) / len(briers) if briers else None
+
+    # ゲート判定
+    gate = "pass"
+    if avg_emd is not None and avg_emd >= GATE_EMD_THRESHOLD:
+        gate = "fail"
+    elif avg_jsd is not None and avg_jsd >= GATE_JSD_THRESHOLD:
+        gate = "fail"
+    elif avg_brier is not None and avg_brier >= GATE_BRIER_THRESHOLD:
+        gate = "fail"
+
+    return ValidationSummary(
+        gate=gate,
+        avg_emd=avg_emd,
+        avg_jsd=avg_jsd,
+        avg_brier=avg_brier,
+        total_count=total_count,
+        validated_count=validated_count,
+        gate_eligible_count=gate_eligible_count,
+        theme_category=theme_category,
+    )

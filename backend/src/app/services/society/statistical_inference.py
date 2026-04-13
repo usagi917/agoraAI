@@ -498,6 +498,56 @@ def load_target_marginals() -> dict[str, dict[str, float]]:
     }
 
 
+# 国勢調査 2020 ベース（15歳以上就業状態統計）employment_status ターゲット分布
+_EMPLOYMENT_STATUS_MARGINALS: dict[str, float] = {
+    "employed": 0.52,       # 正規雇用
+    "part_time": 0.16,      # パート・アルバイト
+    "self_employed": 0.09,  # 自営業・フリーランス・経営者
+    "homemaker": 0.07,      # 主婦/主夫
+    "student": 0.06,        # 学生
+    "retired": 0.10,        # 退職者（無職高齢者含む）
+}
+
+
+def attach_population_weights(
+    agents: list[dict],
+    cap: float = 5.0,
+    max_iter: int = 50,
+    tol: float = 1e-6,
+    include_employment: bool = True,
+) -> list[float]:
+    """エージェントリストに IPF 代表性補正ウェイトを付与する.
+
+    census ターゲット（age_bracket, region, gender, income_bracket, occupation_category）
+    で反復比例フィッティングを行い、include_employment=True の場合は
+    employment_status 次元も加えた拡張 IPF を実行する。
+
+    Args:
+        agents           : エージェントリスト（demographics 含む）
+        cap              : ウェイト上限値 (デフォルト 5.0)
+        max_iter         : IPF 最大反復回数 (デフォルト 50)
+        tol              : 収束許容誤差 (デフォルト 1e-6)
+        include_employment: employment_status 次元を IPF に含めるか (デフォルト True)
+
+    Returns:
+        正規化ウェイトのリスト（長さ = len(agents)）
+    """
+    target_marginals = dict(load_target_marginals())
+    if include_employment:
+        target_marginals["employment_status"] = _EMPLOYMENT_STATUS_MARGINALS
+
+    # compute_poststratification_weights は responses を受け取るが IPF では不要
+    dummy_responses = [{}] * len(agents)
+    return compute_poststratification_weights(
+        agents=agents,
+        responses=dummy_responses,
+        target_marginals=target_marginals,
+        cap=cap,
+        max_iter=max_iter,
+        tol=tol,
+    )
+
+
 def mrp_estimate(
     agents: list[dict],
     responses: list[dict],
