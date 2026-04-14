@@ -19,6 +19,7 @@ from src.app.database import Base
 from src.app.main import app
 from src.app.models import _import_all_models
 from src.app.models.audit_event import AuditEvent
+from src.app.models.agent_profile import AgentProfile
 from src.app.models.population import Population
 from src.app.models.simulation import Simulation
 
@@ -73,10 +74,19 @@ def mock_spawn_simulation(monkeypatch):
 
 
 async def _seed_population(session_factory) -> str:
-    """Create a Population record and return its id."""
+    """Create a Population with agents and return its id."""
     async with session_factory() as session:
-        pop = Population(agent_count=100)
+        pop = Population(agent_count=3, status="ready")
         session.add(pop)
+        await session.flush()
+        for i in range(3):
+            session.add(AgentProfile(
+                population_id=pop.id,
+                agent_index=i,
+                demographics={"age": 30 + i},
+                big_five={"O": 0.5},
+                values={},
+            ))
         await session.commit()
         return pop.id
 

@@ -267,8 +267,13 @@ async def _get_or_create_population(
     population_id: str | None = None,
     count: int | None = None,
     seed: int | None = None,
+    *,
+    strict: bool = False,
 ) -> tuple[str, list[dict]]:
-    """既存の Population を取得するか、新規生成する。"""
+    """既存の Population を取得するか、新規生成する。
+
+    strict=True の場合、population_id が無効なときはエラーを返す（フォールバックしない）。
+    """
     resolved_count = get_default_population_size() if count is None else validate_population_size(count)
 
     if population_id:
@@ -299,6 +304,24 @@ async def _get_or_create_population(
                         "memory_summary": a.memory_summary,
                     })
                 return population_id, agents
+            elif strict:
+                raise ValueError(
+                    f"Population {population_id} has no agent profiles"
+                )
+        elif strict:
+            if pop is None:
+                raise ValueError(f"Population not found: {population_id}")
+            else:
+                raise ValueError(
+                    f"Population {population_id} is not ready (status={pop.status})"
+                )
+        else:
+            logger.warning(
+                "Population %s not usable (exists=%s, status=%s), generating new population",
+                population_id,
+                pop is not None,
+                getattr(pop, "status", None),
+            )
 
     # 新規生成
     pop_id = str(uuid.uuid4())
@@ -361,6 +384,7 @@ async def run_society(simulation_id: str) -> None:
 
             pop_id, agents = await _get_or_create_population(
                 session, sim.population_id, pop_count, seed=sim.seed,
+                strict=bool(getattr(sim, "scenario_pair_id", None)),
             )
             sim.population_id = pop_id
             await session.commit()

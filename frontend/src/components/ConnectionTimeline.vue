@@ -5,6 +5,7 @@ import ConnectionMatrix from './ConnectionMatrix.vue'
 
 const emit = defineEmits<{
   (e: 'highlight-edge', sourceId: string, targetId: string): void
+  (e: 'select-agent', agentId: string): void
 }>()
 
 const societyGraphStore = useSocietyGraphStore()
@@ -164,9 +165,22 @@ watch(
 
           <div class="event-body">
             <div class="event-agents">
-              <span class="agent-name source">{{ event.sourceName }}</span>
+              <span
+                class="agent-name source clickable-agent"
+                role="button"
+                tabindex="0"
+                @click.stop="$emit('select-agent', event.sourceId)"
+                @keydown.enter.stop="$emit('select-agent', event.sourceId)"
+              >{{ event.sourceName }}</span>
               <span v-if="event.type !== 'stance_shift'" class="arrow">→</span>
-              <span v-if="event.type !== 'stance_shift'" class="agent-name target">{{ event.targetName }}</span>
+              <span
+                v-if="event.type !== 'stance_shift'"
+                class="agent-name target clickable-agent"
+                role="button"
+                tabindex="0"
+                @click.stop="$emit('select-agent', event.targetId)"
+                @keydown.enter.stop="$emit('select-agent', event.targetId)"
+              >{{ event.targetName }}</span>
             </div>
             <div class="event-summary">{{ event.summary }}</div>
           </div>
@@ -305,6 +319,12 @@ watch(
 .agent-name.target {
   color: rgba(255, 215, 64, 0.85);
 }
+
+.clickable-agent {
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.clickable-agent:hover { opacity: 0.65; text-decoration: underline; }
 
 .arrow {
   font-size: 0.65rem;

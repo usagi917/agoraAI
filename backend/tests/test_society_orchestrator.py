@@ -758,7 +758,7 @@ class TestSocietyOrchestratorFlow:
 
         fake_session = FakeSession()
 
-        async def fake_get_or_create_population(session, population_id, count=None, seed=None):
+        async def fake_get_or_create_population(session, population_id, count=None, seed=None, **kwargs):
             observed_counts.append(count)
             return "pop-1", [{"id": "a1", "demographics": {"age": 35, "region": "関東（都市部）", "occupation": "会社員"}}]
 
@@ -899,7 +899,7 @@ class TestRunSocietyPipelineFixes:
 
         fake_session = FakeSession()
 
-        async def fake_get_or_create_population(session, population_id, count=None, seed=None):
+        async def fake_get_or_create_population(session, population_id, count=None, seed=None, **kwargs):
             return "pop-1", [
                 {"id": "a1", "demographics": {"age": 35, "region": "関東（都市部）", "occupation": "会社員"}},
                 {"id": "a2", "demographics": {"age": 62, "region": "九州", "occupation": "自営業"}},
@@ -1055,7 +1055,7 @@ class TestRunSocietyPipelineFixes:
 
         fake_session = FakeSession()
 
-        async def fake_get_or_create_population(session, population_id, count=None, seed=None):
+        async def fake_get_or_create_population(session, population_id, count=None, seed=None, **kwargs):
             return "pop-1", [
                 {"id": "a1", "demographics": {"age": 35, "region": "関東（都市部）", "occupation": "会社員"}},
             ]
@@ -1253,3 +1253,80 @@ class TestPredictionMarketTimingConfig:
         mix_config = {"prediction_market": {}}
         config = _get_prediction_market_config(mix_config)
         assert config["use_post_propagation"] is False
+
+
+class TestStrictPopulationLookup:
+    """strict=True 時に不正な population_id でエラーを返すことを検証."""
+
+    @pytest.mark.asyncio
+    async def test_strict_raises_on_missing_population(self):
+        """存在しない population_id で ValueError を返すこと."""
+        from src.app.services.society import society_orchestrator as orchestrator
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=None)
+
+        with pytest.raises(ValueError, match="not found"):
+            await orchestrator._get_or_create_population(
+                mock_session, "nonexistent-id", 100, strict=True,
+            )
+
+    @pytest.mark.asyncio
+    async def test_strict_raises_on_not_ready_population(self):
+        """status='generating' の Population で ValueError を返すこと."""
+        from src.app.services.society import society_orchestrator as orchestrator
+
+        pop_mock = MagicMock()
+        pop_mock.status = "generating"
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=pop_mock)
+
+        with pytest.raises(ValueError, match="not ready"):
+            await orchestrator._get_or_create_population(
+                mock_session, "some-pop-id", 100, strict=True,
+            )
+
+    @pytest.mark.asyncio
+    async def test_strict_raises_on_empty_agents(self):
+        """status='ready' だがエージェント0件で ValueError を返すこと."""
+        from src.app.services.society import society_orchestrator as orchestrator
+
+        pop_mock = MagicMock()
+        pop_mock.status = "ready"
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=pop_mock)
+        mock_session.execute = AsyncMock(return_value=mock_result)
+
+        with pytest.raises(ValueError, match="no agent"):
+            await orchestrator._get_or_create_population(
+                mock_session, "some-pop-id", 100, strict=True,
+            )
+
+    @pytest.mark.asyncio
+    async def test_non_strict_falls_through_to_generation(self):
+        """strict=False (デフォルト) では従来通り新規生成にフォールスルーすること."""
+        from src.app.services.society import society_orchestrator as orchestrator
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=None)
+
+        async def fake_generate(pop_id, count=None, seed=None):
+            return [{"id": f"a{i}", "population_id": pop_id, "agent_index": i,
+                     "demographics": {}, "big_five": {}, "values": {},
+                     "life_event": "", "contradiction": "", "information_source": "",
+                     "local_context": "", "hidden_motivation": "", "speech_style": "",
+                     "shock_sensitivity": {}, "llm_backend": "openai",
+                     "memory_summary": ""} for i in range(5)]
+
+        with patch.object(orchestrator, "generate_population", side_effect=fake_generate):
+            pop_id, agents = await orchestrator._get_or_create_population(
+                mock_session, "nonexistent-id", 100,
+            )
+
+        assert pop_id != "nonexistent-id"
+        assert len(agents) == 5

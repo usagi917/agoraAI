@@ -292,16 +292,16 @@ async def get_evaluation_summary(
     repo = ValidationRepository(session)
     records = await repo.list_by_simulation(sim_id)
 
-    records_data = [
-        {
+    records_data = []
+    for r in records:
+        gate_eligible = (r.theme_category or "") != "unknown"
+        records_data.append({
             "status": "validated" if r.actual_distribution else "report_only",
-            "gate_eligible": True,
+            "gate_eligible": gate_eligible,
             "emd": r.emd,
             "jsd": r.jsd,
             "brier_score": r.brier_score,
-        }
-        for r in records
-    ]
+        })
 
     theme_category = records[0].theme_category if records else None
     gate_result = build_validation_summary(records_data, theme_category=theme_category)

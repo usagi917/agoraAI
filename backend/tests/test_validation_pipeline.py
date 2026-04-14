@@ -179,6 +179,22 @@ class TestValidationRecordModel:
         )
         assert resolved.validated_at is not None
 
+    @pytest.mark.asyncio
+    async def test_resolve_validation_computes_jsd(self, db_session):
+        """resolve() で jsd が自動算出される"""
+        repo = ValidationRepository(db_session)
+        record = await repo.save(
+            simulation_id="sim-jsd",
+            theme_text="test",
+            theme_category="politics",
+            simulated_distribution=SIM_DIST,
+        )
+        resolved = await repo.resolve(
+            record.id, ACTUAL_DIST, "test", "2024-01"
+        )
+        assert resolved.jsd is not None
+        assert resolved.jsd >= 0
+
 
 class TestValidationRecordQueries:
     @pytest.mark.asyncio
@@ -438,3 +454,47 @@ class TestFindOptimalGammaByCategory:
 
         result = await find_optimal_gamma_by_category(db_session)
         assert result["by_category"] == {}
+
+
+# ===== Issue 3: gate_eligible + JSD テスト =====
+
+
+class TestGateEligibilityInSummary:
+    """build_validation_summary が gate_eligible を正しく扱うことを検証."""
+
+    def test_unknown_theme_is_not_gate_eligible(self):
+        """theme_category='unknown' のレコードは gate_eligible=False であるべき."""
+        from src.app.services.society.validation_pipeline import build_validation_summary
+
+        records = [
+            {
+                "status": "validated",
+                "gate_eligible": False,  # unknown カテゴリなので False
+                "emd": 0.05,
+                "jsd": 0.03,
+                "brier_score": 0.02,
+            }
+        ]
+        result = build_validation_summary(records, theme_category="unknown")
+        assert result["gate"] == "inconclusive"
+
+    def test_jsd_threshold_triggers_fail(self):
+        """JSD > 閾値で gate=fail になること."""
+        from src.app.services.society.validation_pipeline import (
+            build_validation_summary,
+            GATE_JSD_THRESHOLD,
+        )
+
+        # EMD/Brier は pass レベル、JSD だけ閾値超え
+        records = [
+            {
+                "status": "validated",
+                "gate_eligible": True,
+                "emd": 0.03,
+                "jsd": GATE_JSD_THRESHOLD + 0.05,
+                "brier_score": 0.02,
+            }
+            for _ in range(5)
+        ]
+        result = build_validation_summary(records, theme_category="politics")
+        assert result["gate"] == "fail"

@@ -14,6 +14,10 @@ defineProps<{
   simulationId: string
 }>()
 
+const emit = defineEmits<{
+  (e: 'select-agent', agentId: string): void
+}>()
+
 const graphContainer = ref<HTMLElement | null>(null)
 const store = useSimulationStore()
 const societyGraphStore = useSocietyGraphStore()
@@ -102,6 +106,15 @@ function clearSelection() {
   selectedAgentId.value = null
   clearHighlight()
 }
+
+// Non-KG node click → emit select-agent to parent for drawer, then clear
+// so re-clicking the same node only takes one click (not two)
+watch(selectedAgentId, (id) => {
+  if (id && !id.startsWith('kg-')) {
+    emit('select-agent', id)
+    selectedAgentId.value = null
+  }
+})
 
 function clearEdgeSelection() {
   societyGraphStore.setSelectedEdge(null)
@@ -367,8 +380,8 @@ onUnmounted(() => {
       :round="societyGraphStore.currentRound"
     />
 
-    <!-- Node detail panel (on click) -->
-    <div v-if="selectedAgentId" class="agent-detail-overlay">
+    <!-- Node detail panel: KG nodes only (agent nodes open drawer in parent) -->
+    <div v-if="selectedAgentId?.startsWith('kg-')" class="agent-detail-overlay">
       <NodeDetailPanel
         :node-id="selectedAgentId"
         @close="clearSelection"

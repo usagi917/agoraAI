@@ -22,9 +22,28 @@ interface StanceShiftDisplay {
   to: string
 }
 
+const emit = defineEmits<{
+  (e: 'select-agent', agentId: string): void
+}>()
+
 const societyGraphStore = useSocietyGraphStore()
 const vizStore = useAgentVisualizationStore()
 const messagesRef = ref<HTMLElement | null>(null)
+
+// Map display name → agent ID for click handler
+const agentIdByName = computed(() => {
+  const map = new Map<string, string>()
+  for (const agent of societyGraphStore.liveAgents.values()) {
+    if (agent.displayName) map.set(agent.displayName, agent.id)
+    map.set(agent.label, agent.id)
+  }
+  return map
+})
+
+function handleSpeakerClick(speaker: string) {
+  const agentId = agentIdByName.value.get(speaker) ?? speaker
+  emit('select-agent', agentId)
+}
 
 function deriveRole(role: string): 'expert' | 'citizen' | null {
   if (!role) return null
@@ -121,7 +140,13 @@ watch(
           :class="['dialogue-bubble', item.align, `stance-${item.stanceClass}`]"
         >
           <div class="bubble-header">
-            <span class="bubble-speaker">{{ item.speaker }}</span>
+            <span
+              class="bubble-speaker clickable-speaker"
+              role="button"
+              tabindex="0"
+              @click="handleSpeakerClick(item.speaker)"
+              @keydown.enter="handleSpeakerClick(item.speaker)"
+            >{{ item.speaker }}</span>
             <span v-if="item.role" class="bubble-role">{{ item.roleLabel }}</span>
           </div>
           <div class="bubble-content">{{ item.content }}</div>
@@ -212,6 +237,15 @@ watch(
   font-weight: 600;
   font-size: 0.72rem;
   color: var(--text-primary);
+}
+
+.clickable-speaker {
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.clickable-speaker:hover {
+  color: var(--accent, #3b82f6);
+  text-decoration: underline;
 }
 
 .bubble-role {

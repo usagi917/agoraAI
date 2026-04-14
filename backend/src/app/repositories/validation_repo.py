@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.database import utcnow_naive
 from src.app.models.validation_record import ValidationRecord
+from src.app.evaluation.metrics import _jsd
 from src.app.utils.distribution_metrics import (
     kl_divergence_symmetric,
     earth_movers_distance,
@@ -97,6 +98,7 @@ class ValidationRepository:
         record.brier_score = _brier_score_distributions(sim_dist, actual_distribution)
         record.kl_divergence = kl_divergence_symmetric(sim_dist, actual_distribution)
         record.emd = earth_movers_distance(sim_dist, actual_distribution)
+        record.jsd = _jsd(sim_dist, actual_distribution)
         record.validated_at = utcnow_naive()
 
         await self.session.commit()

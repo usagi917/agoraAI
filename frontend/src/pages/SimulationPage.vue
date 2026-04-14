@@ -38,6 +38,7 @@ import DigitalWorkspaceBackground from '../components/DigitalWorkspaceBackground
 import DebateCards from '../components/DebateCards.vue'
 import ConnectionTimeline from '../components/ConnectionTimeline.vue'
 import ForceGraph2D from '../components/ForceGraph2D.vue'
+import AgentStoryDrawer from '../components/AgentStoryDrawer.vue'
 import { useTheaterStore } from '../stores/theaterStore'
 import { isWebGLSupported } from '../composables/useWebGLDetect'
 import {
@@ -67,6 +68,7 @@ const graphCanvas = ref<HTMLElement | null>(null)
 const selectedEntity = ref<any>(null)
 const elapsedTime = ref(0)
 const activeSecondaryTab = ref<LiveSecondaryTab>('progress')
+const selectedAgentForStory = ref<string | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -889,6 +891,7 @@ function goToResults() {
             <LiveSocietyGraph
               v-if="store.isSocietyMode"
               :simulation-id="simId"
+              @select-agent="selectedAgentForStory = $event"
             />
             <!-- Other modes: Knowledge Graph (3D or 2D fallback) -->
             <template v-else-if="webglAvailable">
@@ -1025,7 +1028,7 @@ function goToResults() {
         </div>
 
         <div v-if="activeSecondaryTab === 'debate'" class="panel-card">
-          <DebateCards />
+          <DebateCards @select-agent="selectedAgentForStory = $event" />
         </div>
 
         <div v-if="activeSecondaryTab === 'activity'" class="panel-card">
@@ -1046,14 +1049,26 @@ function goToResults() {
         </div>
 
         <div v-if="activeSecondaryTab === 'dialogue'" class="panel-card dialogue-tab">
-          <LiveDialogueStream />
+          <LiveDialogueStream @select-agent="selectedAgentForStory = $event" />
         </div>
 
         <div v-if="activeSecondaryTab === 'connections'" class="panel-card connections-tab">
-          <ConnectionTimeline @highlight-edge="handleConnectionHighlight" />
+          <ConnectionTimeline
+            @highlight-edge="handleConnectionHighlight"
+            @select-agent="selectedAgentForStory = $event"
+          />
         </div>
       </div>
     </div>
+
+    <!-- Agent Story Drawer (society mode) -->
+    <AgentStoryDrawer
+      v-if="store.isSocietyMode"
+      :simulation-id="simId"
+      :agent-id="selectedAgentForStory"
+      :open="selectedAgentForStory !== null"
+      @close="selectedAgentForStory = null"
+    />
   </div>
 </template>
 
