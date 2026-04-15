@@ -1,6 +1,13 @@
 """Scenario Comparison のテスト (Stream E)"""
 
+import pytest
+
+from src.app.models.population import Population
+from src.app.models.population_snapshot import PopulationSnapshot
+from src.app.models.scenario_pair import ScenarioPair
+from src.app.models.simulation import Simulation
 from src.app.services.scenario_comparison import (
+    build_scenario_comparison,
     build_delta_brief,
     build_coalition_map,
     extract_opinion_shifts_top5,
@@ -336,3 +343,169 @@ class TestComputeCoalitionShifts:
         shifts = _compute_coalition_shifts(baseline_map, intervention_map)
         assert len(shifts) == 1
         assert shifts[0]["change"] == 0.05
+
+
+# ---------------------------------------------------------------------------
+# Tests: build_scenario_comparison (async integration, uses db_session)
+# ---------------------------------------------------------------------------
+
+_META_WITH_AGENTS = {
+    "report_content": "Test report content",
+    "sections": {"executive_summary": "Summary of findings"},
+    "quality": {"status": "draft"},
+    "agents": [
+        {"age_bracket": "18-29", "region": "東京", "occupation": "学生", "primary_value": "教育", "stance": 0.8},
+        {"age_bracket": "30-49", "region": "大阪", "occupation": "会社員", "primary_value": "経済", "stance": 0.3},
+    ],
+}
+
+_META_INTERVENTION_SHIFTED = {
+    "report_content": "Intervention report content",
+    "sections": {"executive_summary": "Intervention improved outcomes"},
+    "quality": {"status": "draft"},
+    "agents": [
+        {"age_bracket": "18-29", "region": "東京", "occupation": "学生", "primary_value": "教育", "stance": 0.9},
+        {"age_bracket": "30-49", "region": "大阪", "occupation": "会社員", "primary_value": "経済", "stance": 0.6},
+    ],
+}
+
+
+async def _seed_pair_for_comparison(
+    db_session,
+    baseline_meta=_META_WITH_AGENTS,
+    intervention_meta=_META_INTERVENTION_SHIFTED,
+) -> str:
+    """Seed a completed ScenarioPair with two Simulations and return pair.id."""
+    pop = Population(agent_count=2, status="ready")
+    db_session.add(pop)
+    await db_session.flush()
+
+    snap = PopulationSnapshot(
+        population_id=pop.id,
+        agent_profiles_json={},
+        relationships_json={},
+        initial_beliefs_json={},
+        seed=42,
+    )
+    db_session.add(snap)
+    await db_session.flush()
+
+    baseline = Simulation(
+        mode="standard",
+        prompt_text="baseline prompt",
+        template_name="general",
+        execution_profile="standard",
+        status="completed",
+        metadata_json=baseline_meta,
+    )
+    intervention = Simulation(
+        mode="standard",
+        prompt_text="intervention prompt",
+        template_name="general",
+        execution_profile="standard",
+        status="completed",
+        metadata_json=intervention_meta,
+    )
+    db_session.add(baseline)
+    db_session.add(intervention)
+    await db_session.flush()
+
+    pair = ScenarioPair(
+        population_snapshot_id=snap.id,
+        baseline_simulation_id=baseline.id,
+        intervention_simulation_id=intervention.id,
+        intervention_params={"policy": "test"},
+        decision_context="Test comparison",
+        status="completed",
+    )
+    db_session.add(pair)
+    await db_session.commit()
+    return pair.id
+
+
+class TestBuildScenarioComparison:
+    """build_scenario_comparison の DB 統合テスト"""
+
+    @pytest.mark.asyncio
+    async def test_returns_expected_shape(self, db_session):
+        """返却値が期待するキーをすべて含む"""
+        pair_id = await _seed_pair_for_comparison(db_session)
+        result = await build_scenario_comparison(db_session, pair_id)
+
+        for key in (
+            "scenario_pair_id",
+            "baseline_brief",
+            "intervention_brief",
+            "delta",
+            "opinion_shifts_top5",
+            "coalition_map",
+        ):
+            assert key in result, f"Missing key: {key}"
+
+        assert result["scenario_pair_id"] == pair_id
+        assert isinstance(result["baseline_brief"], dict)
+        assert isinstance(result["intervention_brief"], dict)
+        assert isinstance(result["delta"], dict)
+        assert isinstance(result["opinion_shifts_top5"], list)
+        assert isinstance(result["coalition_map"], dict)
+
+    @pytest.mark.asyncio
+    async def test_null_metadata_does_not_crash(self, db_session):
+        """metadata_json=None のシミュレーションでもクラッシュしない"""
+        pair_id = await _seed_pair_for_comparison(
+            db_session,
+            baseline_meta=None,
+            intervention_meta=None,
+        )
+        result = await build_scenario_comparison(db_session, pair_id)
+
+        assert result["scenario_pair_id"] == pair_id
+        # With None metadata, briefs are still built (from prompt_text fallback)
+        assert isinstance(result["baseline_brief"], dict)
+        assert isinstance(result["intervention_brief"], dict)
+        # coalition_map should be empty (no agents in metadata)
+        assert result["coalition_map"]["by_age"] == []
+        # delta.coalition_shifts stays empty (no agents to compare)
+        assert result["delta"]["coalition_shifts"] == []
+
+    @pytest.mark.asyncio
+    async def test_coalition_shifts_5pct_threshold(self, db_session):
+        """coalition_shifts は 5% 以上のシフトのみ含む"""
+        # Baseline and intervention agents with a large shift in 30-49 group
+        # but no shift in 18-29 group
+        baseline_meta = {
+            "report_content": "baseline",
+            "sections": {"executive_summary": "baseline summary"},
+            "quality": {"status": "draft"},
+            "agents": [
+                {"age_bracket": "18-29", "region": "東京", "occupation": "学生", "primary_value": "教育", "stance": 0.8},
+                {"age_bracket": "30-49", "region": "大阪", "occupation": "会社員", "primary_value": "経済", "stance": 0.3},
+            ],
+        }
+        intervention_meta = {
+            "report_content": "intervention",
+            "sections": {"executive_summary": "intervention summary"},
+            "quality": {"status": "draft"},
+            "agents": [
+                # 18-29: stance 0.8 → 0.8 (0% shift, same support ratio) → excluded
+                {"age_bracket": "18-29", "region": "東京", "occupation": "学生", "primary_value": "教育", "stance": 0.8},
+                # 30-49: stance 0.3 → 0.7 (oppose→support, 100% shift) → included
+                {"age_bracket": "30-49", "region": "大阪", "occupation": "会社員", "primary_value": "経済", "stance": 0.7},
+            ],
+        }
+        pair_id = await _seed_pair_for_comparison(
+            db_session,
+            baseline_meta=baseline_meta,
+            intervention_meta=intervention_meta,
+        )
+        result = await build_scenario_comparison(db_session, pair_id)
+        shifts = result["delta"]["coalition_shifts"]
+
+        # 30-49 group shifted from 0% support (0.3 < 0.5) to 100% support (0.7 >= 0.5)
+        # That's a 100% shift → included
+        shifted_groups = {s["group"] for s in shifts}
+        assert "30-49" in shifted_groups
+
+        # 18-29 group: no change (both at 100% support) → excluded
+        shifts_18_29 = [s for s in shifts if s["group"] == "18-29" and s["dimension"] == "by_age"]
+        assert shifts_18_29 == []

@@ -192,8 +192,7 @@ onUnmounted(() => window.removeEventListener('keydown', handleEscape))
                 </div>
                 <div class="journey-body">
                   <div v-if="item.type === 'stance_shift'" class="shift-banner">
-                    <span v-if="item.fromStance">{{ item.fromStance }} → {{ item.toStance }}</span>
-                    <span v-else class="shift-belief-label">信念更新</span>
+                    <span class="shift-belief-label">信念更新</span>
                   </div>
                   <p class="journey-content">{{ item.content }}</p>
                   <span v-if="item.addressedTo" class="journey-addressed">→ {{ item.addressedTo }}</span>
