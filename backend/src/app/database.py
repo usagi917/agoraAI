@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 
 from sqlalchemy import event, inspect, text
 from sqlalchemy.engine import make_url
@@ -59,6 +60,107 @@ async def _get_existing_tables(conn: AsyncConnection) -> set[str]:
     return await conn.run_sync(
         lambda sync_conn: set(sync_conn.dialect.get_table_names(sync_conn))
     )
+
+
+async def _get_sqlite_table_sql(conn: AsyncConnection, table_name: str) -> str | None:
+    result = await conn.execute(
+        text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = :table_name"),
+        {"table_name": table_name},
+    )
+    rows = result.fetchall()
+    if not rows:
+        return None
+    return rows[0][0]
+
+
+async def _get_sqlite_index_sqls(conn: AsyncConnection, table_name: str) -> list[str]:
+    result = await conn.execute(
+        text(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'index' AND tbl_name = :table_name AND sql IS NOT NULL "
+            "ORDER BY name"
+        ),
+        {"table_name": table_name},
+    )
+    return [row[0] for row in result.fetchall()]
+
+
+def _split_sqlite_table_definitions(definitions_sql: str) -> list[str]:
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    in_single_quote = False
+    in_double_quote = False
+    index = 0
+
+    while index < len(definitions_sql):
+        char = definitions_sql[index]
+
+        if char == "'" and not in_double_quote:
+            current.append(char)
+            if in_single_quote and index + 1 < len(definitions_sql) and definitions_sql[index + 1] == "'":
+                current.append(definitions_sql[index + 1])
+                index += 2
+                continue
+            in_single_quote = not in_single_quote
+            index += 1
+            continue
+
+        if char == '"' and not in_single_quote:
+            current.append(char)
+            if in_double_quote and index + 1 < len(definitions_sql) and definitions_sql[index + 1] == '"':
+                current.append(definitions_sql[index + 1])
+                index += 2
+                continue
+            in_double_quote = not in_double_quote
+            index += 1
+            continue
+
+        if not in_single_quote and not in_double_quote:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            elif char == "," and depth == 0:
+                parts.append("".join(current).strip())
+                current = []
+                index += 1
+                continue
+
+        current.append(char)
+        index += 1
+
+    if current:
+        parts.append("".join(current).strip())
+
+    return parts
+
+
+def _sqlite_definition_name(definition_sql: str) -> str | None:
+    match = re.match(r'\s*(?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|(\S+))', definition_sql)
+    if not match:
+        return None
+    return next(group for group in match.groups() if group is not None)
+
+
+def _sqlite_relax_not_null_in_create_sql(create_sql: str, target_columns: set[str]) -> str:
+    open_paren = create_sql.find("(")
+    close_paren = create_sql.rfind(")")
+    if open_paren == -1 or close_paren == -1 or close_paren <= open_paren:
+        raise RuntimeError("Unexpected SQLite CREATE TABLE format for simulations")
+
+    prefix = create_sql[:open_paren + 1]
+    definitions_sql = create_sql[open_paren + 1:close_paren]
+    suffix = create_sql[close_paren:]
+
+    rebuilt_definitions: list[str] = []
+    for definition in _split_sqlite_table_definitions(definitions_sql):
+        name = _sqlite_definition_name(definition)
+        if name in target_columns:
+            definition = re.sub(r"\bNOT\s+NULL\b", "", definition, flags=re.IGNORECASE)
+        rebuilt_definitions.append(definition.strip())
+
+    return prefix + "\n    " + ",\n    ".join(rebuilt_definitions) + "\n" + suffix
 
 
 async def _apply_sqlite_compatibility_migrations(conn: AsyncConnection) -> None:
@@ -155,30 +257,28 @@ async def _sqlite_drop_not_null_legacy_sim_columns(conn: AsyncConnection, sim_co
     if not has_not_null:
         return
 
-    # 現在の全カラム情報を取得して新 DDL を構築
     all_col_names = [row[1] for row in col_rows]
+    original_table_sql = await _get_sqlite_table_sql(conn, "simulations")
+    if not original_table_sql:
+        raise RuntimeError("Could not load original CREATE TABLE SQL for simulations")
+    original_index_sqls = await _get_sqlite_index_sqls(conn, "simulations")
+    rebuilt_table_sql = _sqlite_relax_not_null_in_create_sql(original_table_sql, has_not_null)
 
     await conn.execute(text("PRAGMA foreign_keys = OFF"))
-    await conn.execute(text("ALTER TABLE simulations RENAME TO _simulations_legacy"))
+    try:
+        await conn.execute(text("ALTER TABLE simulations RENAME TO _simulations_legacy"))
+        await conn.execute(text(rebuilt_table_sql))
 
-    new_ddl_cols: list[str] = []
-    for row in col_rows:
-        col_name, col_type, col_notnull, col_default, col_pk = row[1], row[2], row[3], row[4], row[5]
-        if col_name in legacy:
-            new_ddl_cols.append(f"{col_name} {col_type}")
-        else:
-            nn = " NOT NULL" if col_notnull else ""
-            dflt = f" DEFAULT {col_default}" if col_default is not None else ""
-            pk = " PRIMARY KEY" if col_pk else ""
-            new_ddl_cols.append(f"{col_name} {col_type}{pk}{nn}{dflt}")
+        cols_csv = ", ".join(all_col_names)
+        await conn.execute(
+            text(f"INSERT INTO simulations ({cols_csv}) SELECT {cols_csv} FROM _simulations_legacy")
+        )
+        await conn.execute(text("DROP TABLE _simulations_legacy"))
 
-    new_ddl = "CREATE TABLE simulations (\n    " + ",\n    ".join(new_ddl_cols) + "\n)"
-    await conn.execute(text(new_ddl))
-
-    cols_csv = ", ".join(all_col_names)
-    await conn.execute(text(f"INSERT INTO simulations ({cols_csv}) SELECT {cols_csv} FROM _simulations_legacy"))
-    await conn.execute(text("DROP TABLE _simulations_legacy"))
-    await conn.execute(text("PRAGMA foreign_keys = ON"))
+        for index_sql in original_index_sqls:
+            await conn.execute(text(index_sql))
+    finally:
+        await conn.execute(text("PRAGMA foreign_keys = ON"))
 
 
 async def _get_postgres_columns(conn: AsyncConnection, table_name: str) -> set[str]:
