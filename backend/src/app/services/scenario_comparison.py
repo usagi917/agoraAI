@@ -5,10 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.app.models.audit_event import AuditEvent
 from src.app.models.scenario_pair import ScenarioPair
 from src.app.services.audit_trail_service import get_opinion_shifts
 from src.app.services.decision_briefing import build_single_decision_brief

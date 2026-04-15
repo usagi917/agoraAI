@@ -1,6 +1,5 @@
 """統一 Simulation API エンドポイント"""
 
-import json
 import logging
 import uuid
 

@@ -19,7 +19,6 @@ import random
 from statistics import median
 from typing import TypedDict
 
-from src.app.evaluation.metrics import _jsd
 from src.app.utils.distribution_metrics import earth_movers_distance
 
 

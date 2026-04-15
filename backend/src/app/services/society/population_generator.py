@@ -79,11 +79,6 @@ VALUE_DIMENSIONS = [
     ("個人の権利", "individual_rights"), ("共同体・連帯", "community"),
 ]
 
-SPEECH_STYLES = [
-    "丁寧で慎重", "率直で簡潔", "感情的で熱心", "分析的で論理的",
-    "ユーモアを交える", "控えめで消極的", "攻撃的で主張が強い",
-    "共感的で聞き上手", "皮肉っぽい", "楽観的",
-]
 
 # 職業 → 就業状況マッピング（直接マッピングが存在する職業のみ）
 _OCCUPATION_TO_EMPLOYMENT: dict[str, str] = {

@@ -16,8 +16,6 @@ logger = logging.getLogger(__name__)
 # Meeting はフルBDIの代わりに、軽量な構造化議論プロトコルを使用
 # Phase 2 では debate_protocol の3フェーズ構造を再現する
 
-MEETING_ROUNDS = 3  # Claims → Counters → Synthesis
-
 
 def _resolve_participant_index(participant: dict, fallback: int = -1) -> int:
     """参加者の実エージェント index を返す。"""
