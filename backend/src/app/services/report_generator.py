@@ -19,6 +19,7 @@ from src.app.models.run import Run
 from src.app.services.cost_tracker import record_usage
 from src.app.services.decision_briefing import (
     build_single_decision_brief,
+    enrich_decision_brief,
     render_decision_brief_markdown,
 )
 from src.app.services.quality import (
@@ -199,6 +200,12 @@ async def generate_report(
             report_content=report_content,
             sections=sections_data,
             quality=sections_data["quality"],
+        )
+        decision_brief = enrich_decision_brief(
+            decision_brief,
+            quality=sections_data["quality"],
+            run_config={"evidence_mode": normalized_evidence_mode, "trust_mode": "strict"},
+            evidence_refs=all_evidence_refs,
         )
         sections_data["decision_brief"] = decision_brief
         report_content = (

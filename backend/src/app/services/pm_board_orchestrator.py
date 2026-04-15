@@ -11,6 +11,7 @@ from src.app.llm.client import LLMClient
 from src.app.llm.validator import validate_pm_board_output
 from src.app.services.decision_briefing import (
     build_pm_board_decision_brief,
+    enrich_decision_brief,
     render_decision_brief_markdown,
 )
 from src.app.services.pipeline_fallbacks import build_pm_board_fallback, pm_board_has_substance
@@ -224,6 +225,11 @@ async def run_pm_board(
         output["decision_brief"] = build_pm_board_decision_brief(
             prompt_text=prompt_text,
             pm_result=output,
+            scenarios=scenario_candidates,
+        )
+        output["decision_brief"] = enrich_decision_brief(
+            output["decision_brief"],
+            run_config={"evidence_mode": normalized_evidence_mode, "trust_mode": "strict"},
             scenarios=scenario_candidates,
         )
         output["content"] = render_decision_brief_markdown(output["decision_brief"])

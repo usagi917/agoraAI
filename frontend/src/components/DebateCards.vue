@@ -1,8 +1,26 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useTheaterStore } from '../stores/theaterStore'
+import { useSocietyGraphStore } from '../stores/societyGraphStore'
+
+const emit = defineEmits<{
+  (e: 'select-agent', agentId: string): void
+}>()
 
 const theater = useTheaterStore()
+const societyGraphStore = useSocietyGraphStore()
+
+// Theater SSE の agent_id は participant_index の数値文字列 (e.g. "0") のため
+// liveAgents から本物の UUID に解決する。UUID 形式ならそのまま使用。
+function resolveAgentId(rawId: string): string {
+  const idx = Number(rawId)
+  if (Number.isInteger(idx) && idx >= 0) {
+    for (const agent of societyGraphStore.liveAgents.values()) {
+      if (agent.agentIndex === idx) return agent.id
+    }
+  }
+  return rawId
+}
 
 const stanceColor: Record<string, string> = {
   '賛成': 'var(--success)',
@@ -51,7 +69,13 @@ const hasContent = computed(() =>
         <div class="card-label">最新の主張</div>
         <p class="card-body">{{ topClaim.claimText }}</p>
         <div class="card-meta">
-          <span class="agent-tag">{{ topClaim.agentId }}</span>
+          <span
+            class="agent-tag clickable-agent"
+            role="button"
+            tabindex="0"
+            @click="$emit('select-agent', resolveAgentId(topClaim.agentId))"
+            @keydown.enter="$emit('select-agent', resolveAgentId(topClaim.agentId))"
+          >{{ topClaim.agentId }}</span>
           <span class="stance-tag" :style="{ color: getStanceColor(topClaim.stance) }">{{ topClaim.stance }}</span>
         </div>
       </div>
@@ -65,7 +89,13 @@ const hasContent = computed(() =>
           <span class="shift-to" :style="{ color: getStanceColor(topShift.toStance) }">{{ topShift.toStance }}</span>
         </p>
         <div class="card-meta">
-          <span class="agent-tag">{{ topShift.agentId }}</span>
+          <span
+            class="agent-tag clickable-agent"
+            role="button"
+            tabindex="0"
+            @click="$emit('select-agent', resolveAgentId(topShift.agentId))"
+            @keydown.enter="$emit('select-agent', resolveAgentId(topShift.agentId))"
+          >{{ topShift.agentId }}</span>
         </div>
       </div>
 
@@ -149,6 +179,12 @@ const hasContent = computed(() =>
   font-family: var(--font-mono);
   color: var(--accent);
 }
+
+.clickable-agent {
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.clickable-agent:hover { opacity: 0.75; text-decoration: underline; }
 
 .stance-tag {
   font-weight: 600;

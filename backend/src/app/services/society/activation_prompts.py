@@ -1,5 +1,39 @@
 """活性化レイヤー用プロンプトテンプレート"""
 
+
+def build_confirmation_bias_instruction(openness: float) -> str:
+    """Big Five Openness に基づく確証バイアスプロンプトを生成する.
+
+    低 Openness → 強い確証バイアス（既存の信念を強化する情報を重視）
+    高 Openness → バイアスなし（新しい視点に開放的）
+
+    Args:
+        openness: Big Five の Openness 値 (0.0 ~ 1.0)
+
+    Returns:
+        確証バイアスの指示文（高 Openness では空文字列）
+    """
+    bias_strength = 1.0 - openness
+
+    if bias_strength < 0.3:
+        return ""
+
+    if bias_strength < 0.5:
+        return "あなたは自分の既存の考えに一致する情報をやや重視する傾向があります。"
+
+    if bias_strength < 0.7:
+        return (
+            "あなたは自分の既存の信念を確認する情報を強く重視します。"
+            "反対意見に対しては懐疑的に接し、自分の立場を裏付ける根拠を優先的に挙げてください。"
+        )
+
+    return (
+        "あなたは自分の既存の信念に強く固執します。"
+        "反対意見や矛盾する情報には強い抵抗を示し、"
+        "自分の立場を裏付ける証拠のみを重視してください。"
+        "新しい視点を受け入れることに消極的です。"
+    )
+
 # speech_style ごとの発話ルール: (指示, 発話例, 禁止事項)
 SPEECH_STYLE_DIRECTIVES: dict[str, dict[str, str]] = {
     "率直で簡潔": {
@@ -53,6 +87,124 @@ SPEECH_STYLE_DIRECTIVES: dict[str, dict[str, str]] = {
         "prohibition": "終始シリアスで堅い文体にしない。",
     },
 }
+
+
+def build_theory_of_mind_instruction(agent: dict, theme: str) -> str:
+    """Theory of Mind Chain-of-Thought プロンプトを生成する.
+
+    エージェントが他者の視点を推論してから自分の意見を形成する
+    段階的思考プロセスの指示を生成する。
+
+    Agreeableness が高いほど他者視点の考慮が深くなる。
+    職業や地域に応じて、関連する他者グループを提示する。
+
+    Args:
+        agent: エージェント辞書（demographics, big_five 含む）
+        theme: テーマ文
+
+    Returns:
+        Theory of Mind CoT 指示文字列
+    """
+    demographics = agent.get("demographics", {})
+    big_five = agent.get("big_five", {})
+
+    occupation = demographics.get("occupation", "")
+    region = demographics.get("region", "")
+    age = demographics.get("age", 40)
+    agreeableness = big_five.get("A", 0.5)
+    openness = big_five.get("O", 0.5)
+
+    # 職業ベースで関連する他者グループを推定
+    perspective_groups = _infer_perspective_groups(occupation, age, region)
+
+    # 基本のCoTステップ
+    steps = []
+    steps.append(
+        f"まず、このテーマ「{theme}」について、"
+        f"あなたとは異なる立場の人々がどう考えるか想像してください。"
+    )
+
+    if perspective_groups:
+        group_str = "、".join(perspective_groups[:3])
+        steps.append(
+            f"次に、{group_str}の立場から見たとき、"
+            "このテーマがどのような影響を与えるか考えてください。"
+        )
+
+    # Agreeableness に応じた深さ調整
+    if agreeableness > 0.7:
+        steps.append(
+            "次に、反対の立場を取る人の気持ちや事情を深く理解しようとしてください。"
+            "なぜその人がそう考えるのか、その人の生活状況を具体的に想像してください。"
+        )
+        steps.append(
+            "最後に、自分自身の立場から、他の人々の視点も踏まえた上で、"
+            "あなたの率直な意見を述べてください。"
+        )
+    elif agreeableness > 0.4:
+        steps.append(
+            "最後に、他の人々の視点も一応考慮した上で、"
+            "あなた自身の立場から率直な意見を述べてください。"
+        )
+    else:
+        steps.append(
+            "最後に、あなた自身の信念と経験に基づいて、率直な意見を述べてください。"
+        )
+
+    # Openness が高い場合は新しい視点への開放性を追加
+    if openness > 0.7:
+        steps.insert(-1,
+            "また、まだ議論されていない新しい視点や解決策がないか考えてみてください。"
+        )
+
+    # ステップ番号付きで結合
+    numbered = []
+    for i, step in enumerate(steps, 1):
+        numbered.append(f"①②③④⑤"[i - 1] + " " + step)
+
+    return "\n".join(numbered)
+
+
+def _infer_perspective_groups(occupation: str, age: int, region: str) -> list[str]:
+    """職業・年齢・地域から関連する他者グループを推定する."""
+    groups: list[str] = []
+
+    # 職業ベースの対照グループ
+    occupation_perspectives: dict[str, list[str]] = {
+        "会社員": ["自営業者", "退職者", "学生"],
+        "公務員": ["民間企業で働く人", "フリーランス"],
+        "教師": ["保護者", "学生", "教育行政の担当者"],
+        "医師": ["患者", "看護師", "地方の住民"],
+        "看護師": ["患者", "医師", "介護を受ける高齢者"],
+        "エンジニア": ["非技術職の人", "経営者", "利用者"],
+        "学生": ["社会人", "親世代", "高齢者"],
+        "自営業": ["会社員", "消費者", "行政担当者"],
+        "経営者": ["従業員", "消費者", "競合他社"],
+        "退職者": ["現役世代", "若者", "医療従事者"],
+        "農業": ["都市部の消費者", "食品加工業者", "若い世代"],
+        "主婦/主夫": ["共働き世帯", "単身者", "子供たち"],
+        "介護士": ["介護を受ける高齢者", "その家族", "政策立案者"],
+        "フリーランス": ["会社員", "経営者", "行政担当者"],
+    }
+
+    if occupation in occupation_perspectives:
+        groups.extend(occupation_perspectives[occupation])
+    else:
+        groups.extend(["異なる職業の人", "異なる世代の人"])
+
+    # 年齢ベースの対照グループ
+    if age < 30:
+        groups.append("高齢者世代の人々")
+    elif age > 60:
+        groups.append("若い世代の人々")
+
+    # 地域ベースの対照グループ
+    if "都市" in region or region in ("関東", "関西"):
+        groups.append("地方在住の人々")
+    elif region in ("東北", "四国", "中国", "北海道"):
+        groups.append("都市部の人々")
+
+    return groups
 
 
 def build_activation_prompt(

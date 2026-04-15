@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 from typing import TypedDict
@@ -172,6 +171,7 @@ def find_relevant_surveys(
     surveys: list[SurveyRecord],
     top_k: int = 5,
     theme_category: str | None = None,
+    exclude_survey_ids: list[str] | None = None,
 ) -> list[SurveyRecord]:
     """テーマキーワードでの関連調査検索。
 
@@ -179,11 +179,16 @@ def find_relevant_surveys(
     - theme_category によるプレフィルタ
     - 同義語展開
     - 最低マッチ閾値 (Jaccard >= 0.05)
+    - exclude_survey_ids による leakage 防止（source で除外）
     """
     # カテゴリプレフィルタ
     candidates = surveys
     if theme_category is not None:
         candidates = [s for s in surveys if s.get("theme_category") == theme_category]
+
+    # leakage 防止: exclude_survey_ids に含まれる source を除外
+    if exclude_survey_ids:
+        candidates = [s for s in candidates if s.get("source") not in exclude_survey_ids]
 
     # 同義語展開
     expanded_theme = _expand_synonyms(theme)
@@ -207,13 +212,17 @@ def compare_with_surveys(
     simulation_distribution: dict[str, float],
     theme: str,
     data_dir: str,
+    theme_category: str | None = None,
 ) -> ComparisonReport | None:
-    """シミュレーション出力と調査データの比較レポートを生成する。"""
+    """シミュレーション出力と調査データの比較レポートを生成する。
+
+    theme_category を指定すると find_relevant_surveys のプレフィルタに使用される。
+    """
     surveys = load_survey_data(data_dir)
     if not surveys:
         return None
 
-    matched = find_relevant_surveys(theme, surveys)
+    matched = find_relevant_surveys(theme, surveys, theme_category=theme_category)
     if not matched:
         return None
 
@@ -247,6 +256,64 @@ def compare_with_surveys(
         per_survey_deviations=per_survey_deviations,
         best_match_source=best["source"],
     )
+
+
+def get_anchor_distribution(
+    theme: str,
+    theme_category: str,
+    surveys: list[SurveyRecord],
+) -> dict[str, float] | None:
+    """テーマカテゴリに対応するアンカー分布を取得する。
+
+    関連する調査のスタンス分布の加重平均を返す。
+    マッチする調査がない場合は None を返す。
+
+    Args:
+        theme: シミュレーションのテーマ文
+        theme_category: 推定済みのカテゴリ名
+        surveys: 検索対象の SurveyRecord リスト
+    """
+    matched = find_relevant_surveys(theme, surveys, theme_category=theme_category)
+    if not matched:
+        return None
+
+    avg: dict[str, float] = {k: 0.0 for k in STANCE_ORDER}
+    n = len(matched)
+    for survey in matched:
+        for k in STANCE_ORDER:
+            avg[k] += survey["stance_distribution"].get(k, 0.0)
+    return {k: v / n for k, v in avg.items()}
+
+
+def apply_survey_anchor(
+    distribution: dict[str, float],
+    anchor_distribution: dict[str, float] | None,
+    alpha: float = 0.3,
+) -> dict[str, float]:
+    """シミュレーション分布をアンカー調査分布に向けてブレンドする。
+
+    anchor_distribution が None の場合は distribution をそのまま返す（スキップ）。
+
+    Args:
+        distribution: シミュレーション出力の意見分布
+        anchor_distribution: アンカーとなる調査の分布。None の場合はスキップ。
+        alpha: アンカーの重み (0.0=変更なし, 1.0=完全にアンカーへ置換)
+
+    Returns:
+        ブレンド後の正規化済み分布。anchor_distribution=None の場合は元の分布。
+    """
+    if anchor_distribution is None:
+        return distribution
+
+    all_keys = set(distribution.keys()) | set(anchor_distribution.keys())
+    blended = {
+        k: (1.0 - alpha) * distribution.get(k, 0.0) + alpha * anchor_distribution.get(k, 0.0)
+        for k in all_keys
+    }
+    total = sum(blended.values())
+    if total <= 0:
+        return distribution
+    return {k: v / total for k, v in blended.items()}
 
 
 def map_to_five_stances(

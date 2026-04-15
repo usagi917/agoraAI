@@ -134,10 +134,15 @@ def apply_transfer_correction(
         # James-Stein shrinkage
         k = max(len(bias_profile), 1)
         sigma_sq = bias["std_deviation"] ** 2
-        diff_sq = (bias["mean_deviation"] - grand_mean) ** 2
+        # 全カテゴリの偏差二乗和を使用（正しい James-Stein 分母）
+        sum_diff_sq = sum(
+            (cat_profile.get(stance, {}).get("mean_deviation", 0.0) - grand_mean) ** 2
+            for cat_profile in bias_profile.values()
+            if cat_profile.get(stance, {}).get("sample_count", 0) > 0
+        )
 
-        if k >= 3 and diff_sq > 0:
-            alpha = max(0.0, min(1.0, 1.0 - (k - 2) * sigma_sq / (diff_sq * k)))
+        if k >= 3 and sum_diff_sq > 0:
+            alpha = max(0.0, min(1.0, 1.0 - (k - 2) * sigma_sq / sum_diff_sq))
             # shrink された補正量: グランド平均 + α * (カテゴリ平均 - グランド平均)
             effective_bias = grand_mean + alpha * (bias["mean_deviation"] - grand_mean)
         else:

@@ -177,6 +177,10 @@ export function useLiveSocietyGraph(
     ([nodes, edges]) => {
       if (nodes.length > 0) {
         forceGraph.setFullGraph(nodes, edges)
+        // Reapply spotlight — setFullGraph rebuilds nodes with opacity:1
+        if (currentSpotlightId) {
+          setSpotlight(currentSpotlightId)
+        }
       }
     },
     { deep: true },
@@ -185,7 +189,13 @@ export function useLiveSocietyGraph(
   // Sync interaction counts to edge widths
   watch(
     () => societyGraphStore.interactionMatrix,
-    (matrix) => forceGraph.updateInteractionCounts(matrix),
+    (matrix) => {
+      try {
+        forceGraph.updateInteractionCounts(matrix)
+      } catch (err) {
+        console.error('[useLiveSocietyGraph] updateInteractionCounts failed:', err)
+      }
+    },
     { deep: true },
   )
 
@@ -363,6 +373,9 @@ export function useLiveSocietyGraph(
     { deep: true },
   )
 
+  // Active spotlight agent (persists across graph refreshes)
+  let currentSpotlightId: string | null = null
+
   // Handle node click with KG entity highlighting
   let highlightedNodeIds: Set<string> | null = null
 
@@ -373,6 +386,22 @@ export function useLiveSocietyGraph(
       n.opacity = 1.0
     }
     highlightedNodeIds = null
+  }
+
+  function setSpotlight(agentId: string | null) {
+    currentSpotlightId = agentId
+    const allNodes = forceGraph.getInternalNodes()
+    if (!agentId) {
+      if (!highlightedNodeIds) {
+        for (const n of allNodes) { n.opacity = 1.0 }
+      }
+      return
+    }
+    // Spotlight takes precedence over entity highlight
+    highlightedNodeIds = null
+    for (const n of allNodes) {
+      n.opacity = n.id === agentId ? 1.0 : 0.15
+    }
   }
 
   function highlightAgentsForEntity(entityId: string) {
@@ -449,5 +478,6 @@ export function useLiveSocietyGraph(
     selectedAgentId,
     highlightAgentsForEntity,
     clearHighlight,
+    setSpotlight,
   }
 }

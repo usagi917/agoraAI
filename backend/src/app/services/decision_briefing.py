@@ -176,6 +176,165 @@ def _default_time_horizon(summary: str, blockers: list[dict[str, Any]]) -> dict[
     }
 
 
+def _decision_usage_hint(
+    *,
+    score: float,
+    quality: dict[str, Any] | None = None,
+    verification: dict[str, Any] | None = None,
+) -> tuple[str, str]:
+    quality = dict(quality or {})
+    verification = dict(verification or {})
+    verification_status = _clean_text(verification.get("status"))
+    verification_score = _safe_float(verification.get("score"), 0.0)
+    quality_status = _clean_text(quality.get("status"))
+    trust_level = _clean_text(quality.get("trust_level"))
+
+    if verification_status == "passed" and quality_status == "verified" and score >= 0.7:
+        return (
+            "判断材料として使える",
+            "recommendation を起点にしてよいが、guardrails と deal breakers を同時に確認して採用条件を固定する。",
+        )
+    if verification_status == "failed" or quality_status == "unsupported":
+        return (
+            "論点抽出用に使う",
+            "結論をそのまま採用せず、critical_unknowns と evidence_gaps を follow-up の起点に使う。",
+        )
+    if trust_level == "low_trust" or score < 0.55:
+        return (
+            "仮説整理用に使う",
+            "decision_summary よりも key_reasons / critical_unknowns / recommended_actions の組み合わせを優先して読む。",
+        )
+    return (
+        "条件整理用に使う",
+        "Go/No-Go を即断するより、どの前提が揃えば recommendation が強まるかを確認する用途に向く。",
+    )
+
+
+def enrich_decision_brief(
+    brief: dict[str, Any],
+    *,
+    quality: dict[str, Any] | None = None,
+    run_config: dict[str, Any] | None = None,
+    verification: dict[str, Any] | None = None,
+    scenarios: list[dict[str, Any]] | None = None,
+    evidence_refs: list[dict[str, Any]] | None = None,
+    council_synthesis: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    enriched = dict(brief or {})
+    quality = dict(quality or {})
+    run_config = dict(run_config or {})
+    verification = dict(verification or {})
+    scenarios = _as_list(scenarios)
+    evidence_refs = _as_list(evidence_refs)
+
+    score = _safe_float(enriched.get("agreement_score"), 0.0)
+    evidence_mode = _clean_text(quality.get("evidence_mode") or run_config.get("evidence_mode") or "prefer")
+    trust_level = _clean_text(quality.get("trust_level") or "unknown")
+    verification_status = _clean_text(verification.get("status") or "n/a")
+    verification_score = _safe_float(verification.get("score"), 0.0)
+    usage_label, usage_detail = _decision_usage_hint(
+        score=score,
+        quality=quality,
+        verification=verification,
+    )
+
+    scorecard = [
+        {
+            "label": "実行条件",
+            "value": _truncate(
+                f"mode={evidence_mode} / trust={trust_level or 'unknown'} / refs={len(evidence_refs)}",
+                72,
+            ),
+            "detail": _truncate(
+                (
+                    f"quality={_clean_text(quality.get('status') or 'n/a')}。"
+                    f" document={quality.get('document_refs_count', 0)} / prompt={quality.get('prompt_refs_count', 0)} を根拠に構成。"
+                ),
+                180,
+            ),
+        },
+        {
+            "label": "検証状態",
+            "value": _truncate(
+                f"{verification_status} ({verification_score * 100:.0f}%)" if verification else "n/a",
+                72,
+            ),
+            "detail": _truncate(
+                (
+                    f"issues={len(_as_list(verification.get('issues')))} / warnings={len(_as_list(verification.get('warnings')))}。"
+                    " failed の場合は結論確定ではなく追加確認の起点として扱う。"
+                )
+                if verification
+                else "明示的な verification は未実行。quality と evidence refs を基準に読む。",
+                180,
+            ),
+        },
+        {
+            "label": "使いどころ",
+            "value": usage_label,
+            "detail": _truncate(usage_detail, 180),
+        },
+    ]
+
+    if scenarios:
+        top_scenario = max(
+            scenarios,
+            key=lambda item: _safe_float(
+                item.get("calibrated_probability"),
+                _safe_float(item.get("scenario_score"), _safe_float(item.get("probability"), 0.0)),
+            ),
+        )
+        scenario_score = _safe_float(
+            top_scenario.get("calibrated_probability"),
+            _safe_float(top_scenario.get("scenario_score"), _safe_float(top_scenario.get("probability"), 0.0)),
+        )
+        scorecard.insert(2, {
+            "label": "最有力シナリオ",
+            "value": _truncate(f"{scenario_score * 100:.0f}%: {_clean_text(top_scenario.get('description'))}", 96),
+            "detail": _truncate(
+                (
+                    f"support={_safe_float(top_scenario.get('support_ratio'), _safe_float(top_scenario.get('agreement_ratio'), 0.0)) * 100:.0f}%"
+                    f" / CI={top_scenario.get('ci') or 'n/a'}"
+                    f" / claims={top_scenario.get('claim_count', 'n/a')}"
+                ),
+                180,
+            ),
+        })
+
+    critical_unknowns = _as_list(enriched.get("critical_unknowns"))
+    deal_breakers = _as_list(enriched.get("deal_breakers"))
+    recommended_actions = _as_list(enriched.get("recommended_actions"))
+    followup_prompts: list[str] = []
+    if critical_unknowns:
+        question = _clean_text(critical_unknowns[0].get("question"))
+        if question:
+            followup_prompts.append(_truncate(f"{question} が解消された場合、recommendation はどう変わるか", 160))
+    if deal_breakers:
+        trigger = _clean_text(deal_breakers[0].get("trigger"))
+        if trigger:
+            followup_prompts.append(_truncate(f"{trigger} が起きた場合の代替案と縮小プランは何か", 160))
+    if recommended_actions:
+        action = _clean_text(recommended_actions[0].get("action"))
+        learning = _clean_text(recommended_actions[0].get("expected_learning"))
+        if action:
+            followup_prompts.append(_truncate(
+                f"最優先アクション「{action}」で {learning or '期待した学習'} が得られなかった場合の次の一手は何か",
+                160,
+            ))
+
+    enriched["decision_scorecard"] = scorecard
+    enriched["followup_prompts"] = followup_prompts[:3]
+    # Idempotent highlights injection — only add if not already present
+    if council_synthesis and not enriched.get("conversation_highlights"):
+        highlights = build_conversation_highlights(
+            council_synthesis=council_synthesis,
+            recommendation=_clean_text(enriched.get("recommendation") or ""),
+        )
+        if highlights:
+            enriched["conversation_highlights"] = highlights
+    return enriched
+
+
 def build_single_decision_brief(
     *,
     prompt_text: str,
@@ -275,6 +434,10 @@ def build_single_decision_brief(
     ]
     time_horizon = _default_time_horizon(summary_text or prompt_text, critical_unknowns)
     strongest_counterargument = deal_breakers[0]["trigger"] if deal_breakers else "主要リスクの裏取りが不足している"
+    primary_unknown = critical_unknowns[0]["question"] if critical_unknowns else "主要仮説の成否"
+    primary_action = recommended_actions[0]["action"] if recommended_actions else "追加検証"
+    score_pct = int(round(score * 100))
+    trust_text = "文書根拠あり" if trust_level == "high_trust" else "根拠が限定的"
 
     brief = {
         "recommendation": recommendation,
@@ -284,8 +447,8 @@ def build_single_decision_brief(
             180,
         ),
         "why_now": _truncate(
-            "長文レポートを読む前に、どの前提を満たせば前進できるかを即座に判断できる状態にするため。",
-            180,
+            f"まず {primary_unknown} を見極めつつ {primary_action} を進めると、{recommendation} を採る条件と保留条件を切り分けやすい。",
+            220,
         ),
         "key_reasons": key_reasons,
         "guardrails": guardrails,
@@ -293,17 +456,20 @@ def build_single_decision_brief(
         "critical_unknowns": critical_unknowns,
         "next_decisions": [
             {
-                "decision": "この結論をそのまま採用するか",
+                "decision": _truncate(f"{primary_unknown} を踏まえて {recommendation} を採るか判断する", 120),
                 "owner": "意思決定者",
                 "deadline": "次回レビュー",
-                "input_needed": "追加根拠と主要リスクの解像度",
+                "input_needed": _truncate(
+                    critical_unknowns[0]["how_to_validate"] if critical_unknowns else "追加根拠と主要リスクの解像度",
+                    120,
+                ),
             }
         ],
         "recommended_actions": recommended_actions,
         "option_comparison": option_comparison,
         "confidence_explainer": _truncate(
-            "Single モードでは因果分析の洞察は得られるが、代替シナリオとの比較がないため確信度は中程度として扱う。",
-            180,
+            f"判断スコアは {score_pct}%。{trust_text} の単独レポートなので、結論確定よりも前提整理と追加検証の優先順位づけに向く。",
+            220,
         ),
         "evidence_gaps": [
             item["question"]
@@ -328,6 +494,7 @@ def build_pm_board_decision_brief(
     prompt_text: str,
     pm_result: dict[str, Any],
     scenarios: list[dict[str, Any]] | None = None,
+    council_synthesis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     sections = dict(pm_result.get("sections") or {})
     confidence = _safe_float(pm_result.get("overall_confidence"), 0.55)
@@ -628,7 +795,109 @@ def build_pm_board_decision_brief(
             stakeholder_reactions=stakeholder_reactions[:4],
         )
     )
+    highlights = build_conversation_highlights(
+        council_synthesis=council_synthesis,
+        pm_result=pm_result,
+        recommendation=recommendation,
+    )
+    if highlights:
+        brief["conversation_highlights"] = highlights
     return brief
+
+
+def build_conversation_highlights(
+    *,
+    council_synthesis: dict[str, Any] | None = None,
+    pm_result: dict[str, Any] | None = None,
+    recommendation: str = "",
+) -> dict[str, Any] | None:
+    """Build rule-based conversation highlights from council synthesis or pm_result."""
+    council = dict(council_synthesis or {})
+    pm = dict(pm_result or {})
+    pm_sections = dict(pm.get("sections") or {})
+
+    # --- consensus ---
+    consensus: list[dict[str, Any]] = []
+    for raw in _as_list(council.get("consensus_points"))[:3]:
+        point = _truncate(_clean_text(raw), 120)
+        if point:
+            consensus.append({"point": point, "impact": "合意形成済み"})
+    if not consensus:
+        for item in _as_list(pm_sections.get("assumptions"))[:3]:
+            if _safe_float(item.get("confidence"), 0.0) >= 0.7:
+                point = _truncate(_clean_text(item.get("assumption")), 120)
+                if point:
+                    consensus.append({"point": point, "impact": _truncate(_clean_text(item.get("impact_if_wrong") or "前提成立"), 120)})
+
+    # --- conflicts ---
+    conflicts: list[dict[str, Any]] = []
+    for item in _as_list(council.get("disagreement_points"))[:3]:
+        point = _truncate(_clean_text(item.get("topic") if isinstance(item, dict) else item), 120)
+        impact = _truncate(_clean_text(item.get("impact") if isinstance(item, dict) else ""), 120)
+        if point:
+            conflicts.append({"point": point, "status": "unresolved", "impact": impact})
+    if not conflicts:
+        for item in _as_list(pm.get("contradictions"))[:3]:
+            point = _truncate(_clean_text(item.get("issue") if isinstance(item, dict) else item), 120)
+            if point:
+                conflicts.append({"point": point, "status": "unresolved", "impact": "判断条件の内部整合が崩れる"})
+
+    # --- turning_points ---
+    turning_points: list[dict[str, Any]] = []
+    for item in _as_list(council.get("stance_shifts"))[:3]:
+        moment = _truncate(_clean_text(item.get("moment") if isinstance(item, dict) else item), 120)
+        reason = _truncate(_clean_text(item.get("reason") if isinstance(item, dict) else ""), 120)
+        if moment:
+            turning_points.append({"moment": moment, "why_it_changed": reason})
+    if not turning_points:
+        for point in _as_list(pm.get("key_decision_points"))[:3]:
+            cleaned = _truncate(_clean_text(point), 120)
+            if cleaned:
+                turning_points.append({"moment": cleaned, "why_it_changed": "主要判断点として記録"})
+
+    # --- key_quotes ---
+    key_quotes: list[dict[str, Any]] = []
+    persuasive = council.get("most_persuasive_argument")
+    if isinstance(persuasive, dict):
+        speaker = _clean_text(persuasive.get("participant") or persuasive.get("speaker") or "")
+        quote = _truncate(_clean_text(persuasive.get("argument") or persuasive.get("quote") or ""), 120)
+        if quote:
+            key_quotes.append({
+                "speaker": speaker,
+                "quote": quote,
+                "decision_impact": "最も説得力があった主張",
+            })
+    if not key_quotes:
+        winning = dict(pm_sections.get("winning_hypothesis") or {})
+        if_true = _truncate(_clean_text(winning.get("if_true") or ""), 120)
+        if if_true:
+            key_quotes.append({
+                "speaker": "winning_hypothesis",
+                "quote": if_true,
+                "decision_impact": "勝利仮説の条件",
+            })
+
+    # --- summary ---
+    summary = _first_sentence(council.get("overall_assessment"), "")
+    if not summary:
+        core = _clean_text(pm_sections.get("core_question") or "")
+        rec = _clean_text(recommendation)
+        summary = _truncate(f"{core}: {rec}" if core and rec else core or rec, 160)
+
+    # Return None if nothing was populated
+    if not consensus and not conflicts and not turning_points and not key_quotes and not summary:
+        return None
+
+    source_phase = "council" if council_synthesis else "meeting"
+
+    return {
+        "summary": summary,
+        "consensus": consensus[:3],
+        "conflicts": conflicts[:3],
+        "turning_points": turning_points[:3],
+        "key_quotes": key_quotes[:3],
+        "source_phase": source_phase,
+    }
 
 
 def build_pipeline_decision_brief(
@@ -757,6 +1026,60 @@ def render_decision_brief_markdown(brief: dict[str, Any], *, title: str = "Decis
             if details:
                 line += f" - {details}"
             lines.append(f"- {line}")
+
+    scorecard = _as_list(brief.get("decision_scorecard"))
+    if scorecard:
+        lines.extend(["", "### 判断の基準"])
+        for item in scorecard:
+            label = _clean_text(item.get("label"))
+            value = _clean_text(item.get("value"))
+            detail = _clean_text(item.get("detail"))
+            line = " - ".join(part for part in [value, detail] if part)
+            if label and line:
+                lines.append(f"- {label}: {line}")
+            elif label:
+                lines.append(f"- {label}")
+
+    highlights = brief.get("conversation_highlights")
+    if isinstance(highlights, dict):
+        lines.extend(["", "### 議論ハイライト"])
+        hl_summary = _clean_text(highlights.get("summary"))
+        if hl_summary:
+            lines.append(hl_summary)
+        for item in _as_list(highlights.get("consensus")):
+            point = _clean_text(item.get("point"))
+            impact = _clean_text(item.get("impact"))
+            if point:
+                lines.append(f"- 合意: {point}" + (f" ({impact})" if impact else ""))
+        for item in _as_list(highlights.get("conflicts")):
+            point = _clean_text(item.get("point"))
+            status = _clean_text(item.get("status"))
+            impact = _clean_text(item.get("impact"))
+            if point:
+                status_part = f" [{status}]" if status else ""
+                impact_part = f" ({impact})" if impact else ""
+                lines.append(f"- 対立: {point}{status_part}{impact_part}")
+        for item in _as_list(highlights.get("turning_points")):
+            moment = _clean_text(item.get("moment"))
+            why = _clean_text(item.get("why_it_changed"))
+            if moment:
+                lines.append(f"- 転換点: {moment}" + (f" - {why}" if why else ""))
+        for item in _as_list(highlights.get("key_quotes")):
+            quote = _clean_text(item.get("quote"))
+            speaker = _clean_text(item.get("speaker"))
+            impact = _clean_text(item.get("decision_impact"))
+            if quote:
+                speaker_part = f" — {speaker}" if speaker else ""
+                impact_part = f" ({impact})" if impact else ""
+                lines.append(f"- > 「{quote}」{speaker_part}{impact_part}")
+
+    followup_prompts = _as_list(brief.get("followup_prompts"))
+    if followup_prompts:
+        lines.extend(["", "### 深掘りに使う follow-up"])
+        for item in followup_prompts:
+            cleaned = _clean_text(item)
+            if cleaned:
+                lines.append(f"- {cleaned}")
 
     evidence_gaps = _as_list(brief.get("evidence_gaps"))
     if evidence_gaps:

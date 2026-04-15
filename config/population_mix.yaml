@@ -63,3 +63,13 @@ population:
     k: 6          # 各ノードの近傍接続数
     beta: 0.3     # 再配線確率
     cluster_by_attributes: true
+
+# 精度改善機能のオン/オフフラグ（replay 再現性確保用）
+# false にすると対応機能を無効化してベースライン動作と比較できる
+accuracy_improvements:
+  memory_anchor: true          # FJ-MM 記憶効果（Step 8）
+  confirmation_bias: true      # Motivated cognition 確証バイアス（Step 8）
+  bayesian_param_opt: true     # Optuna TPE パラメータ推定（Step 8）
+  event_loss_aversion: true    # Prospect Theory 非対称イベント効果（Step 9）
+  event_two_phase_decay: true  # Two-phase event decay（Step 9）
+  ipf_population_weights: true # IPF 代表性補正（Step 6）

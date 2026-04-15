@@ -4,6 +4,7 @@ from src.app.services.scenario_comparison import (
     build_delta_brief,
     build_coalition_map,
     extract_opinion_shifts_top5,
+    _compute_coalition_shifts,
 )
 
 
@@ -256,3 +257,82 @@ class TestExtractOpinionShiftsTop5:
         assert len(top5) == 1
         # 2 keys changed: opinion changed, reason is new
         assert top5[0]["shift_magnitude"] == 2.0
+
+
+# ---------------------------------------------------------------------------
+# Tests: _compute_coalition_shifts (5% threshold)
+# ---------------------------------------------------------------------------
+
+
+class TestComputeCoalitionShifts:
+    def test_below_threshold_excluded(self):
+        """0% (or <5%) shift → coalition_shifts に含まれない"""
+        baseline_map = {
+            "by_age": [{"group": "18-29", "support": 0.5, "oppose": 0.5, "count": 10}],
+            "by_region": [],
+            "by_occupation": [],
+            "by_value": [],
+        }
+        # Same support → 0% shift → excluded
+        intervention_map = {
+            "by_age": [{"group": "18-29", "support": 0.5, "oppose": 0.5, "count": 10}],
+            "by_region": [],
+            "by_occupation": [],
+            "by_value": [],
+        }
+        shifts = _compute_coalition_shifts(baseline_map, intervention_map)
+        assert shifts == []
+
+    def test_small_shift_below_threshold_excluded(self):
+        """4% shift → threshold(5%) 未満で除外"""
+        baseline_map = {
+            "by_age": [{"group": "18-29", "support": 0.50, "oppose": 0.50, "count": 10}],
+            "by_region": [],
+            "by_occupation": [],
+            "by_value": [],
+        }
+        intervention_map = {
+            "by_age": [{"group": "18-29", "support": 0.54, "oppose": 0.46, "count": 10}],
+            "by_region": [],
+            "by_occupation": [],
+            "by_value": [],
+        }
+        shifts = _compute_coalition_shifts(baseline_map, intervention_map)
+        assert shifts == []
+
+    def test_above_threshold_included(self):
+        """6% shift → 含まれる"""
+        baseline_map = {
+            "by_age": [{"group": "18-29", "support": 0.50, "oppose": 0.50, "count": 10}],
+            "by_region": [],
+            "by_occupation": [],
+            "by_value": [],
+        }
+        intervention_map = {
+            "by_age": [{"group": "18-29", "support": 0.56, "oppose": 0.44, "count": 10}],
+            "by_region": [],
+            "by_occupation": [],
+            "by_value": [],
+        }
+        shifts = _compute_coalition_shifts(baseline_map, intervention_map)
+        assert len(shifts) == 1
+        assert shifts[0]["group"] == "18-29"
+        assert shifts[0]["change"] == 0.06
+
+    def test_exact_threshold_included(self):
+        """5% shift → ちょうど閾値で含まれる (>= 0.05)"""
+        baseline_map = {
+            "by_age": [{"group": "30-49", "support": 0.40, "oppose": 0.60, "count": 5}],
+            "by_region": [],
+            "by_occupation": [],
+            "by_value": [],
+        }
+        intervention_map = {
+            "by_age": [{"group": "30-49", "support": 0.45, "oppose": 0.55, "count": 5}],
+            "by_region": [],
+            "by_occupation": [],
+            "by_value": [],
+        }
+        shifts = _compute_coalition_shifts(baseline_map, intervention_map)
+        assert len(shifts) == 1
+        assert shifts[0]["change"] == 0.05

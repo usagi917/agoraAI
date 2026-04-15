@@ -13,6 +13,7 @@ from src.app.models.report import Report
 from src.app.models.simulation import Simulation
 from src.app.services.decision_briefing import (
     build_pipeline_decision_brief,
+    enrich_decision_brief,
     render_decision_brief_markdown,
 )
 from src.app.services.pipeline_fallbacks import build_pipeline_report_fallback
@@ -199,6 +200,11 @@ async def generate_final_report(
             report_content=final_content,
             scenarios=swarm_result.get("aggregation", {}).get("scenarios", []),
             pm_result=pm_result,
+        )
+        decision_brief = enrich_decision_brief(
+            decision_brief,
+            run_config={"evidence_mode": sim.metadata_json.get("run_config", {}).get("evidence_mode", "prefer"), "trust_mode": "strict"} if isinstance(sim.metadata_json, dict) else {"evidence_mode": "prefer", "trust_mode": "strict"},
+            scenarios=swarm_result.get("aggregation", {}).get("scenarios", []),
         )
         final_content = (
             f"{render_decision_brief_markdown(decision_brief)}\n\n---\n\n{final_content}"

@@ -128,29 +128,39 @@ class TestFriedkinJohnsen:
         assert result.updated_opinions[1][0] == pytest.approx(0.8, abs=1e-9)
 
     def test_zero_stubbornness_full_social_influence(self):
-        """Agent with stubbornness=0.0 should fully adopt neighbor mean."""
+        """Agent with stubbornness=0.0 moves toward neighbor, capped by MAX_CONV_DELTA.
+
+        Step 8 introduced MAX_CONV_DELTA=0.15 clamp.
+        agent 0 (0.0) targets 1.0: unclamped delta=1.0 → clamped to 0.15 → new=0.15
+        agent 1 (1.0) targets 0.0: unclamped delta=-1.0 → clamped to -0.15 → new=0.85
+        """
+        from src.app.services.society.opinion_dynamics import MAX_CONV_DELTA
+
         agents = _make_agents([0.0, 1.0], stubbornness=[0.0, 0.0])
         edges = _make_edges([(0, 1), (1, 0)])
         engine = OpinionDynamicsEngine(agents, edges, confidence_threshold=1.0)
 
         result = engine.propagation_step(timestep=0)
 
-        # Each agent fully adopts neighbor's opinion
-        assert result.updated_opinions[0][0] == pytest.approx(1.0, abs=1e-9)
-        assert result.updated_opinions[1][0] == pytest.approx(0.0, abs=1e-9)
+        assert result.updated_opinions[0][0] == pytest.approx(MAX_CONV_DELTA, abs=1e-9)
+        assert result.updated_opinions[1][0] == pytest.approx(1.0 - MAX_CONV_DELTA, abs=1e-9)
 
     def test_partial_stubbornness_anchoring(self):
-        """Agent with stubbornness=0.5 should move halfway toward neighbor."""
+        """Agent with stubbornness=0.5 moves toward neighbor, capped by MAX_CONV_DELTA.
+
+        Step 8: unclamped x_0 = 0.5 * 0.0 + 0.5 * 1.0 = 0.5, delta=0.5 → clamped to 0.15
+        """
+        from src.app.services.society.opinion_dynamics import MAX_CONV_DELTA
+
         agents = _make_agents([0.0, 1.0], stubbornness=[0.5, 0.5])
         edges = _make_edges([(0, 1), (1, 0)])
         engine = OpinionDynamicsEngine(agents, edges, confidence_threshold=1.0)
 
         result = engine.propagation_step(timestep=0)
 
-        # x_0(1) = 0.5 * 0.0 + 0.5 * 1.0 = 0.5
-        assert result.updated_opinions[0][0] == pytest.approx(0.5, abs=1e-9)
-        # x_1(1) = 0.5 * 1.0 + 0.5 * 0.0 = 0.5
-        assert result.updated_opinions[1][0] == pytest.approx(0.5, abs=1e-9)
+        # Both agents move toward each other by MAX_CONV_DELTA (unclamped was 0.5)
+        assert result.updated_opinions[0][0] == pytest.approx(MAX_CONV_DELTA, abs=1e-9)
+        assert result.updated_opinions[1][0] == pytest.approx(1.0 - MAX_CONV_DELTA, abs=1e-9)
 
     def test_stubbornness_from_big_five(self):
         """Stubbornness derived from Big Five C: s = 0.4 + 0.45 * C (range [0.4, 0.85])."""
@@ -291,7 +301,14 @@ class TestMultiDimensionalOpinions:
     """Engine should support multi-dimensional opinion vectors."""
 
     def test_2d_opinions_converge(self):
-        """Two agents with 2D opinions should converge in both dimensions."""
+        """Two agents with 2D opinions should move toward each other, clamped by MAX_CONV_DELTA.
+
+        Step 8: MAX_CONV_DELTA clamp applies per dimension.
+        agent 0: [0.2, 0.8], target [0.8, 0.2] → delta [0.6, -0.6] → clamped [0.15, -0.15]
+        → new [0.35, 0.65]
+        """
+        from src.app.services.society.opinion_dynamics import MAX_CONV_DELTA
+
         agents = [
             {"id": "agent_0", "opinion_vector": [0.2, 0.8], "stubbornness": 0.0},
             {"id": "agent_1", "opinion_vector": [0.8, 0.2], "stubbornness": 0.0},
@@ -301,9 +318,9 @@ class TestMultiDimensionalOpinions:
 
         result = engine.propagation_step(timestep=0)
 
-        # s=0: each fully adopts the other's opinion
-        assert result.updated_opinions[0][0] == pytest.approx(0.8, abs=1e-9)
-        assert result.updated_opinions[0][1] == pytest.approx(0.2, abs=1e-9)
+        # Each dimension is clamped to MAX_CONV_DELTA shift
+        assert result.updated_opinions[0][0] == pytest.approx(0.2 + MAX_CONV_DELTA, abs=1e-9)
+        assert result.updated_opinions[0][1] == pytest.approx(0.8 - MAX_CONV_DELTA, abs=1e-9)
 
     def test_2d_bounded_confidence_uses_euclidean_distance(self):
         """Bounded confidence threshold should use Euclidean distance."""
@@ -344,15 +361,20 @@ class TestPropagationStepResult:
         assert isinstance(result.timestep, int)
 
     def test_max_delta_tracks_largest_change(self):
-        """max_delta should reflect the agent with the largest opinion shift."""
+        """max_delta reflects the clamped shift of the agent that moved most.
+
+        Step 8: agent 2 (0.0 → 0.5 unclamped) is clamped to MAX_CONV_DELTA=0.15.
+        """
+        from src.app.services.society.opinion_dynamics import MAX_CONV_DELTA
+
         agents = _make_agents([0.5, 0.5, 0.0], stubbornness=[1.0, 1.0, 0.0])
         edges = _make_edges([(2, 0), (0, 2)])
         engine = OpinionDynamicsEngine(agents, edges, confidence_threshold=1.0)
 
         result = engine.propagation_step(timestep=0)
 
-        # Only agent 2 changes (moves toward agent 0's 0.5)
-        assert result.max_delta == pytest.approx(0.5, abs=1e-9)
+        # Only agent 2 changes, clamped to MAX_CONV_DELTA
+        assert result.max_delta == pytest.approx(MAX_CONV_DELTA, abs=1e-9)
 
 
 # ===========================================================================

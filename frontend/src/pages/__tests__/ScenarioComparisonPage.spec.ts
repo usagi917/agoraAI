@@ -188,7 +188,7 @@ describe('ScenarioComparisonPage', () => {
     const wrapper = createWrapper()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Network error')
+    expect(wrapper.text()).toContain('比較データの読み込みに失敗しました')
   })
 
   it('shows completed status badge for completed pair', async () => {

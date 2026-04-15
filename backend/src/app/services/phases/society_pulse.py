@@ -63,6 +63,7 @@ async def run_society_pulse(
 
     pop_id, agents = await _get_or_create_population(
         session, sim.population_id, pop_count,
+        strict=bool(getattr(sim, "scenario_pair_id", None)),
     )
     sim.population_id = pop_id
     await session.commit()

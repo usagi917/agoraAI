@@ -78,14 +78,17 @@ async def create_scenario_pair_endpoint(
     session: AsyncSession = Depends(get_session),
 ):
     """Create a new scenario pair and start both simulations."""
-    pair = await create_scenario_pair(
-        session=session,
-        population_id=body.population_id,
-        intervention_params=body.intervention_params,
-        decision_context=body.decision_context,
-        preset=body.preset,
-        seed=body.seed,
-    )
+    try:
+        pair = await create_scenario_pair(
+            session=session,
+            population_id=body.population_id,
+            intervention_params=body.intervention_params,
+            decision_context=body.decision_context,
+            preset=body.preset,
+            seed=body.seed,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     for simulation_id in (pair.baseline_simulation_id, pair.intervention_simulation_id):
         if simulation_id:

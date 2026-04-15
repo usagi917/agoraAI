@@ -396,11 +396,25 @@ class TestDeriveScenarioPairStatus:
         result = derive_scenario_pair_status(["completed", "completed"])
         assert result == "completed"
 
-    def test_failed_status_takes_priority(self):
-        """一方が failed のとき、pair は 'failed'。"""
+    def test_failed_while_other_running_stays_running(self):
+        """一方が failed でも他方が running なら 'running'（両方 terminal まで保留）。"""
         from src.app.services.scenario_pair_status import derive_scenario_pair_status
 
         result = derive_scenario_pair_status(["failed", "running"])
+        assert result == "running"
+
+    def test_both_terminal_with_failure_returns_failed(self):
+        """両方がターミナル状態で一方が failed なら 'failed'。"""
+        from src.app.services.scenario_pair_status import derive_scenario_pair_status
+
+        result = derive_scenario_pair_status(["failed", "completed"])
+        assert result == "failed"
+
+    def test_both_failed_returns_failed(self):
+        """両方 failed なら 'failed'。"""
+        from src.app.services.scenario_pair_status import derive_scenario_pair_status
+
+        result = derive_scenario_pair_status(["failed", "failed"])
         assert result == "failed"
 
     def test_queued_does_not_become_running_on_get(self):

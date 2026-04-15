@@ -18,9 +18,14 @@ from typing import Any, Callable
 
 import numpy as np
 
+from src.app.services.society.event_exposure import (
+    ablation_heterogeneous_exposure,
+    event_residual,
+)
 from src.app.services.society.opinion_dynamics import (
     ClusterInfo,
     OpinionDynamicsEngine,
+    apply_belief_decay,
     stubbornness_from_big_five,
 )
 
@@ -263,6 +268,7 @@ async def run_network_propagation(
     reflection_delta_threshold: float = 0.3,
     on_timestep: Callable | None = None,
     llm_client: Any | None = None,
+    events: list[dict] | None = None,
 ) -> PropagationResult:
     """Run multi-round network opinion propagation.
 
@@ -278,6 +284,10 @@ async def run_network_propagation(
         on_timestep: Optional callback per timestep.
         llm_client: Optional LLM client (e.g. MultiLLMClient) for reflection.
             If None, reflection is skipped (pure math only).
+        events: Optional list of external event dicts injected at each timestep.
+            Each event dict must have: source, framing, magnitude, and optionally
+            timestep (the step at which the event fires; default=0).
+            Residual effects accumulate across subsequent steps.
 
     Returns:
         PropagationResult with final opinions, history, clusters, and metrics.
@@ -320,12 +330,57 @@ async def run_network_propagation(
     # Store initial opinions for later reflection comparison
     initial_opinions = [ea["opinion_vector"][:] for ea in engine_agents]
 
+    # Pre-compute which events fire at each timestep and their initial deltas.
+    # event_schedule: {timestep: [(agent_deltas, fired_at_step)]}
+    # Residual effects: list of (initial_delta_per_agent, fired_at_step) still active.
+    active_residuals: list[tuple[list[float], int]] = []
+    _events = events or []
+
     for t in range(max_timesteps):
         prev_opinions = [ea["opinion_vector"] for ea in engine_agents] if t == 0 else [
             list(row) for row in engine._opinions
         ]
 
+        # Phase 1: Compute per-agent cumulative event delta for this timestep.
+        # New events that fire at step t are computed and added to residuals.
+        cumulative_deltas = [0.0] * len(agents)
+        for event in _events:
+            fire_at = event.get("timestep", 0)
+            if fire_at == t:
+                initial_deltas = ablation_heterogeneous_exposure(agents, event)
+                active_residuals.append((initial_deltas, t))
+
+        # Accumulate residual effects from all previously fired events.
+        for initial_deltas, fired_at in active_residuals:
+            elapsed = t - fired_at
+            for i, raw in enumerate(initial_deltas):
+                cumulative_deltas[i] += event_residual(raw, elapsed)
+
+        # Apply event deltas to current opinions before propagation step.
+        if any(d != 0.0 for d in cumulative_deltas):
+            for i in range(len(agents)):
+                engine._opinions[i][0] = float(
+                    np.clip(engine._opinions[i][0] + cumulative_deltas[i], 0.0, 1.0)
+                )
+
         result = engine.propagation_step(timestep=t)
+
+        # Phase 3: Belief decay — opinion drifts back toward initial anchor.
+        # Applied AFTER propagation_step so TimestepRecord captures the raw
+        # conversation result, while engine._opinions reflects the decayed value
+        # that carries forward to the next timestep.
+        if engine._dim == 1:
+            for i in range(len(agents)):
+                engine._opinions[i][0] = float(
+                    np.clip(
+                        apply_belief_decay(
+                            engine._opinions[i][0],
+                            engine._initial_opinions[i][0],
+                        ),
+                        0.0,
+                        1.0,
+                    )
+                )
 
         # Record timestep
         dist = _compute_stance_distribution(result.updated_opinions)

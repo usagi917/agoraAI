@@ -1,7 +1,10 @@
+import logging
 from pathlib import Path
 
 import yaml
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_project_root(start: Path | None = None) -> Path:
@@ -114,8 +117,12 @@ class Settings(BaseSettings):
     def load_population_mix_config(self) -> dict:
         config_path = self.config_dir / "population_mix.yaml"
         if config_path.exists():
-            with open(config_path) as f:
-                return yaml.safe_load(f) or {}
+            try:
+                with open(config_path) as f:
+                    return yaml.safe_load(f) or {}
+            except (yaml.YAMLError, OSError) as e:
+                logger.error("Failed to load population_mix.yaml: %s", e)
+                return {}
         return {}
 
     @property

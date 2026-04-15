@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { listPopulations } from '../api/client'
 import { useScenarioPairStore } from '../stores/scenarioPairStore'
@@ -27,6 +27,7 @@ const presets = [
 const isLoading = ref(false)
 const error = ref('')
 const loadError = ref('')
+const canSubmit = computed(() => decisionContext.value.trim().length > 0 && selectedPopulationId.value !== '')
 
 onMounted(async () => {
   try {
@@ -192,7 +193,7 @@ async function handleSubmit() {
         type="submit"
         class="submit-button"
         :class="{ loading: isLoading }"
-        :disabled="isLoading"
+        :disabled="isLoading || !canSubmit"
         data-testid="compare-submit-button"
       >
         <span v-if="isLoading" class="spinner"></span>

@@ -13,7 +13,10 @@ from src.app.database import Base
 from src.app.main import app
 from src.app.models import _import_all_models
 from src.app.models.audit_event import AuditEvent
+from src.app.models.agent_profile import AgentProfile
 from src.app.models.population import Population
+from src.app.models.population_snapshot import PopulationSnapshot
+from src.app.models.scenario_pair import ScenarioPair
 from src.app.models.simulation import Simulation
 
 
@@ -63,10 +66,19 @@ def mock_spawn_simulation(monkeypatch):
 
 
 async def _seed_population(session_factory) -> str:
-    """Create a Population record and return its id."""
+    """Create a Population with agents and return its id."""
     async with session_factory() as session:
-        pop = Population(agent_count=100)
+        pop = Population(agent_count=3, status="ready")
         session.add(pop)
+        await session.flush()
+        for i in range(3):
+            session.add(AgentProfile(
+                population_id=pop.id,
+                agent_index=i,
+                demographics={"age": 30 + i},
+                big_five={"O": 0.5},
+                values={},
+            ))
         await session.commit()
         return pop.id
 
@@ -170,6 +182,27 @@ async def test_get_scenario_pair_not_found(client):
 
 
 @pytest.mark.asyncio
+async def test_create_scenario_pair_empty_population_returns_400(client, session_factory):
+    """エージェントがいない Population では 400 を返すこと (500 にならない)."""
+    async with session_factory() as session:
+        pop = Population(agent_count=0, status="ready")
+        session.add(pop)
+        await session.commit()
+        empty_pop_id = pop.id
+
+    response = await client.post(
+        "/scenario-pairs",
+        json={
+            "population_id": empty_pop_id,
+            "intervention_params": {},
+            "decision_context": "Empty population test",
+        },
+    )
+    assert response.status_code == 400
+    assert "no agent" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
 async def test_get_scenario_comparison_placeholder(client, session_factory):
     """GET /scenario-pairs/{id}/comparison -> 200 + placeholder."""
     population_id = await _seed_population(session_factory)
@@ -262,3 +295,88 @@ async def test_create_population_snapshot_not_found(client):
     """POST /populations/{nonexistent}/snapshot -> 404."""
     response = await client.post(f"/populations/{uuid.uuid4()}/snapshot")
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Comparison endpoint tests (Phase 3.1)
+# ---------------------------------------------------------------------------
+
+_DEFAULT_META: dict = {
+    "report_content": "Test report content",
+    "sections": {"executive_summary": "Summary of findings"},
+    "quality": {"status": "draft"},
+    "agents": [
+        {"age_bracket": "18-29", "region": "東京", "occupation": "学生", "primary_value": "教育", "stance": 0.8},
+        {"age_bracket": "30-49", "region": "大阪", "occupation": "会社員", "primary_value": "経済", "stance": 0.3},
+    ],
+}
+
+
+async def _seed_completed_pair(session_factory, metadata_json=_DEFAULT_META) -> str:
+    """Create a completed ScenarioPair with two completed Simulations."""
+    async with session_factory() as session:
+        pop = Population(agent_count=2, status="ready")
+        session.add(pop)
+        await session.flush()
+
+        snap = PopulationSnapshot(
+            population_id=pop.id,
+            agent_profiles_json={},
+            relationships_json={},
+            initial_beliefs_json={},
+            seed=42,
+        )
+        session.add(snap)
+        await session.flush()
+
+        baseline = Simulation(
+            mode="standard",
+            prompt_text="baseline prompt",
+            template_name="general",
+            execution_profile="standard",
+            status="completed",
+            metadata_json=metadata_json,
+        )
+        intervention = Simulation(
+            mode="standard",
+            prompt_text="intervention prompt",
+            template_name="general",
+            execution_profile="standard",
+            status="completed",
+            metadata_json=metadata_json,
+        )
+        session.add(baseline)
+        session.add(intervention)
+        await session.flush()
+
+        pair = ScenarioPair(
+            population_snapshot_id=snap.id,
+            baseline_simulation_id=baseline.id,
+            intervention_simulation_id=intervention.id,
+            intervention_params={"policy": "test"},
+            decision_context="Test comparison",
+            status="completed",
+        )
+        session.add(pair)
+        await session.commit()
+        return pair.id
+
+
+@pytest.mark.asyncio
+async def test_get_comparison_for_completed_pair(client, session_factory):
+    """完了済みペアは 200 + 比較スキーマを返す"""
+    pair_id = await _seed_completed_pair(session_factory)
+    response = await client.get(f"/scenario-pairs/{pair_id}/comparison")
+    assert response.status_code == 200
+    body = response.json()
+    for key in ("scenario_pair_id", "baseline_brief", "intervention_brief", "delta",
+                "opinion_shifts_top5", "coalition_map"):
+        assert key in body, f"Missing key: {key}"
+
+
+@pytest.mark.asyncio
+async def test_get_comparison_null_metadata_no_500(client, session_factory):
+    """metadata_json=None の完了済みペアでも 500 にならない"""
+    pair_id = await _seed_completed_pair(session_factory, metadata_json=None)
+    response = await client.get(f"/scenario-pairs/{pair_id}/comparison")
+    assert response.status_code == 200

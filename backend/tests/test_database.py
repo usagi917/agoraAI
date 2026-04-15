@@ -3,6 +3,7 @@ import uuid
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.app.database import (
@@ -87,6 +88,86 @@ async def test_sqlite_compatibility_migration_adds_simulation_scenario_pair_id(t
 
         columns = await conn.execute(text("PRAGMA table_info(simulations)"))
         assert "scenario_pair_id" in {row[1] for row in columns.fetchall()}
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_compatibility_migration_preserves_simulation_foreign_keys_and_indexes(tmp_path):
+    db_path = tmp_path / "legacy-simulations-fks.sqlite3"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
+
+    async with engine.begin() as conn:
+        await conn.execute(text("PRAGMA foreign_keys = ON"))
+        await conn.execute(text("CREATE TABLE projects (id VARCHAR(36) NOT NULL PRIMARY KEY)"))
+        await conn.execute(text("CREATE TABLE runs (id VARCHAR(36) NOT NULL PRIMARY KEY)"))
+        await conn.execute(text("CREATE TABLE populations (id VARCHAR(36) NOT NULL PRIMARY KEY)"))
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE simulations (
+                    id VARCHAR(36) NOT NULL,
+                    project_id VARCHAR(36),
+                    run_id VARCHAR(36),
+                    population_id VARCHAR(36),
+                    mode VARCHAR(20) NOT NULL,
+                    prompt_text TEXT NOT NULL,
+                    template_name VARCHAR(100) NOT NULL,
+                    execution_profile VARCHAR(20) NOT NULL,
+                    status VARCHAR(20) NOT NULL,
+                    error_message TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    colony_count INTEGER NOT NULL DEFAULT 0,
+                    deep_colony_count INTEGER NOT NULL DEFAULT 0,
+                    pipeline_stage VARCHAR(20) DEFAULT 'pending',
+                    stage_progress TEXT DEFAULT '{}',
+                    seed INTEGER,
+                    created_at DATETIME NOT NULL,
+                    PRIMARY KEY (id),
+                    FOREIGN KEY(project_id) REFERENCES projects(id),
+                    FOREIGN KEY(run_id) REFERENCES runs(id),
+                    FOREIGN KEY(population_id) REFERENCES populations(id)
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text("CREATE INDEX ix_simulations_project_status ON simulations(project_id, status)")
+        )
+
+        await _apply_sqlite_compatibility_migrations(conn)
+
+        fk_rows = (
+            await conn.execute(text("PRAGMA foreign_key_list(simulations)"))
+        ).fetchall()
+        assert {row[2] for row in fk_rows} == {"projects", "runs", "populations"}
+
+        index_rows = (await conn.execute(text("PRAGMA index_list(simulations)"))).fetchall()
+        assert "ix_simulations_project_status" in {row[1] for row in index_rows}
+
+    async with engine.begin() as conn:
+        await conn.execute(text("PRAGMA foreign_keys = ON"))
+        with pytest.raises(IntegrityError):
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO simulations (
+                        id, project_id, run_id, population_id, mode, prompt_text, template_name,
+                        execution_profile, status, error_message, metadata_json, colony_count,
+                        deep_colony_count, pipeline_stage, stage_progress, seed, created_at
+                    ) VALUES (
+                        :id, :project_id, :run_id, :population_id, 'standard', '', '',
+                        'standard', 'queued', '', '{}', 1, 0, 'pending', '{}', NULL, '2026-04-15 00:00:00'
+                    )
+                    """
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "project_id": str(uuid.uuid4()),
+                    "run_id": str(uuid.uuid4()),
+                    "population_id": str(uuid.uuid4()),
+                },
+            )
 
     await engine.dispose()
 

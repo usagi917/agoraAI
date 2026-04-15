@@ -256,7 +256,7 @@ function getPipelineStageLabel(stage: string) {
     <!-- Hero -->
     <section class="hero">
       <h2 class="hero-title">ひとつの問いから、<br />社会の反応を予測する</h2>
-      <p class="hero-desc">AIエージェント1,000人が議論し、代表評議会が検証し、あなたの意思決定を支える Decision Brief を生成します。</p>
+      <p class="hero-desc">仮想空間でAIが議論し、代表評議会が検証し、あなたの意思決定を支える Decision Brief を生成します。</p>
     </section>
 
     <section v-if="bootstrapError || (runtimeHealth && !runtimeHealth.live_simulation_available)" class="runtime-notice" :class="{ warning: runtimeHealth && !runtimeHealth.live_simulation_available, error: bootstrapError }">

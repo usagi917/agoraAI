@@ -271,6 +271,64 @@ async def get_evaluation_result(
     ]
 
 
+@router.get("/simulations/{sim_id}/evaluation/summary")
+async def get_evaluation_summary(
+    sim_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """シミュレーション評価サマリーを返す。
+
+    gate 判定（EMD/JSD/Brier）・baseline 比較・live replay warning を含む統合サマリー。
+    validation_records が存在しない場合は inconclusive を返す。
+    """
+    from src.app.repositories.validation_repo import ValidationRepository
+    from src.app.services.society.validation_pipeline import build_validation_summary
+    from src.app.services.society.baseline_comparator import build_evaluation_summary_response
+
+    sim = await session.get(Simulation, sim_id)
+    if not sim:
+        raise HTTPException(status_code=404, detail="シミュレーションが見つかりません")
+
+    repo = ValidationRepository(session)
+    records = await repo.list_by_simulation(sim_id)
+
+    records_data = []
+    for r in records:
+        gate_eligible = (r.theme_category or "") != "unknown"
+        records_data.append({
+            "status": "validated" if r.actual_distribution else "report_only",
+            "gate_eligible": gate_eligible,
+            "emd": r.emd,
+            "jsd": r.jsd,
+            "brier_score": r.brier_score,
+        })
+
+    theme_category = records[0].theme_category if records else None
+    gate_result = build_validation_summary(records_data, theme_category=theme_category)
+
+    # baseline comparison は simulated_emd のみ。
+    # random / initial / no_conversation / no_event は実行時アブレーション結果として
+    # 別途 POST で登録・参照する設計（Step 11 以降で拡張）。
+    baseline_comparison = {
+        "simulated_emd": gate_result["avg_emd"],
+        "random_emd": None,
+        "initial_emd": None,
+        "no_conversation_emd": None,
+        "no_event_emd": None,
+        "vs_random_improvement": None,
+        "vs_initial_improvement": None,
+        "vs_no_conversation_improvement": None,
+        "vs_no_event_improvement": None,
+        "primary_metric": "emd",
+    }
+
+    return build_evaluation_summary_response(
+        sim_id=sim_id,
+        gate_result=gate_result,
+        baseline_comparison=baseline_comparison,
+    )
+
+
 @router.get("/simulations/{sim_id}/narrative")
 async def get_narrative(
     sim_id: str,

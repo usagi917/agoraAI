@@ -171,8 +171,10 @@ describe('SimulationPage', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-testid="simulation-primary-view"]').text()).toContain('Society Live')
-    expect(wrapper.text()).toContain('Society')
-    expect(wrapper.text()).toContain('Colonies')
+    // society mode uses consolidated 3-tab layout: 会話 / Progress / 分析
+    expect(wrapper.text()).toContain('会話')
+    expect(wrapper.text()).toContain('分析')
+    expect(wrapper.text()).not.toContain('Colonies')
   })
 
   it('shows 2D SVG fallback when WebGL is not supported', async () => {
