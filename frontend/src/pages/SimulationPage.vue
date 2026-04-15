@@ -33,12 +33,11 @@ import { useAgentStatusRing } from '../composables/useAgentStatusRing'
 import { useCommunicationPulse, type PulseType } from '../composables/useCommunicationPulse'
 import ThinkingPanel from '../components/ThinkingPanel.vue'
 import AgentActivityTicker from '../components/AgentActivityTicker.vue'
-import LiveDialogueStream from '../components/LiveDialogueStream.vue'
 import DigitalWorkspaceBackground from '../components/DigitalWorkspaceBackground.vue'
 import DebateCards from '../components/DebateCards.vue'
-import ConnectionTimeline from '../components/ConnectionTimeline.vue'
 import ForceGraph2D from '../components/ForceGraph2D.vue'
 import AgentStoryDrawer from '../components/AgentStoryDrawer.vue'
+import ConversationsTab from '../components/ConversationsTab.vue'
 import { useTheaterStore } from '../stores/theaterStore'
 import { isWebGLSupported } from '../composables/useWebGLDetect'
 import {
@@ -398,14 +397,13 @@ const liveLayoutContext = computed(() => ({
 const livePrimaryView = computed<LivePrimaryView>(() => getLivePrimaryView(liveLayoutContext.value))
 const liveSecondaryTabs = computed<LiveSecondaryTab[]>(() => getLiveSecondaryTabs(liveLayoutContext.value))
 const liveSecondaryLabels: Record<LiveSecondaryTab, string> = {
+  conversations: '会話',
+  analysis: '分析',
   progress: 'Progress',
   debate: 'Debate',
   activity: 'Activity',
-  society: 'Society',
   colonies: 'Colonies',
   thinking: 'Thinking',
-  dialogue: 'Dialogue',
-  connections: 'Connections',
 }
 const livePrimaryTitle = computed(() => (
   livePrimaryView.value === 'society'
@@ -891,6 +889,7 @@ function goToResults() {
             <LiveSocietyGraph
               v-if="store.isSocietyMode"
               :simulation-id="simId"
+              :spotlight-agent-id="selectedAgentForStory"
               @select-agent="selectedAgentForStory = $event"
             />
             <!-- Other modes: Knowledge Graph (3D or 2D fallback) -->
@@ -1011,22 +1010,6 @@ function goToResults() {
           </div>
         </div>
 
-        <div v-if="activeSecondaryTab === 'society' && store.isSocietyMode" class="panel-stack">
-          <div class="panel-card">
-            <div class="panel-header">
-              <h3>意見分布</h3>
-            </div>
-            <OpinionDistribution :distribution="store.opinionDistribution" />
-          </div>
-          <div class="panel-card">
-            <div class="panel-header">
-              <h3>社会進行</h3>
-            </div>
-            <p class="prompt-text">Round {{ societyGraphStore.currentRound }} / 活性化 {{ societyGraphStore.activationCompleted }}/{{ societyGraphStore.activationTotal }}</p>
-            <p class="prompt-text">{{ stageLabel }}</p>
-          </div>
-        </div>
-
         <div v-if="activeSecondaryTab === 'debate'" class="panel-card">
           <DebateCards @select-agent="selectedAgentForStory = $event" />
         </div>
@@ -1048,15 +1031,30 @@ function goToResults() {
           <ThinkingPanel />
         </div>
 
-        <div v-if="activeSecondaryTab === 'dialogue'" class="panel-card dialogue-tab">
-          <LiveDialogueStream @select-agent="selectedAgentForStory = $event" />
+        <div v-if="activeSecondaryTab === 'conversations'" class="panel-card">
+          <ConversationsTab
+            @select-agent="selectedAgentForStory = $event"
+            @highlight-edge="handleConnectionHighlight"
+          />
         </div>
 
-        <div v-if="activeSecondaryTab === 'connections'" class="panel-card connections-tab">
-          <ConnectionTimeline
-            @highlight-edge="handleConnectionHighlight"
-            @select-agent="selectedAgentForStory = $event"
-          />
+        <div v-if="activeSecondaryTab === 'analysis'" class="panel-stack">
+          <div class="panel-card">
+            <div class="panel-header">
+              <h3>意見分布</h3>
+            </div>
+            <OpinionDistribution :distribution="store.opinionDistribution" />
+          </div>
+          <div class="panel-card">
+            <div class="panel-header">
+              <h3>社会進行</h3>
+            </div>
+            <p class="prompt-text">Round {{ societyGraphStore.currentRound }} / 活性化 {{ societyGraphStore.activationCompleted }}/{{ societyGraphStore.activationTotal }}</p>
+            <p class="prompt-text">{{ stageLabel }}</p>
+          </div>
+          <div v-if="cognitiveStore.cognitiveMode === 'advanced' || vizStore.recentThoughts.length > 0" class="panel-card thinking-tab">
+            <ThinkingPanel />
+          </div>
         </div>
       </div>
     </div>

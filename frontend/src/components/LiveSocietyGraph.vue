@@ -10,8 +10,9 @@ import ConversationToast from './ConversationToast.vue'
 import NodeDetailPanel from './NodeDetailPanel.vue'
 import TemporalSlider from './TemporalSlider.vue'
 
-defineProps<{
+const props = defineProps<{
   simulationId: string
+  spotlightAgentId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -28,7 +29,7 @@ const thinkingMode = computed<ThinkingVisualMode>(() => {
   return 'society'
 })
 
-const { selectedAgentId, resetCamera, graphError, toggleBloom, bloomEnabled, highlightAgentsForEntity, clearHighlight } = useLiveSocietyGraph(graphContainer, thinkingMode)
+const { selectedAgentId, resetCamera, graphError, toggleBloom, bloomEnabled, highlightAgentsForEntity, clearHighlight, setSpotlight } = useLiveSocietyGraph(graphContainer, thinkingMode)
 
 const phaseLabel = computed(() => {
   // Unified mode phase labels
@@ -114,6 +115,11 @@ watch(selectedAgentId, (id) => {
     emit('select-agent', id)
     selectedAgentId.value = null
   }
+})
+
+// Spotlight: dim all agents except the one open in the story drawer
+watch(() => props.spotlightAgentId, (agentId) => {
+  setSpotlight(agentId ?? null)
 })
 
 function clearEdgeSelection() {
@@ -386,6 +392,7 @@ onUnmounted(() => {
         :node-id="selectedAgentId"
         @close="clearSelection"
         @highlight-agents="handleHighlightAgents"
+        @select-agent="emit('select-agent', $event)"
       />
     </div>
   </div>
