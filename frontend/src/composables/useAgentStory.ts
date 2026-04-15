@@ -7,8 +7,6 @@ export interface OpinionJourneyItem {
   round: number
   content: string
   addressedTo?: string
-  fromStance?: string
-  toStance?: string
   roundName?: string
 }
 
