@@ -493,11 +493,12 @@ export function useForceGraph(
     mentions: 'M',
   }
 
-  function createEdgeLabelSprite(text: string, color: string): THREE.Sprite {
+  function createEdgeLabelSprite(text: string, color: string): THREE.Sprite | null {
     const canvas = document.createElement('canvas')
     canvas.width = 48
     canvas.height = 48
-    const ctx = canvas.getContext('2d')!
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
     ctx.fillStyle = 'rgba(16, 16, 30, 0.75)'
     ctx.beginPath()
     ctx.arc(24, 24, 20, 0, Math.PI * 2)
@@ -924,8 +925,8 @@ export function useForceGraph(
         )
         bloomPassRef = bloomPass
         fg.postProcessingComposer().addPass(bloomPass)
-      } catch {
-        // Graceful fallback if post-processing is unavailable
+      } catch (err) {
+        console.warn('Bloom post-processing unavailable:', err)
         bloomPassRef = null
       }
 
@@ -1020,7 +1021,9 @@ export function useForceGraph(
             let sprite = edgeLabelPool.get(link.id)
             if (!sprite) {
               const style = RELATION_TYPE_STYLES[link.relationType] || RELATION_TYPE_STYLES.default
-              sprite = createEdgeLabelSprite(abbrev, style.color)
+              const newSprite = createEdgeLabelSprite(abbrev, style.color)
+              if (!newSprite) continue
+              sprite = newSprite
               edgeLabelPool.set(link.id, sprite)
               edgeLabelGroup.add(sprite)
             }

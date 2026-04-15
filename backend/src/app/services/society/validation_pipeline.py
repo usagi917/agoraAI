@@ -192,11 +192,20 @@ async def auto_compare(
     if report is None:
         return None
 
-    repo = ValidationRepository(session)
     best_survey = next(
-        s for s in report["matched_surveys"]
-        if s["source"] == report["best_match_source"]
+        (s for s in report["matched_surveys"]
+         if s["source"] == report["best_match_source"]),
+        None,
     )
+    if best_survey is None:
+        logger.error(
+            "auto_compare: best_match_source=%r not found in matched_surveys (sim=%s)",
+            report.get("best_match_source"),
+            record.simulation_id,
+        )
+        return None
+
+    repo = ValidationRepository(session)
     await repo.resolve(
         record_id=record.id,
         actual_distribution=best_survey["stance_distribution"],

@@ -789,8 +789,14 @@ export async function getSocialGraph(simId: string): Promise<SocialGraphResponse
   return data
 }
 
-export async function getAgentDetail(simId: string, agentId: string): Promise<AgentDetailResponse> {
-  const { data } = await api.get(`/society/simulations/${simId}/agents/${agentId}`)
+export async function getAgentDetail(
+  simId: string,
+  agentId: string,
+  options?: { signal?: AbortSignal },
+): Promise<AgentDetailResponse> {
+  const { data } = await api.get(`/society/simulations/${simId}/agents/${agentId}`, {
+    signal: options?.signal,
+  })
   return data
 }
 

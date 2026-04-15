@@ -64,7 +64,8 @@ function createConvLabelSprite(type: ConversationEdge['type']): THREE.Sprite | n
   const canvas = document.createElement('canvas')
   canvas.width = 64
   canvas.height = 64
-  const ctx = canvas.getContext('2d')!
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
 
   // Background circle
   ctx.fillStyle = type === 'question' ? 'rgba(0, 229, 255, 0.7)' : 'rgba(255, 215, 64, 0.7)'

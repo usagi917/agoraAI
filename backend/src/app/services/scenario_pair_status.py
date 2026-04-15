@@ -19,24 +19,24 @@ _STATUS_RANK: dict[str, int] = {
 }
 
 
+_TERMINAL = frozenset({"completed", "failed"})
+
+
 def derive_scenario_pair_status(simulation_statuses: list[str]) -> str:
     """Collapse child simulation statuses into a single pair status.
 
     queued は running と区別して保持する。
-    ワーカーが死亡して永遠に "running" を報告する誤報を防ぐため、
-    queued は queued として返す（running に折り畳まない）。
+    両方がターミナル状態になるまで "failed" 判定を保留する。
     """
     if not simulation_statuses:
         return "created"
-    if any(status == "failed" for status in simulation_statuses):
-        return "failed"
-    if all(status == "completed" for status in simulation_statuses):
+    if all(s in _TERMINAL for s in simulation_statuses):
+        if any(s == "failed" for s in simulation_statuses):
+            return "failed"
         return "completed"
-    # running が1つでもあれば running
-    if any(status == "running" for status in simulation_statuses):
+    if any(s == "running" for s in simulation_statuses):
         return "running"
-    # queued が1つでもあれば queued（running に折り畳まない）
-    if any(status == "queued" for status in simulation_statuses):
+    if any(s == "queued" for s in simulation_statuses):
         return "queued"
     return "created"
 

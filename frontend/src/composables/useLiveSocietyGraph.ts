@@ -189,7 +189,13 @@ export function useLiveSocietyGraph(
   // Sync interaction counts to edge widths
   watch(
     () => societyGraphStore.interactionMatrix,
-    (matrix) => forceGraph.updateInteractionCounts(matrix),
+    (matrix) => {
+      try {
+        forceGraph.updateInteractionCounts(matrix)
+      } catch (err) {
+        console.error('[useLiveSocietyGraph] updateInteractionCounts failed:', err)
+      }
+    },
     { deep: true },
   )
 

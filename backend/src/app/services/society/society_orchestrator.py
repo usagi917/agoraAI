@@ -64,6 +64,7 @@ from src.app.services.society.survey_anchor import (
     get_anchor_distribution,
     load_survey_data,
 )
+from src.app.services.scenario_pair_status import refresh_scenario_pair_status
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -453,7 +454,10 @@ async def run_society(simulation_id: str) -> None:
                             theme_estimate.category,
                         )
                 except Exception as exc:
-                    logger.warning("Anchor distribution pre-load failed: %s", exc)
+                    logger.warning(
+                        "Anchor distribution pre-load failed (sim=%s): %s",
+                        simulation_id, exc, exc_info=True,
+                    )
 
             # === Phase 3: Activation ===
             await sse_manager.publish(simulation_id, "society_activation_started", {
@@ -782,11 +786,11 @@ async def run_society(simulation_id: str) -> None:
                     })
                 logger.info("Validation registration completed for simulation %s", simulation_id)
             except (FileNotFoundError, ImportError) as exc:
-                logger.error("Validation registration failed (system error): %s", exc)
+                logger.error("Validation registration failed (system error) sim=%s: %s", simulation_id, exc)
             except (ValueError, KeyError) as exc:
-                logger.warning("Validation registration failed (data issue): %s", exc)
+                logger.warning("Validation registration failed (data issue) sim=%s: %s", simulation_id, exc)
             except Exception as exc:
-                logger.warning("Validation registration failed, continuing: %s", exc, exc_info=True)
+                logger.warning("Validation registration failed, continuing sim=%s: %s", simulation_id, exc, exc_info=True)
 
             # === Phase 4.6: Demographic Analysis ===
             demographic_analysis = analyze_demographics(
@@ -1076,6 +1080,7 @@ async def run_society(simulation_id: str) -> None:
             await session.rollback()
             sim.status = "failed"
             sim.error_message = f"{type(e).__name__}: {e}"[:500]
+            await refresh_scenario_pair_status(session, getattr(sim, "scenario_pair_id", None))
             await session.commit()
 
             await sse_manager.publish(simulation_id, "simulation_failed", {

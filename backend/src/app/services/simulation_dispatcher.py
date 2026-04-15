@@ -29,7 +29,12 @@ def _on_task_done(task: asyncio.Task) -> None:
     """Log unhandled exceptions from background simulation tasks."""
     _background_tasks.discard(task)
     if not task.cancelled() and task.exception() is not None:
-        logger.error("Background simulation task failed: %s", task.exception())
+        exc = task.exception()
+        logger.error(
+            "Background simulation task failed: %s",
+            exc,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
 
 
 def spawn_simulation(simulation_id: str) -> None:
