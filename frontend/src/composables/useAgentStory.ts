@@ -34,13 +34,18 @@ export function useAgentStory(simId: string, agentId: Ref<string | null>) {
     loading.value = true
     error.value = null
     try {
-      agentDetail.value = await getAgentDetail(simId, id, { signal: controller.signal })
+      const detail = await getAgentDetail(simId, id, { signal: controller.signal })
+      if (controller.signal.aborted || abortController !== controller || agentId.value !== id) {
+        return
+      }
+      agentDetail.value = detail
       lastFetchedId = id
     } catch (e: any) {
       if (e?.name === 'CanceledError' || e?.name === 'AbortError') return
       error.value = e?.message ?? 'データの取得に失敗しました'
     } finally {
       if (abortController === controller) {
+        abortController = null
         loading.value = false
       }
     }
@@ -50,7 +55,10 @@ export function useAgentStory(simId: string, agentId: Ref<string | null>) {
     agentId,
     (newId) => {
       if (!newId) {
+        abortController?.abort()
+        abortController = null
         agentDetail.value = null
+        loading.value = false
         error.value = null
         lastFetchedId = null
         return

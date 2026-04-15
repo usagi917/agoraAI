@@ -88,6 +88,32 @@ describe('useAgentStory', () => {
     expect(agentDetail.value).toBeNull()
   })
 
+  it('agentId=null で進行中リクエストを無効化し stale data を書き戻さない', async () => {
+    let resolveRequest: (value: AgentDetailResponse) => void
+    mockGetAgentDetail.mockImplementation(
+      () => new Promise<AgentDetailResponse>((resolve) => { resolveRequest = resolve }),
+    )
+
+    const agentId = ref<string | null>('agent-1')
+    const { agentDetail, loading } = useAgentStory('sim-1', agentId)
+
+    await nextTick()
+    expect(loading.value).toBe(true)
+    expect(mockGetAgentDetail).toHaveBeenCalledTimes(1)
+
+    agentId.value = null
+    await nextTick()
+
+    expect(loading.value).toBe(false)
+    expect(agentDetail.value).toBeNull()
+
+    resolveRequest!(makeAgentDetail({ id: 'agent-1' }))
+    await nextTick()
+
+    expect(agentDetail.value).toBeNull()
+    expect(loading.value).toBe(false)
+  })
+
   it('opinionJourney: contribution と stance_shift のマッピングが正しい', async () => {
     const contributions: MeetingArgument[] = [
       makeMeetingArg({ round: 1, argument: 'First point', belief_update: 'Changed my mind' }),
