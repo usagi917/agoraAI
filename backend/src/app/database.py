@@ -95,6 +95,8 @@ async def _apply_sqlite_compatibility_migrations(conn: AsyncConnection) -> None:
             await conn.execute(
                 text("ALTER TABLE simulations ADD COLUMN scenario_pair_id VARCHAR(36)")
             )
+        # legacy カラムの NOT NULL 制約を除去（SQLite はテーブル再作成が必要）
+        await _sqlite_drop_not_null_legacy_sim_columns(conn, sim_columns)
 
     # --- agent_profiles: Step 2 スキーマ拡張 ---
     if "agent_profiles" in existing_tables:
@@ -132,6 +134,51 @@ async def _apply_sqlite_compatibility_migrations(conn: AsyncConnection) -> None:
             col_name, ddl = col_ddl
             if col_name not in vr_columns:
                 await conn.execute(text(ddl))
+
+
+async def _sqlite_drop_not_null_legacy_sim_columns(conn: AsyncConnection, sim_columns: set[str]) -> None:
+    """colony_count / deep_colony_count の NOT NULL 制約を SQLite のテーブル再作成で除去する。
+
+    SQLite は ALTER COLUMN DROP NOT NULL をサポートしないため、
+    旧テーブルをリネーム → 新テーブルを作成 → データコピー → 旧テーブル削除 の手順を踏む。
+    対象カラムが存在しない場合や、すでに NOT NULL でない場合はスキップする。
+    """
+    legacy = {"colony_count", "deep_colony_count"}
+    if not legacy.intersection(sim_columns):
+        return
+
+    result = await conn.execute(text("PRAGMA table_info(simulations)"))
+    col_rows = result.fetchall()
+
+    # notnull フィールドは PRAGMA table_info の index 3
+    has_not_null = {row[1] for row in col_rows if row[1] in legacy and row[3] == 1}
+    if not has_not_null:
+        return
+
+    # 現在の全カラム情報を取得して新 DDL を構築
+    all_col_names = [row[1] for row in col_rows]
+
+    await conn.execute(text("PRAGMA foreign_keys = OFF"))
+    await conn.execute(text("ALTER TABLE simulations RENAME TO _simulations_legacy"))
+
+    new_ddl_cols: list[str] = []
+    for row in col_rows:
+        col_name, col_type, col_notnull, col_default, col_pk = row[1], row[2], row[3], row[4], row[5]
+        if col_name in legacy:
+            new_ddl_cols.append(f"{col_name} {col_type}")
+        else:
+            nn = " NOT NULL" if col_notnull else ""
+            dflt = f" DEFAULT {col_default}" if col_default is not None else ""
+            pk = " PRIMARY KEY" if col_pk else ""
+            new_ddl_cols.append(f"{col_name} {col_type}{pk}{nn}{dflt}")
+
+    new_ddl = "CREATE TABLE simulations (\n    " + ",\n    ".join(new_ddl_cols) + "\n)"
+    await conn.execute(text(new_ddl))
+
+    cols_csv = ", ".join(all_col_names)
+    await conn.execute(text(f"INSERT INTO simulations ({cols_csv}) SELECT {cols_csv} FROM _simulations_legacy"))
+    await conn.execute(text("DROP TABLE _simulations_legacy"))
+    await conn.execute(text("PRAGMA foreign_keys = ON"))
 
 
 async def _get_postgres_columns(conn: AsyncConnection, table_name: str) -> set[str]:
