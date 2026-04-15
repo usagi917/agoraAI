@@ -694,6 +694,8 @@ async def run_society(simulation_id: str) -> None:
                         ind_w = independence_weights.get(agent["id"], 1.0)
                         if stance in outcomes:
                             prediction_market.submit_bet(agent["id"], stance, calibrated_confidence, weight=ind_w)
+                    # Update persisted phase_data with post-propagation prices
+                    propagation_record.phase_data["prediction_market"] = prediction_market.get_prices()
 
                 await sse_manager.publish(simulation_id, "network_propagation_completed", {
                     "converged": propagation_result.converged,

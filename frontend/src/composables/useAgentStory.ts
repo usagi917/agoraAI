@@ -29,17 +29,20 @@ export function useAgentStory(simId: string, agentId: Ref<string | null>) {
 
   async function fetchDetail(id: string) {
     abortController?.abort()
-    abortController = new AbortController()
+    const controller = new AbortController()
+    abortController = controller
     loading.value = true
     error.value = null
     try {
-      agentDetail.value = await getAgentDetail(simId, id, { signal: abortController.signal })
+      agentDetail.value = await getAgentDetail(simId, id, { signal: controller.signal })
       lastFetchedId = id
     } catch (e: any) {
       if (e?.name === 'CanceledError' || e?.name === 'AbortError') return
       error.value = e?.message ?? 'データの取得に失敗しました'
     } finally {
-      loading.value = false
+      if (abortController === controller) {
+        loading.value = false
+      }
     }
   }
 

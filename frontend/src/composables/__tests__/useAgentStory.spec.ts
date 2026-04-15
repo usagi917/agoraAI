@@ -162,6 +162,35 @@ describe('useAgentStory', () => {
     await vi.waitFor(() => expect(mockGetAgentDetail).toHaveBeenCalledTimes(2))
   })
 
+  it('リクエスト競合時に abort された側が loading を false にしない', async () => {
+    let resolveFirst: (v: AgentDetailResponse) => void
+    const firstPromise = new Promise<AgentDetailResponse>((r) => { resolveFirst = r })
+    const secondDetail = makeAgentDetail({ id: 'agent-2' })
+
+    mockGetAgentDetail.mockImplementationOnce(() => firstPromise)
+    mockGetAgentDetail.mockImplementationOnce(() => Promise.resolve(secondDetail))
+
+    const agentId = ref<string | null>('agent-1')
+    const { loading } = useAgentStory('sim-1', agentId)
+
+    await nextTick()
+    expect(loading.value).toBe(true)
+
+    // Trigger second request while first is still in flight
+    agentId.value = 'agent-2'
+    await nextTick()
+
+    // First request is now aborted — resolve it to trigger finally
+    resolveFirst!(makeAgentDetail({ id: 'agent-1' }))
+    await nextTick()
+
+    // Wait for second request to complete
+    await vi.waitFor(() => expect(mockGetAgentDetail).toHaveBeenCalledTimes(2))
+
+    // loading should be false only after the second (latest) request completes
+    expect(loading.value).toBe(false)
+  })
+
   it('ラウンド変化で異なるエージェント（lastFetchedId と不一致）なら再フェッチしない', async () => {
     const detail = makeAgentDetail({ id: 'agent-1' })
     mockGetAgentDetail.mockResolvedValue(detail)
