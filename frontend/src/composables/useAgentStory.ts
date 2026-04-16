@@ -40,7 +40,7 @@ export function useAgentStory(simId: string, agentId: Ref<string | null>) {
       lastFetchedId = id
     } catch (e: any) {
       if (e?.name === 'CanceledError' || e?.name === 'AbortError') return
-      error.value = e?.message ?? 'データの取得に失敗しました'
+      error.value = e?.message ?? `エージェント ${id} の詳細データの取得に失敗しました`
     } finally {
       if (abortController === controller) {
         abortController = null

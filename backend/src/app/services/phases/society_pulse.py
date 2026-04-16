@@ -63,6 +63,7 @@ async def run_society_pulse(
 
     pop_id, agents = await _get_or_create_population(
         session, sim.population_id, pop_count,
+        seed=sim.seed,
         strict=bool(getattr(sim, "scenario_pair_id", None)),
     )
     sim.population_id = pop_id
@@ -84,6 +85,7 @@ async def run_society_pulse(
         "total_population": len(agents),
         "selected_agents": [
             {
+                "id": a.get("id", ""),
                 "agent_index": a.get("agent_index", i),
                 "name": f"Agent-{a.get('agent_index', i)}",
                 "occupation": a.get("demographics", {}).get("occupation", ""),

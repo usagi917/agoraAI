@@ -407,6 +407,7 @@ async def run_society(simulation_id: str) -> None:
                 "total_population": len(agents),
                 "selected_agents": [
                     {
+                        "id": a.get("id", ""),
                         "agent_index": a.get("agent_index", i),
                         "name": f"Agent-{a.get('agent_index', i)}",
                         "occupation": a.get("demographics", {}).get("occupation", ""),

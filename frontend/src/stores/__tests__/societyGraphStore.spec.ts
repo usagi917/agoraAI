@@ -20,11 +20,12 @@ describe('societyGraphStore', () => {
     setActivePinia(createPinia())
   })
 
-  it('deduplicates streamed meeting dialogue and clears the active speaker after round completion', () => {
+  it('uses canonical id from SSE payload when available', () => {
     const store = useSocietyGraphStore()
 
     store.setSelectedAgents([
       {
+        id: 'backend-uuid-1',
         agent_index: 1,
         name: '田中太郎',
         display_name: '田中太郎',
@@ -33,6 +34,39 @@ describe('societyGraphStore', () => {
         region: '東京',
       },
       {
+        agent_index: 2,
+        name: '佐藤花子',
+        display_name: '佐藤花子',
+        occupation: '経営者',
+        age: 42,
+        region: '大阪',
+      },
+    ])
+
+    // Agent with id from backend uses it; agent without falls back to agent-{index}
+    expect(store.liveAgents.get('backend-uuid-1')).toBeDefined()
+    expect(store.liveAgents.get('backend-uuid-1')?.agentIndex).toBe(1)
+    expect(store.liveAgents.get('agent-2')).toBeDefined()
+    expect(store.liveAgents.get('agent-2')?.agentIndex).toBe(2)
+    // Ensure fallback key is NOT used when backend id is present
+    expect(store.liveAgents.get('agent-1')).toBeUndefined()
+  })
+
+  it('deduplicates streamed meeting dialogue and clears the active speaker after round completion', () => {
+    const store = useSocietyGraphStore()
+
+    store.setSelectedAgents([
+      {
+        id: 'agent-1',
+        agent_index: 1,
+        name: '田中太郎',
+        display_name: '田中太郎',
+        occupation: '会社員',
+        age: 35,
+        region: '東京',
+      },
+      {
+        id: 'agent-2',
         agent_index: 2,
         name: '佐藤花子',
         display_name: '佐藤花子',
@@ -77,6 +111,7 @@ describe('societyGraphStore', () => {
 
     store.setSelectedAgents([
       {
+        id: 'agent-1',
         agent_index: 1,
         name: '田中太郎',
         display_name: '田中太郎',
@@ -85,6 +120,7 @@ describe('societyGraphStore', () => {
         region: '東京',
       },
       {
+        id: 'agent-2',
         agent_index: 2,
         name: '佐藤花子',
         display_name: '佐藤花子',
@@ -93,6 +129,7 @@ describe('societyGraphStore', () => {
         region: '大阪',
       },
       {
+        id: 'agent-3',
         agent_index: 3,
         name: '鈴木一郎',
         display_name: '鈴木一郎',
