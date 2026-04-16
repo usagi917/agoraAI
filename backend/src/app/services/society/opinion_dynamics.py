@@ -147,93 +147,6 @@ def compute_heterogeneous_thresholds(
     return thresholds
 
 
-def compute_filter_bubble_thresholds(
-    agents: list[dict],
-    base_epsilon: float = 0.3,
-    bubble_weight: float = 0.15,
-    openness_mitigation: float = 0.1,
-    agreeableness_mitigation: float = 0.08,
-) -> list[float]:
-    """Compute confidence thresholds adjusted for information source filter bubbles.
-
-    High bubble_score sources (e.g. algorithmic social media) narrow the threshold,
-    simulating echo chamber effects. Openness and Agreeableness mitigate this effect.
-
-    Args:
-        agents: Agent dicts with big_five.{O, A} and information_sources[].bubble_score.
-        base_epsilon: Base confidence threshold.
-        bubble_weight: How much bubble_score narrows the threshold.
-        openness_mitigation: How much Openness counteracts the bubble.
-        agreeableness_mitigation: How much Agreeableness counteracts the bubble.
-
-    Returns:
-        List of per-agent confidence thresholds.
-    """
-    thresholds: list[float] = []
-
-    for agent in agents:
-        big_five = agent.get("big_five", {})
-        o_val = big_five.get("O", 0.5)
-        a_val = big_five.get("A", 0.5)
-
-        sources = agent.get("information_sources", [])
-        if sources:
-            avg_bubble = sum(s.get("bubble_score", 0.0) for s in sources) / len(sources)
-        else:
-            avg_bubble = 0.0
-
-        # Bubble narrows threshold; O and A mitigate
-        bubble_effect = bubble_weight * avg_bubble
-        mitigation = openness_mitigation * o_val + agreeableness_mitigation * a_val
-        eps = base_epsilon - bubble_effect + mitigation
-
-        eps = max(0.05, min(1.0, eps))
-        thresholds.append(eps)
-
-    return thresholds
-
-
-def compute_heterogeneous_thresholds(
-    agents: list[dict],
-    base_epsilon: float = 0.3,
-    alpha: float = 0.15,
-    beta: float = 0.05,
-    noise_sigma: float = 0.02,
-    seed: int | None = None,
-) -> np.ndarray:
-    """エージェント別の異質 confidence threshold を計算する.
-
-    ε_i = base_ε + α*(1-C_i) + β*(1-O_i) + N(0, σ²)
-
-    高 Conscientiousness → 閾値が狭い（慎重、変わりにくい）
-    高 Openness → 閾値が広い（開放的、影響を受けやすい）
-
-    Args:
-        agents: エージェントリスト（big_five 含む）
-        base_epsilon: 基本閾値
-        alpha: Conscientiousness の影響係数
-        beta: Openness の影響係数（符号反転: 低 O → 閾値狭い）
-        noise_sigma: ノイズの標準偏差
-        seed: 乱数シード
-
-    Returns:
-        per-agent threshold の ndarray
-    """
-    rng = np.random.default_rng(seed)
-    thresholds = np.empty(len(agents), dtype=np.float64)
-
-    for i, agent in enumerate(agents):
-        big_five = agent.get("big_five", {})
-        c_i = big_five.get("C", 0.5)
-        o_i = big_five.get("O", 0.5)
-
-        noise = rng.normal(0, noise_sigma)
-        eps_i = base_epsilon + alpha * (1 - c_i) + beta * (1 - o_i) + noise
-        thresholds[i] = max(0.05, eps_i)  # 最低閾値
-
-    return thresholds
-
-
 # 情報源のフィルターバブル傾向スコア（高い = バブル傾向が強い = 閾値が狭い）
 _SOURCE_BUBBLE_SCORES: dict[str, float] = {
     "SNS(Twitter/X)": 0.85,
@@ -255,53 +168,66 @@ _SOURCE_BUBBLE_SCORES: dict[str, float] = {
 
 def compute_filter_bubble_thresholds(
     agents: list[dict],
-    base_threshold: float = 0.3,
-    bubble_width: float = 0.5,
+    base_epsilon: float | None = None,
+    bubble_weight: float | None = None,
+    openness_mitigation: float = 0.1,
+    agreeableness_mitigation: float = 0.08,
+    *,
+    base_threshold: float | None = None,
+    bubble_width: float | None = None,
 ) -> np.ndarray:
-    """フィルターバブル効果を反映した confidence threshold を計算する.
+    """Compute confidence thresholds adjusted for information source filter bubbles.
 
-    情報源がアルゴリズム推薦型（SNS 等）のエージェントは
-    フィルターバブルにより閾値が狭くなり、同質的な意見にしか影響されにくい。
-    多様な情報源（新聞、専門誌等）を持つエージェントは閾値が広い。
+    High bubble_score sources (e.g. algorithmic social media) narrow the threshold,
+    simulating echo chamber effects. Openness and Agreeableness mitigate this effect.
 
-    計算式:
-        bubble_score = source_bubble_score * (1 - O) で調整
-        threshold_i = base_threshold - bubble_width * (bubble_score - 0.5) * base_threshold
-
-    高 Openness はバブル効果を軽減する。
+    Supports both new-style agents (information_sources: list[dict] with bubble_score)
+    and legacy agents (information_source: str looked up in _SOURCE_BUBBLE_SCORES).
 
     Args:
-        agents: エージェントリスト（information_source, big_five 含む）
-        base_threshold: ベース閾値
-        bubble_width: フィルターバブル効果の強度 (0.0 = 効果なし, 1.0 = 最大)
+        agents: Agent dicts with big_five.{O, A} and information_sources or information_source.
+        base_epsilon / base_threshold: Base confidence threshold (default 0.3).
+        bubble_weight / bubble_width: How much bubble_score narrows the threshold (default 0.15).
+        openness_mitigation: How much Openness counteracts the bubble.
+        agreeableness_mitigation: How much Agreeableness counteracts the bubble.
 
     Returns:
-        per-agent threshold の ndarray
+        ndarray of per-agent confidence thresholds.
     """
+    # Backward-compatible parameter aliases
+    base_eps = base_epsilon if base_epsilon is not None else (base_threshold if base_threshold is not None else 0.3)
+    bw = bubble_weight if bubble_weight is not None else (bubble_width if bubble_width is not None else 0.15)
+
     thresholds = np.empty(len(agents), dtype=np.float64)
 
     for i, agent in enumerate(agents):
-        if bubble_width == 0.0:
-            thresholds[i] = base_threshold
+        if bw == 0.0:
+            thresholds[i] = base_eps
             continue
 
-        source = agent.get("information_source", "")
         big_five = agent.get("big_five", {})
-        openness = big_five.get("O", 0.5)
+        o_val = big_five.get("O", 0.5)
+        a_val = big_five.get("A", 0.5)
 
-        # 情報源のバブルスコア（未知の情報源はデフォルト 0.5）
-        raw_bubble = _SOURCE_BUBBLE_SCORES.get(source, 0.5)
+        # New format: information_sources as list of dicts with bubble_score
+        sources = agent.get("information_sources", [])
+        if sources:
+            avg_bubble = sum(s.get("bubble_score", 0.0) for s in sources) / len(sources)
+        else:
+            # Legacy format: information_source as string
+            source_str = agent.get("information_source", "")
+            if source_str:
+                raw_bubble = _SOURCE_BUBBLE_SCORES.get(source_str, 0.5)
+                avg_bubble = raw_bubble * (1.0 - 0.5 * o_val)
+            else:
+                avg_bubble = 0.0
 
-        # Openness で調整: 高 Openness はバブル効果を軽減
-        adjusted_bubble = raw_bubble * (1.0 - 0.5 * openness)
+        # Bubble narrows threshold; O and A mitigate
+        bubble_effect = bw * avg_bubble
+        mitigation = openness_mitigation * o_val + agreeableness_mitigation * a_val
+        eps = base_eps - bubble_effect + mitigation
 
-        # 閾値計算: バブルスコアが高いほど閾値が狭い
-        # adjusted_bubble の範囲は概ね 0 ~ 0.85
-        # 中央値 (0.5 * 0.75 = 0.375) より上 → 閾値縮小、下 → 閾値拡大
-        deviation = (adjusted_bubble - 0.375) * bubble_width * base_threshold
-        threshold = base_threshold - deviation
-
-        thresholds[i] = max(0.05, threshold)
+        thresholds[i] = max(0.05, min(1.0, eps))
 
     return thresholds
 

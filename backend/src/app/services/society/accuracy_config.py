@@ -46,6 +46,25 @@ class AccuracyConfig:
         self._flags[feature] = enabled
 
 
+def is_enabled(feature: str) -> bool:
+    """モジュールレベル便利関数: population_mix.yaml から直接フラグを読む."""
+    import logging
+    logger = logging.getLogger(__name__)
+    if feature not in KNOWN_FEATURES:
+        raise ValueError(
+            f"Unknown accuracy feature '{feature}'. "
+            f"Register it in accuracy_config.KNOWN_FEATURES first."
+        )
+    try:
+        from src.app.config import settings
+        config = settings.load_population_mix_config()
+        section = config.get("accuracy_improvements", {})
+        return bool(section.get(feature, False))
+    except Exception as exc:
+        logger.warning("Failed to load accuracy flags: %s", exc)
+        return False
+
+
 class CalibrationArtifactStore:
     """トピック別 shrink factor 等のキャリブレーション結果を JSON で保存/読込."""
 
