@@ -64,7 +64,12 @@ class AgentProfile(Base):
     # LLMバックエンド割当
     llm_backend: Mapped[str] = mapped_column(String(50), default="openai")
 
-    # 記憶要約（Phase 3 で活用）
+    # 記憶要約（Phase 3 で活用） — deprecated: rolling_summary + episodes を使用
     memory_summary: Mapped[str] = mapped_column(Text, default="")
+
+    # 二層メモリ: Layer A — LLM で圧縮された性格傾向要約（~200字、固定サイズ）
+    rolling_summary: Mapped[str] = mapped_column(Text, default="")
+    # 二層メモリ: Layer B — テーマ付きエピソードリスト（JSON配列、MAX 50件 FIFO）
+    episodes: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)

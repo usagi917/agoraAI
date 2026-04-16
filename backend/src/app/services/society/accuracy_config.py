@@ -27,6 +27,8 @@ KNOWN_FEATURES: set[str] = {
     "hybrid_network",
     "post_activation_persona",
     "meeting_feedback_propagation",
+    "episodic_memory",
+    "rolling_summary",
 }
 
 

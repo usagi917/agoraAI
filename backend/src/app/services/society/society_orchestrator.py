@@ -355,6 +355,8 @@ async def _get_or_create_population(
                         "shock_sensitivity": a.shock_sensitivity,
                         "llm_backend": a.llm_backend,
                         "memory_summary": a.memory_summary,
+                        "rolling_summary": a.rolling_summary,
+                        "episodes": a.episodes,
                     })
                 return population_id, agents
             elif strict:
@@ -534,6 +536,15 @@ async def run_society(simulation_id: str) -> None:
                     logger.warning(
                         "Anchor distribution pre-load failed (sim=%s): %s",
                         simulation_id, exc, exc_info=True,
+                    )
+
+            # === Phase 2.9: エピソードメモリ選択（二層メモリ Layer B） ===
+            from src.app.services.society.accuracy_config import is_enabled as _acc_is_enabled
+            if _acc_is_enabled("episodic_memory"):
+                from src.app.services.society.memory_compressor import select_relevant_episodes
+                for agent in selected_agents:
+                    agent["_relevant_episodes"] = select_relevant_episodes(
+                        agent.get("episodes"), theme, theme_estimate.category, top_k=3,
                     )
 
             # === Phase 3: Activation ===
@@ -1218,9 +1229,19 @@ async def run_society(simulation_id: str) -> None:
             session.add(narrative_record)
 
             # === Phase 6: Persistent Society (記憶圧縮 + グラフ進化) ===
+            from src.app.services.society.accuracy_config import AccuracyConfig as _AccuracyConfig
+            _acc_flags = _AccuracyConfig(settings.load_population_mix_config())
+            _mem_llm = None
+            if _acc_flags.is_enabled("rolling_summary"):
+                from src.app.llm.multi_client import multi_llm_client as _mem_llm
             await update_agent_memories(
                 session, selected_agents, activation_result["responses"],
                 meeting_result=meeting_result,
+                theme=theme,
+                theme_category=theme_estimate.category,
+                simulation_id=simulation_id,
+                llm_client=_mem_llm,
+                accuracy_flags=_acc_flags,
             )
 
             await evolve_social_graph(

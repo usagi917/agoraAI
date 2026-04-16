@@ -59,7 +59,7 @@ population:
 
   # 社会ネットワーク
   network:
-    type: watts_strogatz
+    type: hybrid
     k: 6          # 各ノードの近傍接続数
     beta: 0.3     # 再配線確率
     m: 3          # BA ネットワークの新規ノードあたり接続数
@@ -75,4 +75,9 @@ accuracy_improvements:
   event_loss_aversion: true    # Prospect Theory 非対称イベント効果（Step 9）
   event_two_phase_decay: true  # Two-phase event decay（Step 9）
   ipf_population_weights: true # IPF 代表性補正（Step 6）
-  meeting_feedback_propagation: false  # 会議→母集団フィードバック伝播（改善4）
+  agreeableness_in_dynamics: true   # Agreeableness→confidence 閾値（改善3）
+  hybrid_network: true              # Barabási-Albert ハイブリッドネットワーク（改善2）
+  post_activation_persona: true     # ペルソナ生成を activation 後に移動（改善1）
+  meeting_feedback_propagation: true  # 会議→母集団フィードバック伝播（改善4）
+  episodic_memory: true               # 二層メモリ Layer B: テーマ付きエピソード記録+検索
+  rolling_summary: true               # 二層メモリ Layer A: LLM性格要約

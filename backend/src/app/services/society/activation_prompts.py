@@ -271,14 +271,27 @@ def build_activation_prompt(
     }
     value_str = "、".join(value_labels.get(v[0], v[0]) for v in top_values) if top_values else "特になし"
 
-    # 生活コンテキスト
+    # 生活コンテキスト（二層メモリ対応）
     life_event = agent.get("life_event", "")
     contradiction = agent.get("contradiction", "")
     hidden_motivation = agent.get("hidden_motivation", "")
+    rolling_summary = agent.get("rolling_summary", "")
+    relevant_episodes: list[dict] = agent.get("_relevant_episodes", [])
     memory_summary = agent.get("memory_summary", "")
 
-    life_parts = []
-    if memory_summary:
+    life_parts: list[str] = []
+    # Layer A: ローリング要約（存在すれば優先）
+    if rolling_summary:
+        life_parts.append(f"【あなたの性格傾向】{rolling_summary}")
+    # Layer B: テーマ関連エピソード
+    if relevant_episodes:
+        ep_lines = [
+            f"- {ep['theme'][:40]}→{ep['stance']}(確信度{ep.get('confidence', 0.5):.0%}): {ep.get('reason_digest', '')}"
+            for ep in relevant_episodes
+        ]
+        life_parts.append("【過去の関連する議論経験】\n" + "\n".join(ep_lines))
+    # Fallback: 新フィールドが両方空なら従来の memory_summary を使用
+    if not life_parts and memory_summary:
         life_parts.append(memory_summary)
     if life_event:
         life_parts.append(f"最近の出来事: {life_event}")
