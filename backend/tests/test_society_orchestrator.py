@@ -766,7 +766,7 @@ class TestSocietyOrchestratorFlow:
         async def fake_publish(simulation_id, event, data):
             published_events.append((event, data))
 
-        async def fake_select_agents(agents, theme, target_count=100):
+        async def fake_select_agents(agents, theme, target_count=100, edges=None):
             return agents
 
         async def fake_run_activation(selected_agents, theme, on_progress=None):
@@ -790,6 +790,7 @@ class TestSocietyOrchestratorFlow:
         monkeypatch.setattr(orchestrator, "_get_or_create_population", fake_get_or_create_population)
         monkeypatch.setattr(orchestrator.sse_manager, "publish", fake_publish)
         monkeypatch.setattr(orchestrator, "_save_network", AsyncMock())
+        monkeypatch.setattr(orchestrator, "_load_population_edges", AsyncMock(return_value=[]))
         monkeypatch.setattr(orchestrator, "select_agents", fake_select_agents)
         monkeypatch.setattr(orchestrator, "run_activation", fake_run_activation)
         monkeypatch.setattr(orchestrator, "evaluate_society_simulation", fake_evaluate_society_simulation)
@@ -910,7 +911,7 @@ class TestRunSocietyPipelineFixes:
         async def fake_publish(simulation_id, event, data):
             return None
 
-        async def fake_select_agents(agents, theme, target_count=100):
+        async def fake_select_agents(agents, theme, target_count=100, edges=None):
             return agents
 
         async def fake_run_activation(selected_agents, theme, on_progress=None):
@@ -975,6 +976,7 @@ class TestRunSocietyPipelineFixes:
         monkeypatch.setattr(orchestrator, "_get_or_create_population", fake_get_or_create_population)
         monkeypatch.setattr(orchestrator.sse_manager, "publish", fake_publish)
         monkeypatch.setattr(orchestrator, "_save_network", AsyncMock())
+        monkeypatch.setattr(orchestrator, "_load_population_edges", AsyncMock(return_value=[]))
         monkeypatch.setattr(orchestrator, "select_agents", fake_select_agents)
         monkeypatch.setattr(orchestrator, "run_activation", fake_run_activation)
         monkeypatch.setattr(orchestrator, "run_network_propagation", fake_run_network_propagation)
@@ -1066,7 +1068,7 @@ class TestRunSocietyPipelineFixes:
         async def fake_publish(simulation_id, event, data):
             return None
 
-        async def fake_select_agents(agents, theme, target_count=100):
+        async def fake_select_agents(agents, theme, target_count=100, edges=None):
             return agents
 
         async def fake_run_activation(selected_agents, theme, on_progress=None):
@@ -1095,6 +1097,7 @@ class TestRunSocietyPipelineFixes:
         monkeypatch.setattr(orchestrator, "_get_or_create_population", fake_get_or_create_population)
         monkeypatch.setattr(orchestrator.sse_manager, "publish", fake_publish)
         monkeypatch.setattr(orchestrator, "_save_network", AsyncMock())
+        monkeypatch.setattr(orchestrator, "_load_population_edges", AsyncMock(return_value=[]))
         monkeypatch.setattr(orchestrator, "select_agents", fake_select_agents)
         monkeypatch.setattr(orchestrator, "run_activation", fake_run_activation)
         monkeypatch.setattr(orchestrator, "run_network_propagation", fake_run_network_propagation)

@@ -349,12 +349,35 @@ async def _get_or_create_population(
 
 
 async def _save_network(session, agents: list[dict], population_id: str) -> None:
-    """ネットワークを生成して保存する。"""
+    """ネットワークを生成して保存する（冪等: 既存エッジを削除してから挿入）。"""
+    from sqlalchemy import delete
+
+    await session.execute(
+        delete(SocialEdge).where(SocialEdge.population_id == population_id)
+    )
+    await session.flush()
+
     edges = await generate_network(agents, population_id)
     for edge_data in edges:
         edge = SocialEdge(**edge_data)
         session.add(edge)
     await session.commit()
+
+
+async def _load_population_edges(session, population_id: str) -> list[dict]:
+    """population_id に紐づくエッジを読み込む。"""
+    edge_result = await session.execute(
+        select(SocialEdge).where(SocialEdge.population_id == population_id)
+    )
+    edges_db = edge_result.scalars().all()
+    return [
+        {
+            "agent_id": e.agent_id,
+            "target_id": e.target_id,
+            "strength": e.strength,
+        }
+        for e in edges_db
+    ]
 
 
 async def run_society(simulation_id: str) -> None:
@@ -399,8 +422,9 @@ async def run_society(simulation_id: str) -> None:
             # ネットワーク生成（バックグラウンド的に）
             await _save_network(session, agents, pop_id)
 
-            # === Phase 2: Selection ===
-            selected_agents = await select_agents(agents, theme, target_count=100)
+            # === Phase 2: Selection (network centrality-aware) ===
+            all_edges = await _load_population_edges(session, pop_id)
+            selected_agents = await select_agents(agents, theme, target_count=100, edges=all_edges)
 
             await sse_manager.publish(simulation_id, "society_selection_completed", {
                 "selected_count": len(selected_agents),
@@ -808,6 +832,25 @@ async def run_society(simulation_id: str) -> None:
                 usage={},
             )
             session.add(demo_record)
+
+            # === Phase 4.8: Post-Activation Persona Generation ===
+            try:
+                from src.app.services.society.persona_generator import (
+                    generate_persona_narratives_post_activation,
+                )
+                await sse_manager.publish(simulation_id, "persona_generation_started", {
+                    "agent_count": len(selected_agents),
+                })
+                selected_agents = await generate_persona_narratives_post_activation(
+                    selected_agents, activation_result["responses"], theme,
+                )
+                persona_count = sum(1 for a in selected_agents if a.get("persona_narrative"))
+                logger.info(
+                    "Post-activation persona narratives: %d/%d generated",
+                    persona_count, len(selected_agents),
+                )
+            except Exception as exc:
+                logger.warning("Post-activation persona generation failed, continuing: %s", exc)
 
             # === Phase 5: Meeting Layer ===
             meeting_participants = select_representatives(
