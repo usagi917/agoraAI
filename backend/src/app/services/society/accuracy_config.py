@@ -23,6 +23,10 @@ KNOWN_FEATURES: set[str] = {
     "mrp_estimation",
     "theory_of_mind_cot",
     "filter_bubble_width",
+    "agreeableness_in_dynamics",
+    "hybrid_network",
+    "post_activation_persona",
+    "meeting_feedback_propagation",
 }
 
 

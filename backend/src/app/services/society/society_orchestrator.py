@@ -263,6 +263,58 @@ def _get_prediction_market_config(mix_config: dict) -> dict:
     }
 
 
+def _extract_representative_updates(
+    meeting_participants: list[dict],
+    meeting_result: dict,
+    activation_responses: list[dict],
+) -> list[dict]:
+    """Compare representative stances before/after meeting and return changes.
+
+    Reads each citizen_representative's pre-meeting stance from
+    activation_responses and compares against the meeting synthesis
+    participant summaries. Only returns entries where the stance actually
+    changed.
+
+    Returns:
+        [{"agent_id": str, "old_stance": str, "new_stance": str}, ...]
+    """
+    # Build lookup: agent_id -> pre-meeting stance
+    resp_map: dict[str, str] = {}
+    for r in activation_responses:
+        resp_map[r.get("agent_id", "")] = r.get("stance", "中立")
+
+    synthesis = meeting_result.get("synthesis", {})
+    # Try to get per-participant final stances from synthesis
+    participant_stances = synthesis.get("participant_stances", {})
+
+    updates: list[dict] = []
+    for p in meeting_participants:
+        if p.get("role") != "citizen_representative":
+            continue
+        agent_profile = p.get("agent_profile", {})
+        agent_id = agent_profile.get("id", "")
+        if not agent_id:
+            continue
+
+        old_stance = resp_map.get(agent_id, "中立")
+        # Check synthesis for participant's final stance
+        new_stance = participant_stances.get(agent_id, "")
+
+        # Fallback: if synthesis doesn't have per-participant stances,
+        # use the majority_stance for representatives (conservative approach)
+        if not new_stance:
+            new_stance = synthesis.get("majority_stance", old_stance)
+
+        if new_stance and new_stance != old_stance:
+            updates.append({
+                "agent_id": agent_id,
+                "old_stance": old_stance,
+                "new_stance": new_stance,
+            })
+
+    return updates
+
+
 async def _get_or_create_population(
     session,
     population_id: str | None = None,
@@ -926,6 +978,111 @@ async def run_society(simulation_id: str) -> None:
             )
             session.add(meeting_record)
             await session.commit()
+
+            # === Phase 5.025: Meeting Feedback Propagation ===
+            feedback_result = None
+            try:
+                from src.app.services.society.accuracy_config import is_enabled
+                if is_enabled("meeting_feedback_propagation") and propagation_result:
+                    await sse_manager.publish(simulation_id, "meeting_feedback_started", {
+                        "representative_count": len(meeting_participants),
+                    })
+
+                    representative_updates = _extract_representative_updates(
+                        meeting_participants, meeting_result, activation_result["responses"],
+                    )
+
+                    if representative_updates:
+                        from src.app.services.society.network_propagation import (
+                            run_meeting_feedback_propagation,
+                        )
+                        feedback_result = await run_meeting_feedback_propagation(
+                            agents=selected_agents,
+                            edges=edges,
+                            representative_updates=representative_updates,
+                            activation_responses=responses_with_ids,
+                            seed=sim.seed,
+                        )
+
+                        await sse_manager.publish(simulation_id, "meeting_feedback_timestep", {
+                            "changed_count": len(feedback_result["changed_agents"]),
+                        })
+
+                        # Re-run evaluation with post-feedback responses
+                        fb_responses = feedback_result["feedback_responses"]
+                        post_fb_eval = await evaluate_society_simulation(
+                            selected_agents, fb_responses,
+                        )
+                        post_fb_eval_data = {m["metric_name"]: m["score"] for m in post_fb_eval}
+
+                        # Re-run demographic analysis
+                        post_fb_demographics = analyze_demographics(
+                            selected_agents, fb_responses,
+                        )
+
+                        # Rebuild PredictionMarket with post-feedback opinions
+                        fb_stances = list({r["stance"] for r in fb_responses})
+                        if fb_stances:
+                            post_fb_market = PredictionMarket(outcomes=fb_stances, adaptive_b=True)
+                            for resp in fb_responses:
+                                stance = resp.get("stance", "中立")
+                                if stance in fb_stances:
+                                    post_fb_market.submit_bet(
+                                        resp["agent_id"], stance,
+                                        resp.get("confidence", 0.5),
+                                    )
+
+                            # Resolve with meeting majority_stance
+                            synthesis = meeting_result.get("synthesis", {})
+                            majority_stance = synthesis.get("majority_stance", "")
+                            post_fb_brier = None
+                            if majority_stance and majority_stance in fb_stances:
+                                post_fb_market.resolve(majority_stance)
+                                post_fb_brier = post_fb_market.compute_brier_score(majority_stance)
+
+                        # Save post-feedback results as separate layers
+                        fb_eval_record = SocietyResult(
+                            id=str(uuid.uuid4()),
+                            simulation_id=simulation_id,
+                            population_id=pop_id,
+                            layer="post_feedback_evaluation",
+                            phase_data={"metrics": post_fb_eval_data},
+                            usage={},
+                        )
+                        session.add(fb_eval_record)
+
+                        fb_demo_record = SocietyResult(
+                            id=str(uuid.uuid4()),
+                            simulation_id=simulation_id,
+                            population_id=pop_id,
+                            layer="post_feedback_demographics",
+                            phase_data=post_fb_demographics,
+                            usage={},
+                        )
+                        session.add(fb_demo_record)
+
+                        fb_propagation_record = SocietyResult(
+                            id=str(uuid.uuid4()),
+                            simulation_id=simulation_id,
+                            population_id=pop_id,
+                            layer="post_feedback_propagation",
+                            phase_data={
+                                "propagation_record": feedback_result["propagation_record"],
+                                "changed_agents": feedback_result["changed_agents"],
+                                "market_prices": post_fb_market.get_prices() if fb_stances else {},
+                                "brier_score": post_fb_brier,
+                            },
+                            usage={},
+                        )
+                        session.add(fb_propagation_record)
+
+                    await sse_manager.publish(simulation_id, "meeting_feedback_completed", {
+                        "total_changed": len(feedback_result["changed_agents"]) if feedback_result else 0,
+                    })
+            except (ValueError, ImportError) as exc:
+                logger.warning("Meeting feedback propagation skipped: %s", exc)
+            except Exception as exc:
+                logger.warning("Meeting feedback propagation failed: %s", exc, exc_info=True)
 
             # === Phase 5.05: Prediction Market Resolution ===
             if prediction_market:
