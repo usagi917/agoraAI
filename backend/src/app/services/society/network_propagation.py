@@ -559,14 +559,16 @@ async def run_meeting_feedback_propagation(
         resp = response_map.get(agent_id, {})
         stance = resp.get("stance", "中立")
         confidence = resp.get("confidence", 0.5)
-        big_five_c = agent.get("big_five", {}).get("C", 0.5)
+        big_five = agent.get("big_five", {})
+        big_five_c = big_five.get("C", 0.5)
+        big_five_a = big_five.get("A", 0.5)
 
         # For representatives who changed, override stance with new_stance
         if agent_id in update_map:
             stance = update_map[agent_id]
 
         opinion = _convert_stance_to_opinion(stance, confidence)
-        stubbornness = stubbornness_from_big_five(big_five_c)
+        stubbornness = stubbornness_from_big_five(big_five_c, agreeableness=big_five_a)
 
         engine_agents.append({
             "id": agent_id,

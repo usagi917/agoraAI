@@ -5,6 +5,47 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 
 
+class TestRepresentativeUpdates:
+    """Representative stance change extraction helpers."""
+
+    def test_extract_representative_updates_uses_agent_id_mapped_responses(self):
+        """Pre-meeting stance should come from responses keyed by canonical agent_id."""
+        from src.app.services.society.society_orchestrator import (
+            _extract_representative_updates,
+        )
+
+        meeting_participants = [
+            {
+                "role": "citizen_representative",
+                "agent_profile": {"id": "agent-123"},
+            },
+        ]
+        meeting_result = {
+            "synthesis": {
+                "participant_stances": {"agent-123": "賛成"},
+            },
+        }
+        activation_responses = [
+            {
+                "stance": "反対",
+                "confidence": 0.8,
+                "agent_id": "agent-123",
+            },
+        ]
+
+        updates = _extract_representative_updates(
+            meeting_participants, meeting_result, activation_responses,
+        )
+
+        assert updates == [
+            {
+                "agent_id": "agent-123",
+                "old_stance": "反対",
+                "new_stance": "賛成",
+            },
+        ]
+
+
 class TestIndependenceWeightedReaggregation:
     """独立性重み → 再集計の統合テスト.
 

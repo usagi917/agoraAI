@@ -989,7 +989,7 @@ async def run_society(simulation_id: str) -> None:
                     })
 
                     representative_updates = _extract_representative_updates(
-                        meeting_participants, meeting_result, activation_result["responses"],
+                        meeting_participants, meeting_result, responses_with_ids,
                     )
 
                     if representative_updates:

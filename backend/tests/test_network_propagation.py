@@ -29,13 +29,14 @@ from src.app.services.society.network_propagation import (
 # ---------------------------------------------------------------------------
 
 def _make_agent(idx: int, stance: str = "中立", confidence: float = 0.5,
-                big_five_c: float = 0.5, region: str = "関東") -> dict:
+                big_five_c: float = 0.5, big_five_a: float = 0.5,
+                region: str = "関東") -> dict:
     return {
         "id": f"agent_{idx}",
         "demographics": {"age": 30 + idx, "gender": "male", "region": region,
                          "occupation": "会社員", "income_bracket": "middle",
                          "education": "bachelor"},
-        "big_five": {"O": 0.5, "C": big_five_c, "E": 0.5, "A": 0.5, "N": 0.5},
+        "big_five": {"O": 0.5, "C": big_five_c, "E": 0.5, "A": big_five_a, "N": 0.5},
         "values": {"安全": 0.5},
         "speech_style": "率直で簡潔",
     }
@@ -818,6 +819,39 @@ class TestMeetingFeedbackPropagation:
                 f"Agent {agent_id}: confidence should be preserved "
                 f"({orig['confidence']}), got {fr['confidence']}"
             )
+
+    @pytest.mark.asyncio
+    async def test_agreeableness_affects_feedback_round_stubbornness(self):
+        """Feedback propagation should honor each agent's agreeableness trait."""
+        agents = [
+            _make_agent(0, big_five_c=0.5, big_five_a=0.9),
+            _make_agent(1, big_five_c=0.5, big_five_a=0.1),
+            _make_agent(2, big_five_c=0.5, big_five_a=0.5),
+        ]
+        responses = [_make_response(i, "反対", 0.8) for i in range(3)]
+        edges = [
+            _make_edge(0, 1, 0.8), _make_edge(1, 0, 0.8),
+            _make_edge(1, 2, 0.8), _make_edge(2, 1, 0.8),
+        ]
+        representative_updates = [
+            {"agent_id": "agent_0", "old_stance": "反対", "new_stance": "賛成"},
+        ]
+
+        result = await run_meeting_feedback_propagation(
+            agents=agents,
+            edges=edges,
+            representative_updates=representative_updates,
+            activation_responses=responses,
+        )
+
+        original_opinion_1 = _convert_stance_to_opinion("反対", 0.8)[0]
+        original_opinion_2 = _convert_stance_to_opinion("反対", 0.8)[0]
+        delta_low_a = abs(result["opinions"][1][0] - original_opinion_1)
+        delta_mid_a = abs(result["opinions"][2][0] - original_opinion_2)
+
+        assert delta_low_a > delta_mid_a, (
+            "Lower agreeableness should yield lower stubbornness and a larger feedback-round shift"
+        )
 
     @pytest.mark.asyncio
     async def test_post_feedback_evaluation_differs(self):
