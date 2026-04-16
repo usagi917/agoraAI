@@ -14,6 +14,9 @@ from src.app.services.society.opinion_dynamics import (
     OpinionDynamicsEngine,
     PropagationStepResult,
     ClusterInfo,
+    stubbornness_from_big_five,
+    compute_heterogeneous_thresholds,
+    compute_filter_bubble_thresholds,
 )
 
 
@@ -163,12 +166,22 @@ class TestFriedkinJohnsen:
         assert result.updated_opinions[1][0] == pytest.approx(1.0 - MAX_CONV_DELTA, abs=1e-9)
 
     def test_stubbornness_from_big_five(self):
-        """Stubbornness derived from Big Five C: s = 0.4 + 0.45 * C (range [0.4, 0.85])."""
+        """Stubbornness derived from Big Five C and A: s = 0.4 + 0.45*C - 0.1*A, clamped [0.3, 0.85].
+
+        With default A=0.5: s = 0.4 + 0.45*C - 0.05 = 0.35 + 0.45*C.
+        """
         from src.app.services.society.opinion_dynamics import stubbornness_from_big_five
 
-        assert stubbornness_from_big_five(0.0) == pytest.approx(0.4)
-        assert stubbornness_from_big_five(0.5) == pytest.approx(0.625)
-        assert stubbornness_from_big_five(1.0) == pytest.approx(0.85)
+        # Default A=0.5: 0.4 + 0.45*0 - 0.1*0.5 = 0.35
+        assert stubbornness_from_big_five(0.0) == pytest.approx(0.35)
+        # Default A=0.5: 0.4 + 0.45*0.5 - 0.1*0.5 = 0.575
+        assert stubbornness_from_big_five(0.5) == pytest.approx(0.575)
+        # Default A=0.5: 0.4 + 0.45*1.0 - 0.1*0.5 = 0.80
+        assert stubbornness_from_big_five(1.0) == pytest.approx(0.80)
+        # Explicit A=0: 0.4 + 0.45*0 - 0.1*0 = 0.4 (original formula)
+        assert stubbornness_from_big_five(0.0, agreeableness=0.0) == pytest.approx(0.4)
+        # Explicit A=0: 0.4 + 0.45*1.0 - 0.1*0 = 0.85
+        assert stubbornness_from_big_five(1.0, agreeableness=0.0) == pytest.approx(0.85)
 
 
 # ===========================================================================
@@ -476,3 +489,93 @@ class TestVarianceBasedStopping:
         engine.propagation_step(timestep=0)
 
         assert engine.detect_variance_plateau(window=3, tolerance=0.01) is False
+
+
+# ===========================================================================
+# Test: Agreeableness in Confidence Thresholds
+# ===========================================================================
+
+class TestAgreeablenessThreshold:
+    """Agreeableness (A) should widen confidence thresholds and reduce stubbornness."""
+
+    def _make_agents_with_big_five(
+        self, n: int, C: float = 0.5, O: float = 0.5, A: float = 0.5,
+    ) -> list[dict]:
+        """Helper: create agents with Big Five traits for threshold computation."""
+        return [
+            {
+                "id": f"agent_{i}",
+                "big_five": {"C": C, "O": O, "A": A},
+            }
+            for i in range(n)
+        ]
+
+    def test_high_A_wider_threshold(self):
+        """A=0.9 agents should have wider confidence thresholds than A=0.1 agents."""
+        agents_high_a = self._make_agents_with_big_five(5, C=0.5, O=0.5, A=0.9)
+        agents_low_a = self._make_agents_with_big_five(5, C=0.5, O=0.5, A=0.1)
+
+        thresholds_high = compute_heterogeneous_thresholds(
+            agents_high_a, base_epsilon=0.3, alpha=0.15, beta=0.05, gamma=0.1, seed=42,
+        )
+        thresholds_low = compute_heterogeneous_thresholds(
+            agents_low_a, base_epsilon=0.3, alpha=0.15, beta=0.05, gamma=0.1, seed=42,
+        )
+
+        # High A -> wider threshold (more receptive)
+        for th, tl in zip(thresholds_high, thresholds_low):
+            assert th > tl
+
+    def test_gamma_zero_matches_original(self):
+        """gamma=0 should produce identical results to the formula without A."""
+        agents = self._make_agents_with_big_five(10, C=0.6, O=0.4, A=0.8)
+
+        thresholds_with_gamma = compute_heterogeneous_thresholds(
+            agents, base_epsilon=0.3, alpha=0.15, beta=0.05, gamma=0.0,
+            noise_sigma=0.0, seed=42,
+        )
+        # Manual calculation: epsilon = 0.3 + 0.15*(1-0.6) + 0.05*(1-0.4) + 0.0*0.8
+        expected = 0.3 + 0.15 * (1 - 0.6) + 0.05 * (1 - 0.4)
+        for t in thresholds_with_gamma:
+            assert t == pytest.approx(expected, abs=1e-9)
+
+    def test_stubbornness_with_A(self):
+        """A=0.9 agent should have lower stubbornness than A=0.1 agent (same C)."""
+        s_high_a = stubbornness_from_big_five(0.5, agreeableness=0.9)
+        s_low_a = stubbornness_from_big_five(0.5, agreeableness=0.1)
+
+        assert s_high_a < s_low_a
+
+    def test_stubbornness_backward_compat(self):
+        """Calling stubbornness_from_big_five with only C should still work (default A=0.5)."""
+        s_old = stubbornness_from_big_five(0.0)
+        # Original formula: 0.4 + 0.45 * 0 = 0.4, but now with A=0.5 default:
+        # 0.4 + 0.45 * 0 - 0.1 * 0.5 = 0.35, clamped to [0.3, 0.85] -> 0.35
+        assert 0.3 <= s_old <= 0.85
+
+    def test_filter_bubble_reduced_by_A(self):
+        """High-A agent with SNS should have wider threshold than low-A agent with SNS."""
+        agent_high_a = {
+            "id": "agent_high_a",
+            "big_five": {"C": 0.5, "O": 0.5, "A": 0.9},
+            "information_sources": [
+                {"name": "Twitter", "bubble_score": 0.8},
+            ],
+        }
+        agent_low_a = {
+            "id": "agent_low_a",
+            "big_five": {"C": 0.5, "O": 0.5, "A": 0.1},
+            "information_sources": [
+                {"name": "Twitter", "bubble_score": 0.8},
+            ],
+        }
+
+        th_high = compute_filter_bubble_thresholds(
+            [agent_high_a], base_epsilon=0.3,
+        )
+        th_low = compute_filter_bubble_thresholds(
+            [agent_low_a], base_epsilon=0.3,
+        )
+
+        # High A mitigates bubble effect -> wider threshold
+        assert th_high[0] > th_low[0]

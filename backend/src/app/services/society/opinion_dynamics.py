@@ -85,13 +85,112 @@ class ClusterInfo:
 # Helper
 # ---------------------------------------------------------------------------
 
-def stubbornness_from_big_five(conscientiousness: float) -> float:
-    """Derive stubbornness from Big Five Conscientiousness score.
+def stubbornness_from_big_five(
+    conscientiousness: float,
+    agreeableness: float = 0.5,
+) -> float:
+    """Derive stubbornness from Big Five Conscientiousness and Agreeableness scores.
 
-    s = 0.4 + 0.45 * C, yielding range [0.4, 0.85].
-    Higher range preserves stronger initial convictions.
+    s = 0.4 + 0.45 * C - 0.1 * A, clamped to [0.3, 0.85].
+    Higher C preserves stronger initial convictions.
+    Higher A slightly reduces stubbornness (more receptive to others).
     """
-    return 0.4 + 0.45 * conscientiousness
+    s = 0.4 + 0.45 * conscientiousness - 0.1 * agreeableness
+    return max(0.3, min(0.85, s))
+
+
+def compute_heterogeneous_thresholds(
+    agents: list[dict],
+    base_epsilon: float = 0.3,
+    alpha: float = 0.15,
+    beta: float = 0.05,
+    gamma: float = 0.0,
+    noise_sigma: float = 0.02,
+    seed: int | None = None,
+) -> list[float]:
+    """Compute per-agent confidence thresholds from Big Five traits.
+
+    Formula: epsilon_i = base_epsilon + alpha*(1-C_i) + beta*(1-O_i) + gamma*A_i + N(0, sigma^2)
+
+    - Higher C (Conscientiousness) -> narrower threshold (more committed)
+    - Higher O (Openness) -> narrower threshold (more discerning)
+    - Higher A (Agreeableness) -> wider threshold (more receptive to others)
+
+    Args:
+        agents: Agent dicts with big_five.{C, O, A}.
+        base_epsilon: Base confidence threshold.
+        alpha: Weight for Conscientiousness effect (inverted).
+        beta: Weight for Openness effect (inverted).
+        gamma: Weight for Agreeableness effect (direct).
+        noise_sigma: Standard deviation of Gaussian noise.
+        seed: Random seed for reproducibility.
+
+    Returns:
+        List of per-agent confidence thresholds.
+    """
+    rng = np.random.default_rng(seed)
+    thresholds: list[float] = []
+
+    for agent in agents:
+        big_five = agent.get("big_five", {})
+        c_val = big_five.get("C", 0.5)
+        o_val = big_five.get("O", 0.5)
+        a_val = big_five.get("A", 0.5)
+
+        eps = base_epsilon + alpha * (1 - c_val) + beta * (1 - o_val) + gamma * a_val
+        if noise_sigma > 0:
+            eps += rng.normal(0, noise_sigma)
+        # Clamp to reasonable range
+        eps = max(0.05, min(1.0, eps))
+        thresholds.append(eps)
+
+    return thresholds
+
+
+def compute_filter_bubble_thresholds(
+    agents: list[dict],
+    base_epsilon: float = 0.3,
+    bubble_weight: float = 0.15,
+    openness_mitigation: float = 0.1,
+    agreeableness_mitigation: float = 0.08,
+) -> list[float]:
+    """Compute confidence thresholds adjusted for information source filter bubbles.
+
+    High bubble_score sources (e.g. algorithmic social media) narrow the threshold,
+    simulating echo chamber effects. Openness and Agreeableness mitigate this effect.
+
+    Args:
+        agents: Agent dicts with big_five.{O, A} and information_sources[].bubble_score.
+        base_epsilon: Base confidence threshold.
+        bubble_weight: How much bubble_score narrows the threshold.
+        openness_mitigation: How much Openness counteracts the bubble.
+        agreeableness_mitigation: How much Agreeableness counteracts the bubble.
+
+    Returns:
+        List of per-agent confidence thresholds.
+    """
+    thresholds: list[float] = []
+
+    for agent in agents:
+        big_five = agent.get("big_five", {})
+        o_val = big_five.get("O", 0.5)
+        a_val = big_five.get("A", 0.5)
+
+        sources = agent.get("information_sources", [])
+        if sources:
+            avg_bubble = sum(s.get("bubble_score", 0.0) for s in sources) / len(sources)
+        else:
+            avg_bubble = 0.0
+
+        # Bubble narrows threshold; O and A mitigate
+        bubble_effect = bubble_weight * avg_bubble
+        mitigation = openness_mitigation * o_val + agreeableness_mitigation * a_val
+        eps = base_epsilon - bubble_effect + mitigation
+
+        eps = max(0.05, min(1.0, eps))
+        thresholds.append(eps)
+
+    return thresholds
 
 
 def compute_heterogeneous_thresholds(

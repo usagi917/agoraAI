@@ -62,6 +62,8 @@ population:
     type: watts_strogatz
     k: 6          # 各ノードの近傍接続数
     beta: 0.3     # 再配線確率
+    m: 3          # BA ネットワークの新規ノードあたり接続数
+    ba_ratio: 0.3 # hybrid 時の BA エッジ割合 (0.0=WS のみ, 1.0=BA のみ)
     cluster_by_attributes: true
 
 # 精度改善機能のオン/オフフラグ（replay 再現性確保用）
