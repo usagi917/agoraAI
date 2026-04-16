@@ -2,7 +2,7 @@ import { ref, watch, computed, type Ref } from 'vue'
 import { getAgentDetail, type AgentDetailResponse } from '../api/client'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
 
-export interface OpinionJourneyItem {
+interface OpinionJourneyItem {
   type: 'contribution' | 'stance_shift'
   round: number
   content: string
@@ -10,7 +10,7 @@ export interface OpinionJourneyItem {
   roundName?: string
 }
 
-export interface InfluenceEntry {
+interface InfluenceEntry {
   agentName: string
   count: number
 }

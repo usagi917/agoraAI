@@ -21,7 +21,7 @@ export interface SwimMotionState {
   previousVelocity: MotionVector
 }
 
-export interface SwimMotionSample {
+interface SwimMotionSample {
   offset: MotionVector
   heading: MotionVector
   yaw: number

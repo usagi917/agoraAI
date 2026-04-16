@@ -5,7 +5,7 @@ export type LiveSecondaryTab =
   | 'conversations' | 'analysis'
   | 'progress' | 'debate' | 'activity' | 'colonies' | 'thinking'
 
-export interface ResultsLayoutContext {
+interface ResultsLayoutContext {
   mode?: string | null
   hasScenarios: boolean
   hasDecisionBrief: boolean
@@ -15,7 +15,7 @@ export interface ResultsLayoutContext {
   hasTranscript?: boolean
 }
 
-export interface LiveLayoutContext {
+interface LiveLayoutContext {
   mode?: string | null
   hasColonies: boolean
   hasActivity: boolean
