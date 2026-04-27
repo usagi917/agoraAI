@@ -418,14 +418,4 @@ catch (e: any) {
 - selection 直後から drawer を開くユースケースを救えない
 - store の責務が過剰に複雑になる
 
-## 補足
 
-今回の不具合は 404 そのものよりも、「selection payload の id 設計」と「UI 内部キーの定義」がずれていることが本質である。
-
-この修正では 404 を解消するだけでなく、以下の一貫性も同時に確保する。
-
-- selection 時点から canonical id を使う
-- social graph hydration 後も同じ id を使い続ける
-- graph, drawer, debate, conversations の各導線で同じ agent key を使う
-
-結果として、Agent Story Drawer だけでなく、今後のエージェント中心 UI の拡張でも id 不整合によるバグを避けやすくなる。
