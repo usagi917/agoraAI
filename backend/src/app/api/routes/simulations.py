@@ -39,6 +39,14 @@ from src.app.services.quality import (
     supports_evidence_mode,
 )
 from src.app.services.simulation_dispatcher import spawn_simulation
+from src.app.services.validation_summary import (
+    build_unvalidated_summary,
+    merge_scenario_backtest_status,
+)
+from src.app.services.society.validation_pipeline import (
+    register_prediction_evaluation,
+    summarize_prediction_evaluations,
+)
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -57,8 +65,10 @@ class SimulationCreate(BaseModel):
 
 class HistoricalOutcome(BaseModel):
     issue_label: str | None = None
+    outcome_label: str | None = None
     summary: str = ""
     actual_scenario: str = ""
+    horizon: str | None = None
     metrics: dict[str, float] = {}
     tags: list[str] = []
 
@@ -191,6 +201,16 @@ def _get_society_first_payload(sim: Simulation) -> dict:
     return dict((sim.metadata_json or {}).get("society_first_result") or {})
 
 
+def _get_validation_summary(sim: Simulation, backtest: dict | None = None) -> dict:
+    stored = dict((sim.metadata_json or {}).get("validation_summary") or {})
+    if not stored:
+        quality = extract_quality((sim.metadata_json or {}).get("sections"))
+        stored = build_unvalidated_summary(
+            calibration_status=str(quality.get("calibration_status") or "uncalibrated")
+        )
+    return merge_scenario_backtest_status(stored, backtest)
+
+
 def _attach_decision_brief_context(
     response: dict,
     *,
@@ -312,6 +332,10 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
         evidence_refs=evidence_refs,
         evidence_mode=evidence_mode,
     )
+    prediction_evaluations = await summarize_prediction_evaluations(
+        session,
+        simulation_id=sim_id,
+    )
 
     # 新プリセット方式: unified_result に全結果を格納
     unified_result = dict((sim.metadata_json or {}).get("unified_result") or {})
@@ -322,11 +346,14 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
             "evidence_refs": evidence_refs,
             "run_config": run_config,
             "quality": quality,
+            "validation_summary": _get_validation_summary(sim),
+            "prediction_evaluations": prediction_evaluations,
         }, quality=quality, run_config=run_config, evidence_refs=evidence_refs)
 
     # レガシー: society_first 結果
     society_first = dict((sim.metadata_json or {}).get("society_first_result") or {})
     if society_first:
+        backtest = society_first.get("backtest") or build_empty_backtest_result()
         return _attach_decision_brief_context({
             "type": "society_first",
             "content": society_first.get("content", ""),
@@ -336,7 +363,7 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
             "selected_issues": society_first.get("selected_issues", []),
             "issue_colonies": society_first.get("issue_colonies", []),
             "intervention_comparison": society_first.get("intervention_comparison", []),
-            "backtest": society_first.get("backtest") or build_empty_backtest_result(),
+            "backtest": backtest,
             "scenarios": normalize_scenarios(
                 society_first.get("scenarios", []),
                 evidence_refs=evidence_refs,
@@ -346,6 +373,8 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
             "evidence_refs": evidence_refs,
             "run_config": run_config,
             "quality": quality,
+            "validation_summary": _get_validation_summary(sim, backtest),
+            "prediction_evaluations": prediction_evaluations,
         }, quality=quality, run_config=run_config, evidence_refs=evidence_refs)
 
     # レガシー: meta_simulation 結果
@@ -356,6 +385,8 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
             "evidence_refs": evidence_refs,
             "run_config": run_config,
             "quality": quality,
+            "validation_summary": _get_validation_summary(sim),
+            "prediction_evaluations": prediction_evaluations,
         }, quality=quality, run_config=run_config, evidence_refs=evidence_refs)
         if "content" not in response and response.get("summary_markdown"):
             response["content"] = response["summary_markdown"]
@@ -399,6 +430,8 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
                     else None
                 ),
                 "quality": response_quality,
+                "validation_summary": _get_validation_summary(sim),
+                "prediction_evaluations": prediction_evaluations,
             }, quality=response_quality, run_config=run_config, evidence_refs=evidence_refs)
 
     # レガシー: PM Board 結果 (metadata_json 直接)
@@ -408,6 +441,8 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
             "evidence_refs": evidence_refs,
             "run_config": run_config,
             "quality": quality,
+            "validation_summary": _get_validation_summary(sim),
+            "prediction_evaluations": prediction_evaluations,
         }, quality=quality, run_config=run_config, evidence_refs=evidence_refs)
 
     raise HTTPException(status_code=404, detail="レポートが見つかりません")
@@ -468,8 +503,66 @@ async def create_simulation_backtest(
     sim.metadata_json = {
         **dict(sim.metadata_json or {}),
         "society_first_result": updated_society_first,
+        "validation_summary": _get_validation_summary(sim, backtest),
     }
     await session.commit()
+
+    scenario_predictions = []
+    for colony in society_first.get("issue_colonies", []) or []:
+        for scenario in colony.get("top_scenarios") or []:
+            scenario_predictions.append({
+                "issue_label": colony.get("label", ""),
+                "outcome_label": scenario.get("outcome_label") or scenario.get("label") or colony.get("label", ""),
+                "probability": scenario.get("probability", scenario.get("scenario_score", 0)),
+                "horizon": scenario.get("horizon") or scenario.get("time_horizon") or "",
+                "leading_indicators": scenario.get("leading_indicators") or [],
+                "affected_segments": scenario.get("affected_segments") or [],
+            })
+    if scenario_predictions:
+        await register_prediction_evaluation(
+            session,
+            simulation_id=sim_id,
+            prediction_type="scenario",
+            theme_category=str((sim.metadata_json or {}).get("theme_category") or ""),
+            horizon="historical_cases",
+            source="society_first_backtest",
+            predicted_payload={"predictions": scenario_predictions},
+            actual_payload={
+                "actual_outcomes": [
+                    case.get("outcome", {}).get("outcome_label")
+                    or case.get("outcome", {}).get("issue_label")
+                    for case in normalized_cases
+                    if case.get("outcome")
+                ],
+            },
+        )
+
+    predicted_effects = [
+        effect
+        for intervention in updated_interventions
+        for effect in (intervention.get("predicted_effects") or [])
+    ]
+    actual_effects = [
+        {
+            "intervention_id": intervention.get("intervention_id"),
+            "metric": observation.get("metric"),
+            "actual_delta": observation.get("signed_delta"),
+            "direction": "up" if float(observation.get("signed_delta") or 0) > 0 else "down",
+        }
+        for intervention in updated_interventions
+        for observation in (intervention.get("supporting_evidence") or [])
+    ]
+    if predicted_effects:
+        await register_prediction_evaluation(
+            session,
+            simulation_id=sim_id,
+            prediction_type="intervention",
+            theme_category=str((sim.metadata_json or {}).get("theme_category") or ""),
+            horizon="historical_cases",
+            source="society_first_backtest",
+            predicted_payload={"predictions": predicted_effects},
+            actual_payload={"actuals": actual_effects} if actual_effects else None,
+        )
 
     return backtest
 

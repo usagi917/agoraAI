@@ -337,6 +337,15 @@ def _build_meeting_system_prompt(participant: dict, theme: str, round_name: str)
                 "これらの主張を踏まえた上で、自分の立場を明確にしてください。"
             )
 
+    anti_consensus = (
+        "\n\n【反合意ルール】\n"
+        "あなたは簡単には意見を変えない人間である。以下の条件のうち2つ以上が満たされない限り、初期スタンスを維持せよ：\n"
+        "（a）自分が知らなかった具体的な事実を突きつけられた\n"
+        "（b）自分の生活に直接影響する新しい視点を示された\n"
+        "（c）反論の根拠が自分の経験と矛盾しない\n"
+        "議論の最後に全員が同意するのは非現実的である。あなたの最終立場は、あなたの生活実感に基づくものでなければならない。"
+    )
+
     return (
         f"あなたは以下のプロフィールを持つ市民代表として議論に参加しています。\n\n"
         f"{context}\n\n"
@@ -345,6 +354,8 @@ def _build_meeting_system_prompt(participant: dict, theme: str, round_name: str)
         f"【最重要ルール】あなたのプロフィール・年齢・職業・話し方ルールに基づいて、"
         f"あなたという人間がそのまま喋っているように議論せよ。"
         f"全員が同じような敬語で話すのは不自然。あなたのキャラクターを貫け。"
+        f"他の参加者と同じ語彙・文体で話してはならない。あなた固有の言い回しを使え。"
+        f"{anti_consensus}"
         f"{devil_advocate_instruction}"
         f"{opposing_block}"
         f"{belief_update_instruction}\n\n"
@@ -426,6 +437,7 @@ async def _run_meeting_round(
             "user_prompt": user_prompt,
             "temperature": agent_temperature,
             "max_tokens": 4096,
+            "response_format": {"type": "json_object"},
         })
 
     results = await multi_llm_client.call_batch_by_provider(calls, max_concurrency=10)
@@ -570,6 +582,7 @@ async def _run_direct_exchanges(
             user_prompt=moderator_user,
             temperature=0.3,
             max_tokens=1024,
+            response_format={"type": "json_object"},
         )
     except Exception as e:
         logger.warning("Moderator call failed, skipping direct exchanges: %s", e)
@@ -636,6 +649,7 @@ async def _run_direct_exchanges(
                 "user_prompt": exchange_user_a,
                 "temperature": temp_a,
                 "max_tokens": 2048,
+                "response_format": {"type": "json_object"},
             },
             {
                 "provider": part_b.get("agent_profile", {}).get("llm_backend", "openai"),
@@ -643,6 +657,7 @@ async def _run_direct_exchanges(
                 "user_prompt": exchange_user_b,
                 "temperature": temp_b,
                 "max_tokens": 2048,
+                "response_format": {"type": "json_object"},
             },
         ]
 
@@ -787,6 +802,7 @@ async def _run_synthesis(
         user_prompt=user_prompt,
         temperature=0.3,
         max_tokens=4096,
+        response_format={"type": "json_object"},
     )
 
     if isinstance(result, dict):

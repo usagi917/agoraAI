@@ -1,10 +1,12 @@
 """出力バリデーター:
 
 活性化結果と会議結論の整合性、レスポンス品質、少数派意見の保全を検証する。
+人工合意・浅い応答・ペルソナ崩壊の自動検出機能を含む。
 """
 
 import re
 import logging
+from collections import Counter
 
 logger = logging.getLogger(__name__)
 
@@ -413,3 +415,177 @@ def validate_minority_preservation(aggregation: dict, narrative: dict) -> dict:
         return {"status": "warning", "missing_minorities": missing}
 
     return {"status": "ok", "missing_minorities": []}
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: 品質異常検出
+# ---------------------------------------------------------------------------
+
+# 浅い応答の閾値
+_MIN_ARGUMENT_LENGTH = 200
+
+# ペルソナ崩壊検出: 冒頭フレーズの一致率閾値
+_PHRASE_COLLAPSE_THRESHOLD = 0.5
+
+# 冒頭フレーズとして切り出す文字数
+_OPENING_PHRASE_LENGTH = 15
+
+
+def detect_artificial_consensus(synthesis: dict) -> dict:
+    """人工合意を検出する。
+
+    consensus_points が多数ある一方で disagreement_points が皆無の場合、
+    LLMが人工的に全員一致を生成した可能性がある。
+
+    Args:
+        synthesis: 会議の synthesis 結果辞書
+
+    Returns:
+        {"flagged": bool, "detail": str, "consensus_count": int, "disagreement_count": int}
+    """
+    consensus_points = synthesis.get("consensus_points", [])
+    disagreement_points = synthesis.get("disagreement_points", [])
+
+    c_count = len(consensus_points)
+    d_count = len(disagreement_points)
+
+    flagged = c_count > 5 and d_count == 0
+    detail = ""
+    if flagged:
+        detail = (
+            f"consensus_points が {c_count} 件あるが disagreement_points が 0 件。"
+            f"LLMが人工的に合意を生成した可能性がある。"
+        )
+
+    return {
+        "flagged": flagged,
+        "detail": detail,
+        "consensus_count": c_count,
+        "disagreement_count": d_count,
+    }
+
+
+def detect_shallow_arguments(meeting_rounds: list[list[dict]]) -> dict:
+    """浅い応答を検出する。
+
+    Meeting の全ラウンドを通じて argument の平均文字数が閾値未満の場合フラグ。
+
+    Args:
+        meeting_rounds: 各ラウンドの発言リスト [round1_args, round2_args, ...]
+
+    Returns:
+        {"flagged": bool, "detail": str, "avg_length": float, "threshold": int}
+    """
+    all_lengths: list[int] = []
+    for arguments in meeting_rounds:
+        for arg in arguments:
+            text = arg.get("argument", "")
+            if text:
+                all_lengths.append(len(text))
+
+    if not all_lengths:
+        return {
+            "flagged": True,
+            "detail": "Meeting に発言データがない。",
+            "avg_length": 0.0,
+            "threshold": _MIN_ARGUMENT_LENGTH,
+        }
+
+    avg_length = sum(all_lengths) / len(all_lengths)
+    flagged = avg_length < _MIN_ARGUMENT_LENGTH
+    detail = ""
+    if flagged:
+        detail = (
+            f"Meeting 発言の平均文字数が {avg_length:.0f} 文字（閾値: {_MIN_ARGUMENT_LENGTH} 文字）。"
+            f"議論の深さが不足している可能性がある。"
+        )
+
+    return {
+        "flagged": flagged,
+        "detail": detail,
+        "avg_length": round(avg_length, 1),
+        "threshold": _MIN_ARGUMENT_LENGTH,
+    }
+
+
+def detect_persona_collapse(meeting_rounds: list[list[dict]]) -> dict:
+    """ペルソナ崩壊を検出する。
+
+    同一ラウンド内で発言の冒頭フレーズが 50% 以上一致する場合、
+    エージェントが個性を失い同質化している（ペルソナ崩壊）と判定。
+
+    Args:
+        meeting_rounds: 各ラウンドの発言リスト
+
+    Returns:
+        {"flagged": bool, "detail": str, "collapsed_rounds": list[int]}
+    """
+    collapsed_rounds: list[int] = []
+
+    for round_idx, arguments in enumerate(meeting_rounds):
+        if len(arguments) < 2:
+            continue
+
+        openings: list[str] = []
+        for arg in arguments:
+            text = arg.get("argument", "").strip()
+            if text:
+                opening = text[:_OPENING_PHRASE_LENGTH]
+                openings.append(opening)
+
+        if not openings:
+            continue
+
+        counter = Counter(openings)
+        most_common_count = counter.most_common(1)[0][1]
+        collapse_ratio = most_common_count / len(openings)
+
+        if collapse_ratio >= _PHRASE_COLLAPSE_THRESHOLD:
+            collapsed_rounds.append(round_idx + 1)
+
+    flagged = len(collapsed_rounds) > 0
+    detail = ""
+    if flagged:
+        detail = (
+            f"ラウンド {collapsed_rounds} で発言冒頭の {_PHRASE_COLLAPSE_THRESHOLD*100:.0f}% 以上が同一フレーズ。"
+            f"エージェントのペルソナが崩壊している可能性がある。"
+        )
+
+    return {
+        "flagged": flagged,
+        "detail": detail,
+        "collapsed_rounds": collapsed_rounds,
+    }
+
+
+def run_quality_checks(
+    synthesis: dict,
+    meeting_rounds: list[list[dict]],
+) -> dict:
+    """全品質チェックを一括実行する。
+
+    Returns:
+        {
+            "artificial_consensus": {...},
+            "shallow_arguments": {...},
+            "persona_collapse": {...},
+            "any_flagged": bool,
+        }
+    """
+    ac = detect_artificial_consensus(synthesis)
+    sa = detect_shallow_arguments(meeting_rounds)
+    pc = detect_persona_collapse(meeting_rounds)
+
+    any_flagged = ac["flagged"] or sa["flagged"] or pc["flagged"]
+    if any_flagged:
+        logger.warning(
+            "Quality check flags: artificial_consensus=%s, shallow_arguments=%s, persona_collapse=%s",
+            ac["flagged"], sa["flagged"], pc["flagged"],
+        )
+
+    return {
+        "artificial_consensus": ac,
+        "shallow_arguments": sa,
+        "persona_collapse": pc,
+        "any_flagged": any_flagged,
+    }

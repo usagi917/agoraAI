@@ -128,6 +128,7 @@ class MultiLLMClient:
         max_tokens: int = 1024,
         max_retries: int = 2,
         seed: int | None = None,
+        response_format: dict | None = None,
     ) -> tuple[dict | str, dict]:
         """指定プロバイダで LLM を呼び出す。一時的なエラーにはリトライする。"""
         adapter, limiter = self._resolve_provider(provider_name)
@@ -137,7 +138,8 @@ class MultiLLMClient:
             await limiter.acquire(estimated_tokens=max_tokens)
             try:
                 content, usage = await adapter.call(
-                    system_prompt, user_prompt, temperature, max_tokens, seed=seed,
+                    system_prompt, user_prompt, temperature, max_tokens,
+                    seed=seed, response_format=response_format,
                 )
             except Exception as e:
                 last_exc = e
@@ -192,6 +194,8 @@ class MultiLLMClient:
                             user_prompt=call_params["user_prompt"],
                             temperature=call_params.get("temperature", 0.5),
                             max_tokens=call_params.get("max_tokens", 1024),
+                            seed=call_params.get("seed"),
+                            response_format=call_params.get("response_format"),
                         )
                     except Exception as e:
                         last_exc = e

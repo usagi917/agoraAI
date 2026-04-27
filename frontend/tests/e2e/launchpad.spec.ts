@@ -77,7 +77,7 @@ test('launches a simulation from the launchpad', async ({ page }) => {
   })
 
   await page.goto('/')
-  await page.getByLabel('分析プロンプト').fill('EV battery market analysis')
+  await page.getByTestId('launchpad-prompt').fill('EV battery market analysis')
   await expect(page.getByTestId('launch-button')).toBeEnabled()
   const createSimulationResponse = page.waitForResponse((response) => {
     return response.url().endsWith('/api/simulations') && response.request().method() === 'POST'

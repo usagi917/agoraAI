@@ -8,6 +8,9 @@ from src.app.evaluation.metrics import (
     ConsistencyMetric,
     ConvergenceMetric,
     CoverageMetric,
+    ResponseDepthMetric,
+    MeetingPolarizationMetric,
+    LexicalDiversityMetric,
 )
 
 
@@ -40,4 +43,7 @@ def create_default_runner() -> EvaluationRunner:
     runner.register(ConsistencyMetric())
     runner.register(ConvergenceMetric())
     runner.register(CoverageMetric())
+    runner.register(ResponseDepthMetric())
+    runner.register(MeetingPolarizationMetric())
+    runner.register(LexicalDiversityMetric())
     return runner

@@ -48,26 +48,31 @@ def _clean_text(value: Any) -> str:
     return text.strip()
 
 
-def _truncate(text: str, limit: int = 160) -> str:
+def _truncate(text: str, limit: int = 300) -> str:
     cleaned = _clean_text(text)
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[: limit - 3].rstrip() + "..."
 
 
-def _first_sentence(text: Any, fallback: str = "") -> str:
+def _first_sentence(text: Any, fallback: str = "", n: int = 2) -> str:
     cleaned = _clean_text(text)
     if not cleaned:
         return fallback
     candidates = re.split(r"(?<=[。.!?])\s+|[。.!?\n]+", cleaned)
+    sentences: list[str] = []
     for candidate in candidates:
         candidate = candidate.strip()
         if candidate:
-            return _truncate(candidate)
+            sentences.append(candidate)
+            if len(sentences) >= n:
+                break
+    if sentences:
+        return _truncate("。".join(sentences))
     return _truncate(cleaned or fallback)
 
 
-def _sentence_list(text: Any, *, limit: int = 3) -> list[str]:
+def _sentence_list(text: Any, *, limit: int = 5) -> list[str]:
     cleaned = _clean_text(text)
     if not cleaned:
         return []
@@ -100,10 +105,10 @@ def _dedupe(items: list[dict[str, Any]], *, key: str) -> list[dict[str, Any]]:
 def _normalize_option(label: str, upside: str, downside: str, fit: str, when_to_choose: str) -> dict[str, str]:
     return {
         "label": label,
-        "upside": _truncate(upside, 120),
-        "downside": _truncate(downside, 120),
-        "fit": _truncate(fit, 120),
-        "when_to_choose": _truncate(when_to_choose, 120),
+        "upside": _truncate(upside, 200),
+        "downside": _truncate(downside, 200),
+        "fit": _truncate(fit, 200),
+        "when_to_choose": _truncate(when_to_choose, 200),
     }
 
 
@@ -133,7 +138,7 @@ def _legacy_fields(
             "synthesis": round(min(score + 0.03, 1.0), 4),
         },
         "options": options,
-        "strongest_counterargument": _truncate(strongest_counterargument, 180),
+        "strongest_counterargument": _truncate(strongest_counterargument, 300),
         "risk_factors": risk_factors[:4],
         "next_steps": [action.get("action", "") for action in recommended_actions[:4] if action.get("action")],
         "time_horizon": time_horizon,

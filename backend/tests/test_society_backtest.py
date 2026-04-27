@@ -1,3 +1,5 @@
+import pytest
+
 from src.app.services.society.backtest import (
     overlay_observed_intervention_comparison,
     run_backtest_analysis,
@@ -26,7 +28,14 @@ def _society_first_payload() -> dict:
                 "issue_id": "issue-1",
                 "label": "価格受容性",
                 "top_scenarios": [
-                    {"description": "価格障壁で導入が遅れる", "scenario_score": 0.73},
+                    {
+                        "outcome_label": "価格受容性",
+                        "description": "価格障壁で導入が遅れる",
+                        "probability": 0.73,
+                        "horizon": "6ヶ月",
+                        "leading_indicators": ["価格反論"],
+                        "affected_segments": ["試験導入企業"],
+                    },
                     {"description": "値下げで試験導入が増える", "scenario_score": 0.58},
                 ],
             },
@@ -63,7 +72,11 @@ def test_run_backtest_analysis_matches_predicted_issue_scenarios():
     assert backtest["status"] == "ready"
     assert backtest["summary"]["case_count"] == 1
     assert backtest["summary"]["hit_count"] == 1
+    assert backtest["summary"]["partial_hit_rate"] == 0.0
+    assert backtest["summary"]["scenario_probability_brier"] is not None
+    assert backtest["summary"]["mean_reciprocal_rank"] == 1.0
     assert backtest["cases"][0]["best_match"]["issue_label"] == "価格受容性"
+    assert backtest["cases"][0]["best_match"]["outcome_label"] == "価格受容性"
     assert backtest["cases"][0]["best_match"]["verdict"] == "hit"
 
 
@@ -118,4 +131,88 @@ def test_overlay_observed_intervention_comparison_uses_backtest_deltas():
     assert price_change["comparison_mode"] == "observed"
     assert price_change["observed_uplift"] > 0
     assert price_change["observed_case_count"] == 1
+    assert price_change["direction_accuracy"] == 1.0
+    assert price_change["effect_mae"] is not None
     assert price_change["supporting_evidence"]
+
+
+def test_build_intervention_comparison_uses_signed_improvement_for_down_metrics():
+    payload = _society_first_payload()
+    comparisons = build_intervention_comparison(
+        payload["selected_issues"],
+        payload["issue_colonies"],
+    )
+
+    regulatory_change = next(
+        item for item in comparisons if item["intervention_id"] == "regulatory_alignment"
+    )
+    risk_effect = next(
+        effect
+        for effect in regulatory_change["predicted_effects"]
+        if effect["metric"] == "regulatory_risk"
+    )
+
+    assert risk_effect["metric_direction"] == "down"
+    assert risk_effect["expected_delta"] > 0
+    assert risk_effect["direction"] == "up"
+
+
+def test_overlay_observed_intervention_comparison_aggregates_repeated_metric_observations():
+    payload = _society_first_payload()
+    comparisons = build_intervention_comparison(
+        payload["selected_issues"],
+        payload["issue_colonies"],
+    )
+    backtest = run_backtest_analysis(
+        payload,
+        [
+            {
+                "title": "2025 関西ローンチ",
+                "observed_at": "2025-10-01",
+                "baseline_metrics": {"adoption_rate": 0.20},
+                "outcome": {
+                    "issue_label": "価格受容性",
+                    "summary": "試験導入が増えた",
+                    "actual_scenario": "価格障壁で導入が遅れる",
+                    "metrics": {"adoption_rate": 0.30},
+                    "tags": ["価格", "導入"],
+                },
+                "interventions": [
+                    {
+                        "intervention_id": "price_reduction",
+                        "baseline_metrics": {"adoption_rate": 0.20},
+                        "outcome_metrics": {"adoption_rate": 0.30},
+                    }
+                ],
+            },
+            {
+                "title": "2025 九州ローンチ",
+                "observed_at": "2025-11-01",
+                "baseline_metrics": {"adoption_rate": 0.18},
+                "outcome": {
+                    "issue_label": "価格受容性",
+                    "summary": "導入が少し増えた",
+                    "actual_scenario": "価格障壁で導入が遅れる",
+                    "metrics": {"adoption_rate": 0.20},
+                    "tags": ["価格", "導入"],
+                },
+                "interventions": [
+                    {
+                        "intervention_id": "price_reduction",
+                        "baseline_metrics": {"adoption_rate": 0.18},
+                        "outcome_metrics": {"adoption_rate": 0.20},
+                    }
+                ],
+            },
+        ],
+    )
+
+    observed = overlay_observed_intervention_comparison(comparisons, backtest)
+    price_change = next(item for item in observed if item["intervention_id"] == "price_reduction")
+    adoption_effect = next(
+        effect for effect in price_change["effect_comparisons"] if effect["metric"] == "adoption_rate"
+    )
+
+    assert price_change["observed_case_count"] == 2
+    assert adoption_effect["actual_delta"] == pytest.approx(0.06)
+    assert adoption_effect["direction_match"] is True

@@ -21,11 +21,9 @@ const selectedTemplate = ref('')
 const selectedProfile = ref('standard')
 const selectedPreset = ref('standard')
 
-const presets = [
-  { id: 'quick', label: 'Quick', desc: '社会反応 → レポート', time: '約1分', phases: 2 },
-  { id: 'standard', label: 'Standard', desc: '社会反応 → 評議会 → レポート', time: '約3分', phases: 3 },
-  { id: 'deep', label: 'Deep', desc: '全フェーズ投入・最高品質', time: '約8分', phases: 5 },
-  { id: 'research', label: 'Research', desc: 'イシュー深掘り＋介入テスト', time: '約10分', phases: 5 },
+const analysisModes = [
+  { id: 'standard', label: '標準', desc: '社会反応と代表評議会で素早く判断', time: '約3分' },
+  { id: 'research', label: '検証強化', desc: '実調査アンカーとシナリオ検証を重視', time: '約10分' },
 ]
 const promptText = ref('')
 const files = ref<File[]>([])
@@ -33,6 +31,8 @@ const isLoading = ref(false)
 const recentSimulations = ref<SimulationListItem[]>([])
 const runtimeHealth = ref<HealthResponse | null>(null)
 const bootstrapError = ref('')
+const examplesOpen = ref(false)
+const advancedOpen = ref(false)
 // advanced options removed for simplicity
 
 // Question Wizard state
@@ -139,6 +139,14 @@ function buildPromptFromWizard(): string {
   return parts.join('\n')
 }
 
+function syncExamplesDetails(event: Event) {
+  examplesOpen.value = event.target instanceof HTMLDetailsElement ? event.target.open : false
+}
+
+function syncAdvancedDetails(event: Event) {
+  advancedOpen.value = event.target instanceof HTMLDetailsElement ? event.target.open : false
+}
+
 // Legacy mode list (backward compat — no longer exposed in UI)
 const _legacyModes = ['unified', 'pipeline', 'meta_simulation', 'society_first', 'society', 'single', 'swarm'] as const
 void _legacyModes
@@ -153,6 +161,9 @@ const launchDisabled = computed(() => {
   const hasManualInput = promptText.value.trim() || files.value.length > 0
   return !hasWizardInput && !hasManualInput
 })
+const selectedModeInfo = computed(() => (
+  analysisModes.find(mode => mode.id === selectedPreset.value) ?? analysisModes[0]
+))
 // launchLabel は inline で処理
 
 onMounted(async () => {
@@ -272,24 +283,39 @@ function getPipelineStageLabel(stage: string) {
     <!-- Unified Input Section -->
     <section class="section input-section">
       <h3 class="input-section-title">何を分析しますか？</h3>
-      <p class="input-section-hint">テンプレートを選ぶか、自由に入力してください</p>
+      <p class="input-section-hint">問いを入力すれば、標準分析でそのまま開始できます</p>
 
-      <!-- Question Template Cards -->
-      <div class="question-templates">
-        <button
-          v-for="qt in questionTemplates"
-          :key="qt.id"
-          class="question-card"
-          :class="{ selected: selectedQuestionTemplate === qt.id }"
-          :style="{ '--card-accent': qt.accentColor }"
-          :data-testid="`question-${qt.id}`"
-          @click="selectQuestionTemplate(qt.id)"
-        >
-          <span class="question-card-bar" />
-          <span class="question-icon">{{ qt.icon }}</span>
-          <span class="question-title">{{ qt.title }}</span>
-        </button>
+      <div class="free-prompt">
+        <label class="free-prompt-label" for="launchpad-prompt">分析したい問い</label>
+        <textarea
+          id="launchpad-prompt"
+          name="launchpad-prompt"
+          v-model="promptText"
+          class="prompt-textarea"
+          data-testid="launchpad-prompt"
+          placeholder="例: EVバッテリー市場に参入すべきか。顧客受容性、規制リスク、競合反応を知りたい。"
+          rows="4"
+        />
       </div>
+
+      <details class="example-builder-details" @toggle="syncExamplesDetails">
+        <summary class="example-builder-summary">例から作る</summary>
+        <div v-if="examplesOpen" class="question-templates">
+          <button
+            v-for="qt in questionTemplates"
+            :key="qt.id"
+            class="question-card"
+            :class="{ selected: selectedQuestionTemplate === qt.id }"
+            :style="{ '--card-accent': qt.accentColor }"
+            :data-testid="`question-${qt.id}`"
+            @click="selectQuestionTemplate(qt.id)"
+          >
+            <span class="question-card-bar" />
+            <span class="question-icon">{{ qt.icon }}</span>
+            <span class="question-title">{{ qt.title }}</span>
+          </button>
+        </div>
+      </details>
 
       <!-- Wizard Fields (inline, appears when template selected) -->
       <div v-if="activeTemplate" class="wizard-inline">
@@ -311,20 +337,6 @@ function getPipelineStageLabel(stage: string) {
         </div>
       </div>
 
-      <!-- Free Prompt (visible when no template, or as additional input) -->
-      <div v-if="!activeTemplate" class="free-prompt">
-        <label class="free-prompt-label" for="launchpad-prompt">分析プロンプト</label>
-        <textarea
-          id="launchpad-prompt"
-          name="launchpad-prompt"
-          v-model="promptText"
-          class="prompt-textarea"
-          data-testid="launchpad-prompt"
-          placeholder="もし〜なら？ — 分析したい仮説やシナリオを入力してください"
-          rows="3"
-        />
-      </div>
-
       <!-- File Upload (compact) -->
       <details class="file-drop-details">
         <summary class="file-drop-summary">ファイルを添付（任意）</summary>
@@ -334,12 +346,13 @@ function getPipelineStageLabel(stage: string) {
         />
       </details>
 
-      <!-- Preset Selection -->
-      <div class="preset-section">
-        <h4 class="preset-title">分析モード</h4>
-        <div class="preset-cards">
+      <details class="advanced-details" @toggle="syncAdvancedDetails">
+        <summary class="advanced-summary">詳細設定</summary>
+        <div v-if="advancedOpen" class="preset-section">
+          <h4 class="preset-title">分析モード</h4>
+          <div class="preset-cards">
           <button
-            v-for="p in presets"
+            v-for="p in analysisModes"
             :key="p.id"
             class="preset-card"
             :class="{ selected: selectedPreset === p.id, recommended: p.id === 'standard' }"
@@ -349,10 +362,11 @@ function getPipelineStageLabel(stage: string) {
             <span v-if="p.id === 'standard'" class="preset-recommended">おすすめ</span>
             <span class="preset-label">{{ p.label }}</span>
             <span class="preset-desc">{{ p.desc }}</span>
-            <span class="preset-meta">{{ p.time }} · {{ p.phases }} phase{{ p.phases > 1 ? 's' : '' }}</span>
+            <span class="preset-meta">{{ p.time }}</span>
           </button>
+          </div>
         </div>
-      </div>
+      </details>
 
       <!-- Launch Button (inline) -->
       <button
@@ -366,8 +380,8 @@ function getPipelineStageLabel(stage: string) {
         {{ isLoading ? '起動中...' : '分析を開始' }}
       </button>
       <p class="launch-note">
-        {{ presets.find(p => p.id === selectedPreset)?.time ?? '約3分' }}
-        — {{ presets.find(p => p.id === selectedPreset)?.desc ?? '' }}
+        {{ selectedModeInfo?.time ?? '約3分' }}
+        — {{ selectedModeInfo?.desc ?? '' }}
       </p>
     </section>
 
@@ -382,7 +396,9 @@ function getPipelineStageLabel(stage: string) {
     </details>
 
     <!-- History -->
-    <section class="section">
+    <details class="history-details">
+      <summary class="history-summary">実行履歴</summary>
+      <section class="section">
       <div class="section-header">
         <h3 class="section-title">実行履歴</h3>
         <span v-if="recentSimulations.length > 0" class="section-badge">{{ recentSimulations.length }} 件</span>
@@ -418,7 +434,8 @@ function getPipelineStageLabel(stage: string) {
           </div>
         </router-link>
       </div>
-    </section>
+      </section>
+    </details>
   </div>
 </template>
 
@@ -627,6 +644,7 @@ function getPipelineStageLabel(stage: string) {
 }
 
 .question-templates {
+  margin-top: 0.75rem;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: 0.75rem;
@@ -745,6 +763,27 @@ function getPipelineStageLabel(stage: string) {
 
 .prompt-textarea::placeholder { color: var(--text-muted); }
 
+.example-builder-details,
+.advanced-details,
+.history-details {
+  margin-top: 0.75rem;
+}
+
+.example-builder-summary,
+.advanced-summary,
+.history-summary {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.35rem 0;
+}
+
+.example-builder-summary:hover,
+.advanced-summary:hover,
+.history-summary:hover {
+  color: var(--text-secondary);
+}
+
 /* File Drop */
 .file-drop-details {
   margin-top: 0.5rem;
@@ -760,7 +799,7 @@ function getPipelineStageLabel(stage: string) {
 .file-drop-summary:hover { color: var(--text-secondary); }
 
 /* Preset Selection */
-.preset-section { margin-top: 1.5rem; }
+.preset-section { margin-top: 0.75rem; }
 .preset-title {
   font-size: 0.75rem;
   font-weight: 600;
@@ -777,7 +816,7 @@ function getPipelineStageLabel(stage: string) {
 }
 .preset-card {
   flex: 1;
-  min-width: 120px;
+  min-width: 180px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;

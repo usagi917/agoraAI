@@ -169,6 +169,11 @@ describe('LaunchPadPage', () => {
     })
     await flushPromises()
 
+    const advancedDetails = wrapper.get('.advanced-details')
+    ;(advancedDetails.element as HTMLDetailsElement).open = true
+    await advancedDetails.trigger('toggle')
+    await flushPromises()
+
     const standardCard = wrapper.get('[data-testid="preset-standard"]')
     expect(standardCard.find('.preset-recommended').exists()).toBe(true)
     expect(standardCard.find('.preset-recommended').text()).toBe('おすすめ')

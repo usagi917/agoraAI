@@ -32,6 +32,7 @@ from src.app.models.conversation_log import ConversationLog
 from src.app.models.llm_call_log import LLMCallLog
 from src.app.models.experiment_config import ExperimentConfig
 from src.app.models.validation_record import ValidationRecord
+from src.app.models.prediction_evaluation import PredictionEvaluation
 from src.app.models.population_snapshot import PopulationSnapshot
 from src.app.models.scenario_pair import ScenarioPair
 from src.app.models.audit_event import AuditEvent
@@ -77,6 +78,7 @@ __all__ = [
     "LLMCallLog",
     "ExperimentConfig",
     "ValidationRecord",
+    "PredictionEvaluation",
     "PopulationSnapshot",
     "ScenarioPair",
     "AuditEvent",

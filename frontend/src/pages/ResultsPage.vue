@@ -14,12 +14,14 @@ import {
   type GraphSnapshot,
   type EvidenceRef,
   type QualitySummary,
+  type ValidationSummary,
   type SimulationReportResponse,
   type PMBoardReportResponse,
   type RunConfig,
   type SocietyFirstReportResponse,
   type SocietyFirstBacktestResponse,
   type SocietyFirstIntervention,
+  type SocietyFirstInterventionEffectComparison,
   type SocietyFirstInterventionEvidence,
   type MetaSimulationReportResponse,
   type MetaInterventionPlan,
@@ -134,6 +136,9 @@ interface SocietyInterventionViewModel {
   observedUplift?: number | null
   observedDownside?: number | null
   uncertainty?: number | null
+  directionAccuracy?: number | null
+  effectMae?: number | null
+  effectComparisons: SocietyFirstInterventionEffectComparison[]
   supportingEvidence: SocietyFirstInterventionEvidence[]
 }
 
@@ -154,6 +159,9 @@ function normalizeSocietyIntervention(
       observedUplift: intervention.observed_uplift,
       observedDownside: intervention.observed_downside,
       uncertainty: intervention.uncertainty,
+      directionAccuracy: intervention.direction_accuracy,
+      effectMae: intervention.effect_mae,
+      effectComparisons: intervention.effect_comparisons || [],
       supportingEvidence: intervention.supporting_evidence || [],
     }
   }
@@ -167,6 +175,7 @@ function normalizeSocietyIntervention(
     issues: intervention.target_issues || [],
     expectedEffect: intervention.expected_effect,
     isObserved: false,
+    effectComparisons: [],
     supportingEvidence: [],
   }
 }
@@ -239,6 +248,40 @@ const reportQuality = computed<QualitySummary | null>(() => {
   if (pmBoardData.value?.quality) return pmBoardData.value.quality
   return null
 })
+const validationSummary = computed<ValidationSummary | null>(() => report.value?.validation_summary || null)
+const predictionEvaluations = computed(() => report.value?.prediction_evaluations || null)
+const predictionAccuracyCards = computed(() => {
+  const summary = predictionEvaluations.value
+  if (!summary) return []
+  const cards = []
+  const distribution = summary.distribution
+  if (distribution?.count) {
+    cards.push({
+      label: '分布予測',
+      value: distribution.best_variant || 'pending',
+      detail: typeof distribution.avg_calibration_improvement === 'number'
+        ? `補正改善 ${distribution.avg_calibration_improvement.toFixed(3)}`
+        : `${distribution.validated_count}/${distribution.count} validated`,
+    })
+  }
+  const scenario = summary.scenario
+  if (scenario?.count) {
+    cards.push({
+      label: 'シナリオ',
+      value: typeof scenario.probability_brier === 'number' ? `Brier ${scenario.probability_brier.toFixed(3)}` : 'pending',
+      detail: typeof scenario.mean_reciprocal_rank === 'number' ? `MRR ${scenario.mean_reciprocal_rank.toFixed(2)}` : `${scenario.validated_count}/${scenario.count} validated`,
+    })
+  }
+  const intervention = summary.intervention
+  if (intervention?.count) {
+    cards.push({
+      label: '介入効果',
+      value: typeof intervention.direction_accuracy === 'number' ? `${(intervention.direction_accuracy * 100).toFixed(0)}%` : 'pending',
+      detail: typeof intervention.mae === 'number' ? `MAE ${intervention.mae.toFixed(3)}` : `${intervention.validated_count}/${intervention.count} validated`,
+    })
+  }
+  return cards
+})
 const reportEvidenceRefs = computed<EvidenceRef[]>(() => report.value?.evidence_refs || [])
 const runConfig = computed<RunConfig | null>(() => {
   if (report.value?.run_config) return report.value.run_config
@@ -262,6 +305,22 @@ const evidenceSummary = computed(() => {
   const quality = reportQuality.value
   if (!quality) return ''
   return `mode=${quality.evidence_mode || runConfig.value?.evidence_mode || 'prefer'} · document=${quality.document_refs_count ?? 0} · refs=${quality.evidence_refs_count}`
+})
+const validationLabel = computed(() => {
+  const summary = validationSummary.value
+  if (!summary) return ''
+  const anchor = summary.survey_anchor_status || '未検証'
+  const scenario = summary.scenario_backtest_status === '過去ケース検証あり'
+    ? `過去ケース Hit ${(Number(summary.hit_rate || 0) * 100).toFixed(0)}%`
+    : '過去ケース未検証'
+  return `${anchor} · ${scenario}`
+})
+const distributionErrorLabel = computed(() => {
+  const err = validationSummary.value?.distribution_error
+  if (!err) return ''
+  const kl = typeof err.kl_divergence === 'number' ? err.kl_divergence.toFixed(3) : 'n/a'
+  const emd = typeof err.emd === 'number' ? err.emd.toFixed(3) : 'n/a'
+  return `KL=${kl} · EMD=${emd}`
 })
 
 const reportText = computed(() => {
@@ -698,6 +757,18 @@ function renderMarkdown(content: string): string {
         </span>
       </div>
 
+      <div
+        v-if="validationSummary"
+        data-testid="validation-summary"
+        class="validation-banner"
+        :class="{ verified: validationSummary.survey_anchor_status !== '未検証' || validationSummary.scenario_backtest_status === '過去ケース検証あり' }"
+      >
+        <strong>検証状態</strong>
+        <span>{{ validationLabel }}</span>
+        <span class="quality-meta">calibration={{ validationSummary.calibration_status }}</span>
+        <span v-if="distributionErrorLabel" class="quality-meta">{{ distributionErrorLabel }}</span>
+      </div>
+
       <div v-if="reportEvidenceRefs.length" class="evidence-panel">
         <div class="section-header">
           <h3 class="section-title">Evidence</h3>
@@ -972,6 +1043,16 @@ function renderMarkdown(content: string): string {
                   </span>
                 </div>
               </div>
+              <div v-if="predictionAccuracyCards.length" class="society-section">
+                <h4 class="society-section-title">予測精度</h4>
+                <div class="society-backtest-summary">
+                  <div v-for="card in predictionAccuracyCards" :key="card.label" class="society-metric-card">
+                    <span class="society-metric-label">{{ card.label }}</span>
+                    <span class="society-metric-score">{{ card.value }}</span>
+                    <span class="society-metric-sub">{{ card.detail }}</span>
+                  </div>
+                </div>
+              </div>
               <div v-if="societyInterventions.length" class="society-section">
                 <h4 class="society-section-title">介入比較</h4>
                 <div class="society-intervention-grid">
@@ -983,6 +1064,17 @@ function renderMarkdown(content: string): string {
                     <p class="society-intervention-desc">{{ intervention.description }}</p>
                     <p class="society-intervention-issues">対象: {{ intervention.issues.join(', ') }}</p>
                     <p class="society-intervention-hint">{{ intervention.expectedEffect }}</p>
+                    <div
+                      v-if="(intervention.directionAccuracy !== null && intervention.directionAccuracy !== undefined) || (intervention.effectMae !== null && intervention.effectMae !== undefined)"
+                      class="society-intervention-metrics"
+                    >
+                      <span v-if="intervention.directionAccuracy !== null && intervention.directionAccuracy !== undefined">
+                        方向一致 {{ (intervention.directionAccuracy * 100).toFixed(0) }}%
+                      </span>
+                      <span v-if="intervention.effectMae !== null && intervention.effectMae !== undefined">
+                        MAE {{ intervention.effectMae.toFixed(3) }}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1000,6 +1092,14 @@ function renderMarkdown(content: string): string {
                   <div class="society-metric-card">
                     <span class="society-metric-label">issue hit rate</span>
                     <span class="society-metric-score">{{ (societyBacktest.summary.issue_hit_rate * 100).toFixed(0) }}%</span>
+                  </div>
+                  <div v-if="societyBacktest.summary.scenario_probability_brier !== null && societyBacktest.summary.scenario_probability_brier !== undefined" class="society-metric-card">
+                    <span class="society-metric-label">scenario brier</span>
+                    <span class="society-metric-score">{{ societyBacktest.summary.scenario_probability_brier.toFixed(3) }}</span>
+                  </div>
+                  <div v-if="societyBacktest.summary.mean_reciprocal_rank !== null && societyBacktest.summary.mean_reciprocal_rank !== undefined" class="society-metric-card">
+                    <span class="society-metric-label">MRR</span>
+                    <span class="society-metric-score">{{ societyBacktest.summary.mean_reciprocal_rank.toFixed(2) }}</span>
                   </div>
                 </div>
                 <div v-if="societyBacktest.summary.case_count" class="society-backtest-grid">
@@ -1263,6 +1363,9 @@ function renderMarkdown(content: string): string {
 .quality-verified { background: rgba(34,197,94,0.08); color: var(--success); border-color: rgba(34,197,94,0.2); }
 .quality-draft { background: rgba(245,158,11,0.08); color: #f59e0b; border-color: rgba(245,158,11,0.2); }
 .quality-unsupported { background: rgba(239,68,68,0.08); color: var(--danger); border-color: rgba(239,68,68,0.2); }
+.validation-banner { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; padding: 0.75rem 1.25rem; border-radius: var(--radius-sm); font-size: 0.82rem; border: 1px solid rgba(245,158,11,0.2); background: rgba(245,158,11,0.08); color: #f59e0b; }
+.validation-banner.verified { border-color: rgba(34,197,94,0.22); background: rgba(34,197,94,0.08); color: var(--success); }
+.validation-banner strong { font-family: var(--font-mono); font-size: 0.74rem; }
 .evidence-panel { display: flex; flex-direction: column; gap: 0.75rem; }
 .evidence-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; }
 .evidence-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.85rem; display: flex; flex-direction: column; gap: 0.5rem; }
@@ -1677,6 +1780,7 @@ function renderMarkdown(content: string): string {
 .society-metric-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem; text-align: center; display: flex; flex-direction: column; gap: 0.25rem; }
 .society-metric-label { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; }
 .society-metric-score { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+.society-metric-sub { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); }
 .society-meeting-summary { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.7; }
 .society-participants-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .society-participant-chip { font-size: 0.78rem; padding: 0.3rem 0.6rem; border-radius: 999px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); display: flex; align-items: center; gap: 0.35rem; }

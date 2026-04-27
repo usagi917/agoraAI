@@ -5,7 +5,6 @@ Phase 5: 検証パイプライン
 """
 
 import os
-import uuid
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import (
@@ -18,9 +17,9 @@ from src.app.database import Base
 # 全モデルを import して Base.metadata に登録する
 import src.app.models  # noqa: F401
 
-from src.app.models.validation_record import ValidationRecord
 from src.app.repositories.validation_repo import ValidationRepository
 from src.app.services.society.validation_pipeline import (
+    evaluate_intervention_prediction,
     register_result,
     auto_compare,
     resolve_with_actual,
@@ -48,6 +47,40 @@ async def db_session():
 
 SIM_DIST = {"賛成": 0.30, "条件付き賛成": 0.25, "中立": 0.20, "条件付き反対": 0.15, "反対": 0.10}
 ACTUAL_DIST = {"賛成": 0.25, "条件付き賛成": 0.20, "中立": 0.25, "条件付き反対": 0.15, "反対": 0.15}
+
+
+def test_evaluate_intervention_prediction_aggregates_repeated_actual_metrics():
+    result = evaluate_intervention_prediction(
+        {
+            "predictions": [
+                {
+                    "intervention_id": "price_reduction",
+                    "metric": "adoption_rate",
+                    "expected_delta": 0.08,
+                    "direction": "up",
+                }
+            ]
+        },
+        {
+            "actuals": [
+                {
+                    "intervention_id": "price_reduction",
+                    "metric": "adoption_rate",
+                    "signed_delta": 0.10,
+                },
+                {
+                    "intervention_id": "price_reduction",
+                    "metric": "adoption_rate",
+                    "signed_delta": 0.02,
+                },
+            ]
+        },
+    )
+
+    assert result["status"] == "validated"
+    assert result["direction_accuracy"] == 1.0
+    assert result["comparisons"][0]["actual_delta"] == pytest.approx(0.06)
+    assert result["mae"] == pytest.approx(0.02)
 
 
 class TestValidationRecordModel:

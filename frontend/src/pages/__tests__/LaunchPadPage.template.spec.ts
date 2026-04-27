@@ -69,9 +69,15 @@ describe('LaunchPadPage — template-specific wizard steps', () => {
     })
   }
 
+  async function openExamples(wrapper: ReturnType<typeof mountPage>) {
+    ;(wrapper.vm as any).examplesOpen = true
+    await wrapper.vm.$nextTick()
+  }
+
   it('auto-selects matching backend template when question template is chosen', async () => {
     const wrapper = mountPage()
     await flushPromises()
+    await openExamples(wrapper)
 
     await wrapper.get('[data-testid="question-market_entry"]').trigger('click')
 
@@ -94,6 +100,7 @@ describe('LaunchPadPage — template-specific wizard steps', () => {
   it('uses policy_impact template when policy question is selected', async () => {
     const wrapper = mountPage()
     await flushPromises()
+    await openExamples(wrapper)
 
     await wrapper.get('[data-testid="question-policy_impact"]').trigger('click')
 
@@ -123,6 +130,7 @@ describe('LaunchPadPage — template-specific wizard steps', () => {
   it('shows wizard steps specific to the selected question template', async () => {
     const wrapper = mountPage()
     await flushPromises()
+    await openExamples(wrapper)
 
     await wrapper.get('[data-testid="question-market_entry"]').trigger('click')
 
@@ -133,6 +141,7 @@ describe('LaunchPadPage — template-specific wizard steps', () => {
   it('shows different wizard steps for policy_impact template', async () => {
     const wrapper = mountPage()
     await flushPromises()
+    await openExamples(wrapper)
 
     await wrapper.get('[data-testid="question-policy_impact"]').trigger('click')
 
