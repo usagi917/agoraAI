@@ -77,7 +77,7 @@ test('launches a simulation from the launchpad', async ({ page }) => {
   })
 
   await page.goto('/')
-  await page.getByLabel('分析プロンプト').fill('EV battery market analysis')
+  await page.getByTestId('launchpad-prompt').fill('EV battery market analysis')
   await expect(page.getByTestId('launch-button')).toBeEnabled()
   await page.getByTestId('launch-button').click()
 
