@@ -23,6 +23,12 @@ KNOWN_FEATURES: set[str] = {
     "mrp_estimation",
     "theory_of_mind_cot",
     "filter_bubble_width",
+    "agreeableness_in_dynamics",
+    "hybrid_network",
+    "post_activation_persona",
+    "meeting_feedback_propagation",
+    "episodic_memory",
+    "rolling_summary",
 }
 
 
@@ -40,6 +46,25 @@ class AccuracyConfig:
 
     def set_enabled(self, feature: str, enabled: bool) -> None:
         self._flags[feature] = enabled
+
+
+def is_enabled(feature: str) -> bool:
+    """モジュールレベル便利関数: population_mix.yaml から直接フラグを読む."""
+    import logging
+    logger = logging.getLogger(__name__)
+    if feature not in KNOWN_FEATURES:
+        raise ValueError(
+            f"Unknown accuracy feature '{feature}'. "
+            f"Register it in accuracy_config.KNOWN_FEATURES first."
+        )
+    try:
+        from src.app.config import settings
+        config = settings.load_population_mix_config()
+        section = config.get("accuracy_improvements", {})
+        return bool(section.get(feature, False))
+    except Exception as exc:
+        logger.warning("Failed to load accuracy flags: %s", exc)
+        return False
 
 
 class CalibrationArtifactStore:

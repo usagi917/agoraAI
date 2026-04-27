@@ -304,10 +304,12 @@ async def run_network_propagation(
         resp = response_map.get(agent_id, {})
         stance = resp.get("stance", "中立")
         confidence = resp.get("confidence", 0.5)
-        big_five_c = agent.get("big_five", {}).get("C", 0.5)
+        big_five = agent.get("big_five", {})
+        big_five_c = big_five.get("C", 0.5)
+        big_five_a = big_five.get("A", 0.5)
 
         opinion = _convert_stance_to_opinion(stance, confidence)
-        stubbornness = stubbornness_from_big_five(big_five_c)
+        stubbornness = stubbornness_from_big_five(big_five_c, agreeableness=big_five_a)
 
         engine_agents.append({
             "id": agent_id,
@@ -501,3 +503,160 @@ async def run_network_propagation(
         reflection_count=total_reflections,
         reflections=reflections,
     )
+
+
+# ---------------------------------------------------------------------------
+# Meeting Feedback Propagation (Improvement 4)
+# ---------------------------------------------------------------------------
+
+async def run_meeting_feedback_propagation(
+    agents: list[dict],
+    edges: list[dict],
+    representative_updates: list[dict],
+    *,
+    activation_responses: list[dict],
+    seed: int | None = None,
+) -> dict:
+    """Propagate meeting representative stance changes to the population (1 round).
+
+    Unlike the full ``run_network_propagation``, this function:
+    - Runs exactly **1 propagation round** (does not iterate to convergence).
+    - Only overwrites opinions for representatives that changed stance;
+      all other agents keep their pre-meeting opinion.
+    - Preserves each agent's original ``confidence`` value (no inverse
+      conversion from opinion back to confidence).
+
+    Args:
+        agents: Agent profile dicts (must have id, big_five).
+        edges: SocialEdge dicts with agent_id, target_id, strength.
+        representative_updates: List of ``{"agent_id", "old_stance", "new_stance"}``.
+        activation_responses: Original activation responses (used to read
+            each agent's stance, confidence, and other fields).
+        seed: Optional RNG seed (unused currently, reserved for future use).
+
+    Returns:
+        dict with keys:
+        - ``opinions``: list[list[float]] -- post-feedback opinion vectors
+        - ``changed_agents``: list[dict] -- agents whose stance label changed
+        - ``propagation_record``: dict -- summary metadata
+        - ``feedback_responses``: list[dict] -- updated response dicts with
+          new stance labels but original confidence values preserved
+    """
+    # Build response lookup
+    response_map: dict[str, dict] = {}
+    for r in activation_responses:
+        response_map[r["agent_id"]] = r
+
+    # Build set of shifted representative IDs
+    update_map: dict[str, str] = {}  # agent_id -> new_stance
+    for upd in representative_updates:
+        update_map[upd["agent_id"]] = upd["new_stance"]
+
+    # Convert all agents to opinion dynamics format
+    engine_agents = []
+    for agent in agents:
+        agent_id = agent["id"]
+        resp = response_map.get(agent_id, {})
+        stance = resp.get("stance", "中立")
+        confidence = resp.get("confidence", 0.5)
+        big_five = agent.get("big_five", {})
+        big_five_c = big_five.get("C", 0.5)
+        big_five_a = big_five.get("A", 0.5)
+
+        # For representatives who changed, override stance with new_stance
+        if agent_id in update_map:
+            stance = update_map[agent_id]
+
+        opinion = _convert_stance_to_opinion(stance, confidence)
+        stubbornness = stubbornness_from_big_five(big_five_c, agreeableness=big_five_a)
+
+        engine_agents.append({
+            "id": agent_id,
+            "opinion_vector": opinion,
+            "stubbornness": stubbornness,
+        })
+
+    # Short-circuit: if no updates, return original opinions unchanged
+    if not representative_updates:
+        opinions = [ea["opinion_vector"][:] for ea in engine_agents]
+        feedback_responses = _build_feedback_responses_from_opinions(
+            agents, opinions, response_map,
+        )
+        return {
+            "opinions": opinions,
+            "changed_agents": [],
+            "propagation_record": {"rounds": 0, "max_delta": 0.0},
+            "feedback_responses": feedback_responses,
+        }
+
+    # Initialize engine & run exactly 1 propagation round.
+    # Use confidence_threshold=1.0 to disable bounded confidence filtering,
+    # since meeting feedback should propagate regardless of opinion distance.
+    engine = OpinionDynamicsEngine(
+        agents=engine_agents,
+        edges=edges,
+        confidence_threshold=1.0,
+    )
+
+    pre_opinions = [ea["opinion_vector"][:] for ea in engine_agents]
+    result = engine.propagation_step(timestep=0)
+    post_opinions = [list(row) for row in result.updated_opinions]
+
+    # Detect which agents' stance labels changed
+    changed_agents = []
+    for i, agent in enumerate(agents):
+        old_stance = _convert_opinion_to_stance(pre_opinions[i])
+        new_stance = _convert_opinion_to_stance(post_opinions[i])
+        if old_stance != new_stance:
+            changed_agents.append({
+                "agent_id": agent["id"],
+                "old_stance": old_stance,
+                "new_stance": new_stance,
+                "opinion_delta": abs(post_opinions[i][0] - pre_opinions[i][0]),
+            })
+
+    # Build feedback responses (preserve original confidence)
+    feedback_responses = _build_feedback_responses_from_opinions(
+        agents, post_opinions, response_map,
+    )
+
+    return {
+        "opinions": post_opinions,
+        "changed_agents": changed_agents,
+        "propagation_record": {
+            "rounds": 1,
+            "max_delta": result.max_delta,
+            "representative_count": len(representative_updates),
+        },
+        "feedback_responses": feedback_responses,
+    }
+
+
+def _build_feedback_responses_from_opinions(
+    agents: list[dict],
+    opinions: list[list[float]],
+    response_map: dict[str, dict],
+) -> list[dict]:
+    """Build feedback response dicts from opinion vectors.
+
+    Stance labels are derived from the new opinion, but confidence values
+    are preserved from the original activation responses (no inverse
+    conversion from opinion to confidence).
+    """
+    feedback_responses = []
+    for i, agent in enumerate(agents):
+        agent_id = agent["id"]
+        orig_resp = response_map.get(agent_id, {})
+        new_stance = _convert_opinion_to_stance(opinions[i])
+
+        feedback_responses.append({
+            "agent_id": agent_id,
+            "stance": new_stance,
+            "confidence": orig_resp.get("confidence", 0.5),
+            "reason": orig_resp.get("reason", ""),
+            "concern": orig_resp.get("concern", ""),
+            "priority": orig_resp.get("priority", ""),
+            "opinion_vector": opinions[i],
+        })
+
+    return feedback_responses

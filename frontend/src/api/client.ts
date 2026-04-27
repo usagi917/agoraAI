@@ -904,7 +904,7 @@ export interface TranscriptEntry {
   created_at: string
 }
 
-export interface TranscriptResponse {
+interface TranscriptResponse {
   simulation_id: string
   total_entries: number
   entries: TranscriptEntry[]

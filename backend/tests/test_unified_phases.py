@@ -83,6 +83,15 @@ class TestRunSocietyPulse:
                 return_value=("pop-1", fake_agents),
             ),
             patch(
+                "src.app.services.phases.society_pulse._save_network",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.app.services.phases.society_pulse._load_population_edges",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
                 "src.app.services.phases.society_pulse.select_agents",
                 new_callable=AsyncMock,
                 return_value=fake_agents,
@@ -91,6 +100,11 @@ class TestRunSocietyPulse:
                 "src.app.services.phases.society_pulse.run_activation",
                 new_callable=AsyncMock,
                 return_value=fake_activation,
+            ),
+            patch(
+                "src.app.services.phases.society_pulse.generate_persona_narratives_post_activation",
+                new_callable=AsyncMock,
+                return_value=fake_agents,
             ),
             patch(
                 "src.app.services.phases.society_pulse.evaluate_society_simulation",

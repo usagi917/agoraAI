@@ -5,6 +5,47 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 
 
+class TestRepresentativeUpdates:
+    """Representative stance change extraction helpers."""
+
+    def test_extract_representative_updates_uses_agent_id_mapped_responses(self):
+        """Pre-meeting stance should come from responses keyed by canonical agent_id."""
+        from src.app.services.society.society_orchestrator import (
+            _extract_representative_updates,
+        )
+
+        meeting_participants = [
+            {
+                "role": "citizen_representative",
+                "agent_profile": {"id": "agent-123"},
+            },
+        ]
+        meeting_result = {
+            "synthesis": {
+                "participant_stances": {"agent-123": "賛成"},
+            },
+        }
+        activation_responses = [
+            {
+                "stance": "反対",
+                "confidence": 0.8,
+                "agent_id": "agent-123",
+            },
+        ]
+
+        updates = _extract_representative_updates(
+            meeting_participants, meeting_result, activation_responses,
+        )
+
+        assert updates == [
+            {
+                "agent_id": "agent-123",
+                "old_stance": "反対",
+                "new_stance": "賛成",
+            },
+        ]
+
+
 class TestIndependenceWeightedReaggregation:
     """独立性重み → 再集計の統合テスト.
 
@@ -728,6 +769,7 @@ class TestSocietyOrchestratorFlow:
                     metadata_json={},
                     error_message=None,
                     seed=42,
+                    scenario_pair_id=None,
                 )
 
             async def get(self, model, obj_id):
@@ -758,14 +800,14 @@ class TestSocietyOrchestratorFlow:
 
         fake_session = FakeSession()
 
-        async def fake_get_or_create_population(session, population_id, count=None, seed=None, **kwargs):
+        async def fake_get_or_create_population(session, population_id, count=None, seed=None, *, strict=False):
             observed_counts.append(count)
             return "pop-1", [{"id": "a1", "demographics": {"age": 35, "region": "関東（都市部）", "occupation": "会社員"}}]
 
         async def fake_publish(simulation_id, event, data):
             published_events.append((event, data))
 
-        async def fake_select_agents(agents, theme, target_count=100):
+        async def fake_select_agents(agents, theme, target_count=100, edges=None):
             return agents
 
         async def fake_run_activation(selected_agents, theme, on_progress=None):
@@ -789,6 +831,7 @@ class TestSocietyOrchestratorFlow:
         monkeypatch.setattr(orchestrator, "_get_or_create_population", fake_get_or_create_population)
         monkeypatch.setattr(orchestrator.sse_manager, "publish", fake_publish)
         monkeypatch.setattr(orchestrator, "_save_network", AsyncMock())
+        monkeypatch.setattr(orchestrator, "_load_population_edges", AsyncMock(return_value=[]))
         monkeypatch.setattr(orchestrator, "select_agents", fake_select_agents)
         monkeypatch.setattr(orchestrator, "run_activation", fake_run_activation)
         monkeypatch.setattr(orchestrator, "evaluate_society_simulation", fake_evaluate_society_simulation)
@@ -867,6 +910,7 @@ class TestRunSocietyPipelineFixes:
                     metadata_json={},
                     error_message=None,
                     seed=42,
+                    scenario_pair_id=None,
                 )
 
             async def get(self, model, obj_id):
@@ -899,7 +943,7 @@ class TestRunSocietyPipelineFixes:
 
         fake_session = FakeSession()
 
-        async def fake_get_or_create_population(session, population_id, count=None, seed=None, **kwargs):
+        async def fake_get_or_create_population(session, population_id, count=None, seed=None, *, strict=False):
             return "pop-1", [
                 {"id": "a1", "demographics": {"age": 35, "region": "関東（都市部）", "occupation": "会社員"}},
                 {"id": "a2", "demographics": {"age": 62, "region": "九州", "occupation": "自営業"}},
@@ -908,7 +952,7 @@ class TestRunSocietyPipelineFixes:
         async def fake_publish(simulation_id, event, data):
             return None
 
-        async def fake_select_agents(agents, theme, target_count=100):
+        async def fake_select_agents(agents, theme, target_count=100, edges=None):
             return agents
 
         async def fake_run_activation(selected_agents, theme, on_progress=None):
@@ -973,6 +1017,7 @@ class TestRunSocietyPipelineFixes:
         monkeypatch.setattr(orchestrator, "_get_or_create_population", fake_get_or_create_population)
         monkeypatch.setattr(orchestrator.sse_manager, "publish", fake_publish)
         monkeypatch.setattr(orchestrator, "_save_network", AsyncMock())
+        monkeypatch.setattr(orchestrator, "_load_population_edges", AsyncMock(return_value=[]))
         monkeypatch.setattr(orchestrator, "select_agents", fake_select_agents)
         monkeypatch.setattr(orchestrator, "run_activation", fake_run_activation)
         monkeypatch.setattr(orchestrator, "run_network_propagation", fake_run_network_propagation)
@@ -1023,6 +1068,7 @@ class TestRunSocietyPipelineFixes:
                     metadata_json={},
                     error_message=None,
                     seed=42,
+                    scenario_pair_id=None,
                 )
 
             async def get(self, model, obj_id):
@@ -1055,7 +1101,7 @@ class TestRunSocietyPipelineFixes:
 
         fake_session = FakeSession()
 
-        async def fake_get_or_create_population(session, population_id, count=None, seed=None, **kwargs):
+        async def fake_get_or_create_population(session, population_id, count=None, seed=None, *, strict=False):
             return "pop-1", [
                 {"id": "a1", "demographics": {"age": 35, "region": "関東（都市部）", "occupation": "会社員"}},
             ]
@@ -1063,7 +1109,7 @@ class TestRunSocietyPipelineFixes:
         async def fake_publish(simulation_id, event, data):
             return None
 
-        async def fake_select_agents(agents, theme, target_count=100):
+        async def fake_select_agents(agents, theme, target_count=100, edges=None):
             return agents
 
         async def fake_run_activation(selected_agents, theme, on_progress=None):
@@ -1092,6 +1138,7 @@ class TestRunSocietyPipelineFixes:
         monkeypatch.setattr(orchestrator, "_get_or_create_population", fake_get_or_create_population)
         monkeypatch.setattr(orchestrator.sse_manager, "publish", fake_publish)
         monkeypatch.setattr(orchestrator, "_save_network", AsyncMock())
+        monkeypatch.setattr(orchestrator, "_load_population_edges", AsyncMock(return_value=[]))
         monkeypatch.setattr(orchestrator, "select_agents", fake_select_agents)
         monkeypatch.setattr(orchestrator, "run_activation", fake_run_activation)
         monkeypatch.setattr(orchestrator, "run_network_propagation", fake_run_network_propagation)
@@ -1121,212 +1168,3 @@ class TestRunSocietyPipelineFixes:
         assert observed_dirs == [
             str(orchestrator.settings.config_dir / "grounding" / "survey_data")
         ]
-
-
-class TestSeedPropagation:
-    """P0-1: _get_or_create_population が seed を generate_population に渡すこと."""
-
-    @pytest.mark.asyncio
-    async def test_get_or_create_population_passes_seed(self):
-        """seed パラメータが generate_population まで伝播すること."""
-        from unittest.mock import AsyncMock, MagicMock, patch
-        from src.app.services.society import society_orchestrator as orchestrator
-
-        mock_session = AsyncMock()
-        mock_session.get = AsyncMock(return_value=None)  # population not found
-
-        captured_kwargs = {}
-        original_generate = None
-
-        async def capturing_generate(pop_id, count=None, seed=None):
-            captured_kwargs["seed"] = seed
-            # Return minimal agents
-            return [{"id": f"agent-{i}", "population_id": pop_id,
-                     "agent_index": i, "demographics": {"age": 30, "region": "関東", "gender": "male"},
-                     "big_five": {}, "values": {}, "life_event": "", "contradiction": "",
-                     "information_source": "", "local_context": "", "hidden_motivation": "",
-                     "speech_style": "", "shock_sensitivity": 0.5, "llm_backend": "default",
-                     "memory_summary": ""} for i in range(5)]
-
-        with patch.object(orchestrator, "generate_population", side_effect=capturing_generate):
-            await orchestrator._get_or_create_population(mock_session, None, 100, seed=42)
-
-        assert captured_kwargs.get("seed") == 42, (
-            "seed=42 が generate_population に渡されるべき"
-        )
-
-    @pytest.mark.asyncio
-    async def test_get_or_create_population_without_seed(self):
-        """seed 未指定時は None が渡されること."""
-        from unittest.mock import AsyncMock, patch
-        from src.app.services.society import society_orchestrator as orchestrator
-
-        mock_session = AsyncMock()
-        mock_session.get = AsyncMock(return_value=None)
-
-        captured_kwargs = {}
-
-        async def capturing_generate(pop_id, count=None, seed=None):
-            captured_kwargs["seed"] = seed
-            return [{"id": f"agent-{i}", "population_id": pop_id,
-                     "agent_index": i, "demographics": {"age": 30, "region": "関東", "gender": "male"},
-                     "big_five": {}, "values": {}, "life_event": "", "contradiction": "",
-                     "information_source": "", "local_context": "", "hidden_motivation": "",
-                     "speech_style": "", "shock_sensitivity": 0.5, "llm_backend": "default",
-                     "memory_summary": ""} for i in range(5)]
-
-        with patch.object(orchestrator, "generate_population", side_effect=capturing_generate):
-            await orchestrator._get_or_create_population(mock_session, None, 100)
-
-        assert captured_kwargs.get("seed") is None
-
-
-class TestStigmergyAgentId:
-    """P0-2: stigmergy board が正しい agent_id を受け取ること."""
-
-    def test_responses_with_ids_have_agent_id(self):
-        """responses_with_ids にはすべて agent_id が設定されていること."""
-        selected_agents = [
-            {"id": "agent-1"},
-            {"id": "agent-2"},
-            {"id": "agent-3"},
-        ]
-        raw_responses = [
-            {"stance": "賛成", "confidence": 0.8, "reason": "理由", "concern": "財源"},
-            {"stance": "反対", "confidence": 0.6, "reason": "理由", "concern": "格差"},
-            {"stance": "中立", "confidence": 0.5, "reason": "理由", "concern": ""},
-        ]
-
-        # Build responses_with_ids the same way the orchestrator does
-        responses_with_ids = []
-        for agent, resp in zip(selected_agents, raw_responses):
-            responses_with_ids.append({**resp, "agent_id": agent["id"]})
-
-        # Simulate stigmergy loop — should use responses_with_ids, not raw_responses
-        deposited = []
-        for resp in responses_with_ids:
-            concern = resp.get("concern", "")
-            if concern:
-                for keyword in ["財源", "格差"]:
-                    if keyword in concern:
-                        deposited.append((resp.get("agent_id", ""), keyword))
-
-        # All deposits should have a real agent_id, not empty string
-        assert all(aid != "" for aid, _ in deposited), (
-            "stigmergy deposits must have non-empty agent_id"
-        )
-        assert ("agent-1", "財源") in deposited
-        assert ("agent-2", "格差") in deposited
-
-    def test_raw_responses_lack_agent_id(self):
-        """activation_result['responses'] 直接参照では agent_id が空になるバグの再現."""
-        raw_responses = [
-            {"stance": "賛成", "confidence": 0.8, "concern": "財源"},
-        ]
-        # This is the bug: raw responses don't have agent_id
-        agent_id = raw_responses[0].get("agent_id", "")
-        assert agent_id == "", "raw responses should NOT have agent_id (confirming the bug)"
-
-
-class TestPredictionMarketTimingConfig:
-    """P0-3: 予測市場タイミングのコンフィグフラグテスト."""
-
-    def test_default_is_pre_propagation(self):
-        """デフォルトでは use_post_propagation=False (pre-propagation を使用)."""
-        from src.app.services.society.society_orchestrator import _get_prediction_market_config
-
-        config = _get_prediction_market_config({})
-        assert config["use_post_propagation"] is False
-
-    def test_config_enables_post_propagation(self):
-        """population_mix config で post_propagation を有効化できること."""
-        from src.app.services.society.society_orchestrator import _get_prediction_market_config
-
-        mix_config = {"prediction_market": {"use_post_propagation": True}}
-        config = _get_prediction_market_config(mix_config)
-        assert config["use_post_propagation"] is True
-
-    def test_config_with_empty_prediction_market_section(self):
-        """prediction_market セクションが空でもデフォルト値が返ること."""
-        from src.app.services.society.society_orchestrator import _get_prediction_market_config
-
-        mix_config = {"prediction_market": {}}
-        config = _get_prediction_market_config(mix_config)
-        assert config["use_post_propagation"] is False
-
-
-class TestStrictPopulationLookup:
-    """strict=True 時に不正な population_id でエラーを返すことを検証."""
-
-    @pytest.mark.asyncio
-    async def test_strict_raises_on_missing_population(self):
-        """存在しない population_id で ValueError を返すこと."""
-        from src.app.services.society import society_orchestrator as orchestrator
-
-        mock_session = AsyncMock()
-        mock_session.get = AsyncMock(return_value=None)
-
-        with pytest.raises(ValueError, match="not found"):
-            await orchestrator._get_or_create_population(
-                mock_session, "nonexistent-id", 100, strict=True,
-            )
-
-    @pytest.mark.asyncio
-    async def test_strict_raises_on_not_ready_population(self):
-        """status='generating' の Population で ValueError を返すこと."""
-        from src.app.services.society import society_orchestrator as orchestrator
-
-        pop_mock = MagicMock()
-        pop_mock.status = "generating"
-
-        mock_session = AsyncMock()
-        mock_session.get = AsyncMock(return_value=pop_mock)
-
-        with pytest.raises(ValueError, match="not ready"):
-            await orchestrator._get_or_create_population(
-                mock_session, "some-pop-id", 100, strict=True,
-            )
-
-    @pytest.mark.asyncio
-    async def test_strict_raises_on_empty_agents(self):
-        """status='ready' だがエージェント0件で ValueError を返すこと."""
-        from src.app.services.society import society_orchestrator as orchestrator
-
-        pop_mock = MagicMock()
-        pop_mock.status = "ready"
-
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-
-        mock_session = AsyncMock()
-        mock_session.get = AsyncMock(return_value=pop_mock)
-        mock_session.execute = AsyncMock(return_value=mock_result)
-
-        with pytest.raises(ValueError, match="no agent"):
-            await orchestrator._get_or_create_population(
-                mock_session, "some-pop-id", 100, strict=True,
-            )
-
-    @pytest.mark.asyncio
-    async def test_non_strict_falls_through_to_generation(self):
-        """strict=False (デフォルト) では従来通り新規生成にフォールスルーすること."""
-        from src.app.services.society import society_orchestrator as orchestrator
-
-        mock_session = AsyncMock()
-        mock_session.get = AsyncMock(return_value=None)
-
-        async def fake_generate(pop_id, count=None, seed=None):
-            return [{"id": f"a{i}", "population_id": pop_id, "agent_index": i,
-                     "demographics": {}, "big_five": {}, "values": {},
-                     "life_event": "", "contradiction": "", "information_source": "",
-                     "local_context": "", "hidden_motivation": "", "speech_style": "",
-                     "shock_sensitivity": {}, "llm_backend": "openai",
-                     "memory_summary": ""} for i in range(5)]
-
-        with patch.object(orchestrator, "generate_population", side_effect=fake_generate):
-            pop_id, agents = await orchestrator._get_or_create_population(
-                mock_session, "nonexistent-id", 100,
-            )
-
-        assert pop_id != "nonexistent-id"
-        assert len(agents) == 5

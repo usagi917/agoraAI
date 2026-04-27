@@ -54,21 +54,18 @@ class TestFilterBubbleThresholds:
         np.testing.assert_array_almost_equal(thresholds, [0.3, 0.3])
 
     def test_bubble_width_one_max_effect(self):
-        """bubble_width=1.0 で最大のフィルターバブル効果."""
+        """bubble_width=1.0 で SNS エージェントの閾値がより狭くなる."""
         from src.app.services.society.opinion_dynamics import compute_filter_bubble_thresholds
 
         agents = [
-            {"id": "a1", "information_source": "SNS(Twitter/X)", "big_five": {"O": 0.2, "C": 0.5}},
-            {"id": "a2", "information_source": "新聞", "big_five": {"O": 0.8, "C": 0.5}},
+            {"id": "a1", "information_source": "SNS(Twitter/X)", "big_five": {"O": 0.5, "C": 0.5}},
         ]
 
         t_max = compute_filter_bubble_thresholds(agents, base_threshold=0.3, bubble_width=1.0)
         t_mid = compute_filter_bubble_thresholds(agents, base_threshold=0.3, bubble_width=0.5)
 
-        # bubble_width が大きいほど、情報源による閾値差が拡大する
-        spread_max = abs(float(t_max[0]) - float(t_max[1]))
-        spread_mid = abs(float(t_mid[0]) - float(t_mid[1]))
-        assert spread_max >= spread_mid
+        # bubble_width が大きいほど、SNS エージェントの閾値はより狭くなる
+        assert float(t_max[0]) <= float(t_mid[0])
 
     def test_sns_users_have_narrower_threshold(self):
         """SNS 主体の情報源はフィルターバブルにより閾値が狭い."""

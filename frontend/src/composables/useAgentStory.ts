@@ -2,7 +2,7 @@ import { ref, watch, computed, type Ref } from 'vue'
 import { getAgentDetail, type AgentDetailResponse } from '../api/client'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
 
-export interface OpinionJourneyItem {
+interface OpinionJourneyItem {
   type: 'contribution' | 'stance_shift'
   round: number
   content: string
@@ -10,7 +10,7 @@ export interface OpinionJourneyItem {
   roundName?: string
 }
 
-export interface InfluenceEntry {
+interface InfluenceEntry {
   agentName: string
   count: number
 }
@@ -40,7 +40,7 @@ export function useAgentStory(simId: string, agentId: Ref<string | null>) {
       lastFetchedId = id
     } catch (e: any) {
       if (e?.name === 'CanceledError' || e?.name === 'AbortError') return
-      error.value = e?.message ?? 'データの取得に失敗しました'
+      error.value = e?.message ?? `エージェント ${id} の詳細データの取得に失敗しました`
     } finally {
       if (abortController === controller) {
         abortController = null

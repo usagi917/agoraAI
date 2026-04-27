@@ -15,11 +15,13 @@ type FilterMode = 'all' | 'shifts_only'
 const filterMode = ref<FilterMode>('all')
 const filterAgentId = ref<string | null>(null)
 
-// Track when the current meeting round started so we can exclude historical shifts
-const currentRoundStartTime = ref<number>(Date.now())
+// Track when the current meeting round started so we can exclude historical shifts.
+// Initial value is 0 (not Date.now()) so that stance shifts arriving before the
+// first round change are not filtered out.
+const currentRoundStartTime = ref<number>(0)
 watch(() => societyGraphStore.currentRound, () => {
   currentRoundStartTime.value = Date.now()
-}, { immediate: true })
+})
 
 // Track arrival timestamps for arguments (they have no server-side timestamp)
 const argTimestamps = ref<number[]>([])

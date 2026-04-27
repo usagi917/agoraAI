@@ -7,6 +7,7 @@ from src.app.services.society.agent_selector import (
     _extract_relevant_topics,
     _score_agent,
     _age_bracket,
+    compute_degree_centrality,
 )
 
 
@@ -242,3 +243,116 @@ class TestDemographicQuotas:
         genders = {a["demographics"]["gender"] for a in selected}
         assert len(brackets) >= 3, f"Expected 3+ age brackets, got {brackets}"
         assert "male" in genders and "female" in genders
+
+
+# ---------------------------------------------------------------------------
+# Network-aware selection tests (改善5)
+# ---------------------------------------------------------------------------
+
+
+def _make_star_graph_agents(center_id: str = "hub", n_leaves: int = 20):
+    """中心1ノード + n_leaves 個のリーフからなるスターグラフを返す。"""
+    agents = []
+    # Hub agent
+    agents.append({
+        "id": center_id,
+        "demographics": {
+            "age": 40,
+            "region": "関東（都市部）",
+            "gender": "male",
+            "income_bracket": "middle",
+            "occupation": "会社員",
+        },
+        "shock_sensitivity": {
+            "economy": 0.5,
+            "technology": 0.5,
+        },
+    })
+    # Leaf agents
+    regions = ["北海道", "東北", "関東（都市部）", "関西（都市部）", "九州"]
+    for i in range(n_leaves):
+        agents.append({
+            "id": f"leaf-{i}",
+            "demographics": {
+                "age": 20 + (i % 50),
+                "region": regions[i % len(regions)],
+                "gender": "male" if i % 2 == 0 else "female",
+                "income_bracket": "lower_middle",
+                "occupation": "会社員",
+            },
+            "shock_sensitivity": {
+                "economy": 0.5,
+                "technology": 0.5,
+            },
+        })
+
+    # Edges: hub connects to every leaf
+    edges = []
+    for i in range(n_leaves):
+        edges.append({
+            "agent_id": center_id,
+            "target_id": f"leaf-{i}",
+            "strength": 0.8,
+        })
+
+    return agents, edges
+
+
+class TestNetworkAwareSelection:
+    """ネットワーク中心性を使ったエージェント選出のテスト。"""
+
+    @pytest.mark.asyncio
+    async def test_hub_agents_preferred(self):
+        """スターグラフの中心ノードが選出されやすい。"""
+        agents, edges = _make_star_graph_agents(n_leaves=50)
+        # 少数だけ選出 -- hub は高い centrality でブーストされるべき
+        selected_ids_with_edges = set()
+        for _ in range(20):
+            selected = await select_agents(agents, "経済問題", target_count=10, edges=edges)
+            selected_ids_with_edges.update(a["id"] for a in selected)
+        assert "hub" in selected_ids_with_edges, "Hub agent should be selected with edges"
+
+    @pytest.mark.asyncio
+    async def test_no_edges_fallback(self):
+        """edges=None で既存の挙動と完全一致する。"""
+        agents, edges = _make_star_graph_agents(n_leaves=30)
+        # Without edges
+        selected_no_edges = await select_agents(agents, "経済問題", target_count=15)
+        # With edges=None explicitly
+        selected_none = await select_agents(agents, "経済問題", target_count=15, edges=None)
+        # Both should work and return same count
+        assert len(selected_no_edges) >= 15
+        assert len(selected_none) >= 15
+
+    @pytest.mark.asyncio
+    async def test_demographic_quotas_still_enforced(self):
+        """エッジスコアがあっても多様性制約は維持される。"""
+        agents, edges = _make_star_graph_agents(n_leaves=100)
+        selected = await select_agents(agents, "経済問題", target_count=30, edges=edges)
+        regions = {a["demographics"]["region"] for a in selected}
+        genders = {a["demographics"]["gender"] for a in selected}
+        # At least 3 regions and both genders
+        assert len(regions) >= 3, f"Expected >=3 regions, got {regions}"
+        assert "male" in genders and "female" in genders
+
+    def test_degree_centrality_values(self):
+        """compute_degree_centrality がスターグラフで正しい値を返す。"""
+        agents, edges = _make_star_graph_agents(n_leaves=10)
+        centrality = compute_degree_centrality(agents, edges)
+        # Hub should have highest centrality (degree = 10 out of 10 possible)
+        assert centrality["hub"] == 1.0, f"Hub centrality should be 1.0, got {centrality['hub']}"
+        # Each leaf should have centrality = 1/10 = 0.1
+        for i in range(10):
+            assert abs(centrality[f"leaf-{i}"] - 0.1) < 0.01, (
+                f"Leaf-{i} centrality should be ~0.1, got {centrality[f'leaf-{i}']}"
+            )
+
+    def test_degree_centrality_empty_edges(self):
+        """edges が None/空なら全員 0.0 を返す。"""
+        agents, _ = _make_star_graph_agents(n_leaves=5)
+        # None
+        centrality_none = compute_degree_centrality(agents, None)
+        assert all(v == 0.0 for v in centrality_none.values())
+        # Empty
+        centrality_empty = compute_degree_centrality(agents, [])
+        assert all(v == 0.0 for v in centrality_empty.values())

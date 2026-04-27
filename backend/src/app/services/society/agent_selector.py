@@ -4,6 +4,8 @@ import logging
 import random
 from collections import defaultdict
 
+import networkx as nx
+
 from src.app.services.society.age_utils import age_bracket_4 as _age_bracket
 
 logger = logging.getLogger(__name__)
@@ -23,6 +25,31 @@ TOPIC_KEYWORDS: dict[str, list[str]] = {
 }
 
 
+def compute_degree_centrality(
+    agents: list[dict],
+    edges: list[dict] | None,
+) -> dict[str, float]:
+    """networkx でグラフを構築し、degree centrality を計算する。
+
+    Args:
+        agents: エージェントリスト（各要素に "id" キーが必要）
+        edges: エッジリスト（各要素に "agent_id", "target_id", "strength" キーが必要）
+
+    Returns:
+        agent_id → centrality_score の dict。edges が None/空なら全員 0.0。
+    """
+    agent_ids = [a["id"] for a in agents]
+
+    if not edges:
+        return {aid: 0.0 for aid in agent_ids}
+
+    G = nx.Graph()
+    G.add_nodes_from(agent_ids)
+    for edge in edges:
+        G.add_edge(edge["agent_id"], edge["target_id"], weight=edge.get("strength", 0.5))
+
+    centrality = nx.degree_centrality(G)
+    return {aid: centrality.get(aid, 0.0) for aid in agent_ids}
 
 
 def _build_demographic_quotas(agents: list[dict], target_count: int) -> dict:
@@ -75,14 +102,22 @@ def _extract_relevant_topics(theme: str) -> list[str]:
     return relevant
 
 
-def _score_agent(agent: dict, relevant_topics: list[str]) -> float:
-    """エージェントのテーマ関連スコアを計算する (0-1)。"""
+def _score_agent(agent: dict, relevant_topics: list[str], centrality: float = 0.0) -> float:
+    """エージェントのテーマ関連スコアを計算する (0-1)。
+
+    centrality が 0.0 の場合はトピックスコアのみ（既存互換）。
+    centrality が指定された場合: final_score = topic_score * 0.7 + centrality * 0.3
+    """
     shock = agent.get("shock_sensitivity", {})
     if not shock or not relevant_topics:
-        return 0.5
+        topic_score = 0.5
+    else:
+        scores = [shock.get(t, 0.3) for t in relevant_topics]
+        topic_score = sum(scores) / len(scores) if scores else 0.5
 
-    scores = [shock.get(t, 0.3) for t in relevant_topics]
-    return sum(scores) / len(scores) if scores else 0.5
+    if centrality > 0.0:
+        return topic_score * 0.7 + centrality * 0.3
+    return topic_score
 
 
 def _stratified_sample(
@@ -208,8 +243,13 @@ async def select_agents(
     target_count: int = 100,
     min_count: int = 50,
     max_count: int = 200,
+    edges: list[dict] | None = None,
 ) -> list[dict]:
     """テーマに基づいてエージェントを選抜する。
+
+    Args:
+        edges: ネットワークエッジ。指定された場合、degree centrality を
+               スコアリングに反映する (topic*0.7 + centrality*0.3)。
 
     Returns:
         選抜されたエージェントプロフィールのリスト
@@ -221,8 +261,14 @@ async def select_agents(
     relevant_topics = _extract_relevant_topics(theme)
     logger.info("Theme topics: %s", relevant_topics)
 
+    # ネットワーク中心性を事前計算
+    centrality_map = compute_degree_centrality(agents, edges) if edges else {}
+
     # スコアリング
-    scores = [_score_agent(a, relevant_topics) for a in agents]
+    scores = [
+        _score_agent(a, relevant_topics, centrality=centrality_map.get(a.get("id", ""), 0.0))
+        for a in agents
+    ]
 
     # 層化抽出
     selected_indices = _stratified_sample(agents, scores, target_count)

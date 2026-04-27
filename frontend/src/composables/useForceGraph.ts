@@ -152,8 +152,6 @@ interface InternalLink {
   curveIndex: number
 }
 
-export type { InternalLink }
-
 interface TransitionNodeFrame extends Position {
   label: string
   type: string

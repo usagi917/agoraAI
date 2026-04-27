@@ -223,6 +223,18 @@ async def _apply_sqlite_compatibility_migrations(conn: AsyncConnection) -> None:
                     {"val": _json.dumps([src], ensure_ascii=False), "id": row_id},
                 )
 
+    # --- agent_profiles: 二層メモリカラム追加 ---
+    if "agent_profiles" in existing_tables:
+        ap_columns2 = await _get_sqlite_columns(conn, "agent_profiles")
+        if "rolling_summary" not in ap_columns2:
+            await conn.execute(
+                text("ALTER TABLE agent_profiles ADD COLUMN rolling_summary TEXT DEFAULT ''")
+            )
+        if "episodes" not in ap_columns2:
+            await conn.execute(
+                text("ALTER TABLE agent_profiles ADD COLUMN episodes JSON")
+            )
+
     # --- validation_records: Step 2 スキーマ拡張 ---
     if "validation_records" in existing_tables:
         vr_columns = await _get_sqlite_columns(conn, "validation_records")
@@ -332,6 +344,18 @@ async def _apply_postgres_compatibility_migrations(conn: AsyncConnection) -> Non
                     "SET information_sources = to_json(ARRAY[information_source]) "
                     "WHERE information_source IS NOT NULL AND information_source != ''"
                 )
+            )
+
+    # --- agent_profiles: 二層メモリカラム追加 ---
+    if "agent_profiles" in existing_tables:
+        ap_columns2 = await _get_postgres_columns(conn, "agent_profiles")
+        if "rolling_summary" not in ap_columns2:
+            await conn.execute(
+                text("ALTER TABLE agent_profiles ADD COLUMN rolling_summary TEXT DEFAULT ''")
+            )
+        if "episodes" not in ap_columns2:
+            await conn.execute(
+                text("ALTER TABLE agent_profiles ADD COLUMN episodes JSON")
             )
 
     # --- validation_records: Step 2 スキーマ拡張 ---

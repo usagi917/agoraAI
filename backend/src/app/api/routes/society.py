@@ -163,6 +163,8 @@ async def fork_population(
             shock_sensitivity=agent.shock_sensitivity,
             llm_backend=agent.llm_backend,
             memory_summary=agent.memory_summary,  # 記憶を引き継ぐ
+            rolling_summary=agent.rolling_summary,
+            episodes=agent.episodes,
         )
         session.add(new_agent)
 

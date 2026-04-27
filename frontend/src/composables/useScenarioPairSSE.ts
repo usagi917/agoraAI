@@ -1,7 +1,7 @@
 import { ref, onUnmounted } from 'vue'
 import { useScenarioPairStore } from '../stores/scenarioPairStore'
 
-export interface ScenarioPairSSEEvent {
+interface ScenarioPairSSEEvent {
   simulation_id: string
   role: 'baseline' | 'intervention'
   event_type: string

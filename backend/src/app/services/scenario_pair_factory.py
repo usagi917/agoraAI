@@ -36,6 +36,8 @@ def _serialize_agent(a: AgentProfile) -> dict:
         "shock_sensitivity": a.shock_sensitivity,
         "llm_backend": a.llm_backend,
         "memory_summary": a.memory_summary,
+        "rolling_summary": a.rolling_summary,
+        "episodes": a.episodes,
     }
 
 
