@@ -638,6 +638,14 @@ def _normalize_direction(value: Any) -> str:
     return "flat"
 
 
+def _direction_from_delta(delta: float) -> str:
+    if delta > 0:
+        return "up"
+    if delta < 0:
+        return "down"
+    return "flat"
+
+
 def evaluate_distribution_prediction(
     predicted_payload: dict[str, Any],
     actual_payload: dict[str, Any],
@@ -746,28 +754,43 @@ def evaluate_intervention_prediction(
     if not predictions or not actuals:
         return {"status": "pending_validation", "direction_accuracy": None, "mae": None}
 
-    actual_by_key = {
-        (
+    actuals_by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for item in actuals:
+        key = (
             str(item.get("intervention_id") or ""),
             str(item.get("metric") or ""),
-        ): item
-        for item in actuals
-    }
+        )
+        actuals_by_key.setdefault(key, []).append(item)
+
     rows: list[dict[str, Any]] = []
     for prediction in predictions:
         key = (
             str(prediction.get("intervention_id") or ""),
             str(prediction.get("metric") or ""),
         )
-        actual = actual_by_key.get(key)
-        if not actual:
+        matched_actuals = actuals_by_key.get(key)
+        if not matched_actuals:
             continue
         expected_delta = _as_float(prediction.get("expected_delta"))
-        actual_delta = _as_float(actual.get("actual_delta"), _as_float(actual.get("signed_delta")))
+        actual_deltas = [
+            _as_float(actual.get("actual_delta"), _as_float(actual.get("signed_delta")))
+            for actual in matched_actuals
+        ]
+        actual_delta = sum(actual_deltas) / len(actual_deltas)
         predicted_direction = _normalize_direction(prediction.get("direction"))
-        actual_direction = _normalize_direction(actual.get("direction"))
+        actual_direction = _direction_from_delta(actual_delta)
         if actual_direction == "flat":
-            actual_direction = "up" if actual_delta > 0 else "down" if actual_delta < 0 else "flat"
+            actual_direction = next(
+                (
+                    direction
+                    for direction in (
+                        _normalize_direction(actual.get("direction"))
+                        for actual in matched_actuals
+                    )
+                    if direction != "flat"
+                ),
+                "flat",
+            )
         rows.append({
             "intervention_id": key[0],
             "metric": key[1],

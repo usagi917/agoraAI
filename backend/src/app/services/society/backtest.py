@@ -583,9 +583,14 @@ def overlay_observed_intervention_comparison(
         downside = round(abs(sum(negative) / max(len(negative), 1)), 4) if negative else 0.0
         spread = pstdev(deltas) if len(deltas) > 1 else 0.0
         uncertainty = round(min(1.0, (1 / math.sqrt(len(deltas))) + spread), 4)
+        observed_deltas_by_metric: dict[str, list[float]] = {}
+        for observation in observations:
+            metric = str(observation["metric"])
+            observed_deltas_by_metric.setdefault(metric, []).append(float(observation["signed_delta"]))
         observed_by_metric = {
-            str(obs["metric"]): float(obs["signed_delta"])
-            for obs in observations
+            metric: sum(values) / len(values)
+            for metric, values in observed_deltas_by_metric.items()
+            if values
         }
         predicted_effects = list(item.get("predicted_effects") or [])
         effect_comparisons = []

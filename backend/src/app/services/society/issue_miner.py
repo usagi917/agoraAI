@@ -277,12 +277,12 @@ def build_intervention_comparison(
         predicted_effects = []
         for metric in INTERVENTION_METRICS.get(intervention["intervention_id"], []):
             metric_direction = str(METRIC_DEFINITIONS.get(metric, {}).get("direction") or "up")
-            effect_direction = "down" if metric_direction == "down" else "up"
             predicted_effects.append({
                 "intervention_id": intervention["intervention_id"],
                 "metric": metric,
-                "expected_delta": -expected_delta if effect_direction == "down" else expected_delta,
-                "direction": effect_direction,
+                "expected_delta": expected_delta,
+                "direction": "up",
+                "metric_direction": metric_direction,
                 "confidence": round(min(0.9, 0.45 + normalized_score * 0.35), 3),
                 "time_horizon": "next_observation",
             })
