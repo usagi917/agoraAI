@@ -1,6 +1,7 @@
 """具象メトリクス: 既存 evaluation.py のロジックを BaseMetric パターンに昇格"""
 
 import math
+import re
 from collections import Counter
 from typing import Any
 
@@ -190,6 +191,129 @@ class CoverageMetric(BaseMetric):
                 "observed_stances": sorted(observed),
                 "covered_count": len(covered),
                 "total_categories": len(STANDARD_STANCES),
+            },
+        }
+
+
+_JP_TOKEN_PATTERN = re.compile(r"[一-龥ぁ-んァ-ヴー\w]+")
+
+
+class ResponseDepthMetric(BaseMetric):
+    """活性化レスポンスの reason + personal_story 平均文字数を測定する。"""
+
+    name = "response_depth"
+    description = "活性化レスポンスの理由説明の深さ（平均文字数）"
+
+    TARGET_CHARS = 250
+
+    def compute(self, **kwargs: Any) -> dict:
+        responses = kwargs.get("responses", [])
+        if not responses:
+            return {"score": 0.0, "details": {"method": "avg_reason_length", "avg_chars": 0}}
+
+        total_chars = 0
+        valid_count = 0
+        for response in responses:
+            if response.get("_failed"):
+                continue
+            total_chars += len(response.get("reason", "")) + len(response.get("personal_story", ""))
+            valid_count += 1
+
+        if valid_count == 0:
+            return {"score": 0.0, "details": {"method": "avg_reason_length", "avg_chars": 0}}
+
+        avg_chars = total_chars / valid_count
+        return {
+            "score": round(min(1.0, avg_chars / self.TARGET_CHARS), 4),
+            "details": {
+                "method": "avg_reason_length",
+                "avg_chars": round(avg_chars, 1),
+                "target_chars": self.TARGET_CHARS,
+                "valid_responses": valid_count,
+            },
+        }
+
+
+class MeetingPolarizationMetric(BaseMetric):
+    """Meeting 最終ラウンドのスタンス多様性維持度を測定する。"""
+
+    name = "meeting_polarization"
+    description = "Meeting 最終ラウンドのスタンス多様性維持度"
+
+    TARGET_DIVERSITY_RATIO = 0.4
+
+    def compute(self, **kwargs: Any) -> dict:
+        meeting_rounds: list[list[dict]] = kwargs.get("meeting_rounds", [])
+        if not meeting_rounds:
+            return {"score": 0.0, "details": {"method": "round_stance_diversity", "rounds": 0}}
+
+        round_stats = []
+        for round_idx, arguments in enumerate(meeting_rounds):
+            positions = [
+                self._normalize_position(argument.get("position", ""))
+                for argument in arguments
+                if argument.get("position")
+            ]
+            round_stats.append({
+                "round": round_idx + 1,
+                "unique_positions": len(set(positions)),
+                "total_arguments": len(positions),
+            })
+
+        last = round_stats[-1]
+        if last["total_arguments"] == 0:
+            score = 0.0
+        else:
+            ratio = last["unique_positions"] / last["total_arguments"]
+            score = min(1.0, ratio / self.TARGET_DIVERSITY_RATIO)
+
+        return {
+            "score": round(score, 4),
+            "details": {
+                "method": "round_stance_diversity",
+                "rounds": len(meeting_rounds),
+                "round_stats": round_stats,
+                "target_diversity_ratio": self.TARGET_DIVERSITY_RATIO,
+            },
+        }
+
+    @staticmethod
+    def _normalize_position(position: str) -> str:
+        position = position.strip()
+        for label in ("条件付き賛成", "条件付き反対", "賛成", "反対", "中立"):
+            if label in position:
+                return label
+        return position[:20]
+
+
+class LexicalDiversityMetric(BaseMetric):
+    """全エージェント応答の語彙多様性を Type-Token Ratio で測定する。"""
+
+    name = "lexical_diversity"
+    description = "全エージェント応答の語彙多様性 (Type-Token Ratio)"
+
+    def compute(self, **kwargs: Any) -> dict:
+        responses = kwargs.get("responses", [])
+        if not responses:
+            return {"score": 0.0, "details": {"method": "type_token_ratio", "types": 0, "tokens": 0}}
+
+        tokens: list[str] = []
+        for response in responses:
+            if response.get("_failed"):
+                continue
+            text = response.get("reason", "") + " " + response.get("personal_story", "")
+            tokens.extend(_JP_TOKEN_PATTERN.findall(text))
+
+        if not tokens:
+            return {"score": 0.0, "details": {"method": "type_token_ratio", "types": 0, "tokens": 0}}
+
+        types = len(set(tokens))
+        return {
+            "score": round(types / len(tokens), 4),
+            "details": {
+                "method": "type_token_ratio",
+                "types": types,
+                "tokens": len(tokens),
             },
         }
 

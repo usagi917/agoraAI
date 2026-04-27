@@ -278,7 +278,7 @@ async def run_society_pulse(
     theme_category = _estimate_theme_category(theme, [])
     validation_summary = build_validation_summary(
         theme=theme,
-        theme_category=theme_category,
+        theme_category=theme_category.category,
         distribution=activation_result["aggregation"].get("stance_distribution", {}),
     )
     if validation_summary.get("corrected_distribution"):
