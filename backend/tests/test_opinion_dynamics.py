@@ -14,6 +14,9 @@ from src.app.services.society.opinion_dynamics import (
     OpinionDynamicsEngine,
     PropagationStepResult,
     ClusterInfo,
+    stubbornness_from_big_five,
+    compute_heterogeneous_thresholds,
+    compute_filter_bubble_thresholds,
 )
 
 
@@ -128,37 +131,57 @@ class TestFriedkinJohnsen:
         assert result.updated_opinions[1][0] == pytest.approx(0.8, abs=1e-9)
 
     def test_zero_stubbornness_full_social_influence(self):
-        """Agent with stubbornness=0.0 should fully adopt neighbor mean."""
+        """Agent with stubbornness=0.0 moves toward neighbor, capped by MAX_CONV_DELTA.
+
+        Step 8 introduced MAX_CONV_DELTA=0.15 clamp.
+        agent 0 (0.0) targets 1.0: unclamped delta=1.0 → clamped to 0.15 → new=0.15
+        agent 1 (1.0) targets 0.0: unclamped delta=-1.0 → clamped to -0.15 → new=0.85
+        """
+        from src.app.services.society.opinion_dynamics import MAX_CONV_DELTA
+
         agents = _make_agents([0.0, 1.0], stubbornness=[0.0, 0.0])
         edges = _make_edges([(0, 1), (1, 0)])
         engine = OpinionDynamicsEngine(agents, edges, confidence_threshold=1.0)
 
         result = engine.propagation_step(timestep=0)
 
-        # Each agent fully adopts neighbor's opinion
-        assert result.updated_opinions[0][0] == pytest.approx(1.0, abs=1e-9)
-        assert result.updated_opinions[1][0] == pytest.approx(0.0, abs=1e-9)
+        assert result.updated_opinions[0][0] == pytest.approx(MAX_CONV_DELTA, abs=1e-9)
+        assert result.updated_opinions[1][0] == pytest.approx(1.0 - MAX_CONV_DELTA, abs=1e-9)
 
     def test_partial_stubbornness_anchoring(self):
-        """Agent with stubbornness=0.5 should move halfway toward neighbor."""
+        """Agent with stubbornness=0.5 moves toward neighbor, capped by MAX_CONV_DELTA.
+
+        Step 8: unclamped x_0 = 0.5 * 0.0 + 0.5 * 1.0 = 0.5, delta=0.5 → clamped to 0.15
+        """
+        from src.app.services.society.opinion_dynamics import MAX_CONV_DELTA
+
         agents = _make_agents([0.0, 1.0], stubbornness=[0.5, 0.5])
         edges = _make_edges([(0, 1), (1, 0)])
         engine = OpinionDynamicsEngine(agents, edges, confidence_threshold=1.0)
 
         result = engine.propagation_step(timestep=0)
 
-        # x_0(1) = 0.5 * 0.0 + 0.5 * 1.0 = 0.5
-        assert result.updated_opinions[0][0] == pytest.approx(0.5, abs=1e-9)
-        # x_1(1) = 0.5 * 1.0 + 0.5 * 0.0 = 0.5
-        assert result.updated_opinions[1][0] == pytest.approx(0.5, abs=1e-9)
+        # Both agents move toward each other by MAX_CONV_DELTA (unclamped was 0.5)
+        assert result.updated_opinions[0][0] == pytest.approx(MAX_CONV_DELTA, abs=1e-9)
+        assert result.updated_opinions[1][0] == pytest.approx(1.0 - MAX_CONV_DELTA, abs=1e-9)
 
     def test_stubbornness_from_big_five(self):
-        """Stubbornness derived from Big Five C: s = 0.3 + 0.4 * C."""
+        """Stubbornness derived from Big Five C and A: s = 0.4 + 0.45*C - 0.1*A, clamped [0.3, 0.85].
+
+        With default A=0.5: s = 0.4 + 0.45*C - 0.05 = 0.35 + 0.45*C.
+        """
         from src.app.services.society.opinion_dynamics import stubbornness_from_big_five
 
-        assert stubbornness_from_big_five(0.0) == pytest.approx(0.3)
-        assert stubbornness_from_big_five(0.5) == pytest.approx(0.5)
-        assert stubbornness_from_big_five(1.0) == pytest.approx(0.7)
+        # Default A=0.5: 0.4 + 0.45*0 - 0.1*0.5 = 0.35
+        assert stubbornness_from_big_five(0.0) == pytest.approx(0.35)
+        # Default A=0.5: 0.4 + 0.45*0.5 - 0.1*0.5 = 0.575
+        assert stubbornness_from_big_five(0.5) == pytest.approx(0.575)
+        # Default A=0.5: 0.4 + 0.45*1.0 - 0.1*0.5 = 0.80
+        assert stubbornness_from_big_five(1.0) == pytest.approx(0.80)
+        # Explicit A=0: 0.4 + 0.45*0 - 0.1*0 = 0.4 (original formula)
+        assert stubbornness_from_big_five(0.0, agreeableness=0.0) == pytest.approx(0.4)
+        # Explicit A=0: 0.4 + 0.45*1.0 - 0.1*0 = 0.85
+        assert stubbornness_from_big_five(1.0, agreeableness=0.0) == pytest.approx(0.85)
 
 
 # ===========================================================================
@@ -291,7 +314,14 @@ class TestMultiDimensionalOpinions:
     """Engine should support multi-dimensional opinion vectors."""
 
     def test_2d_opinions_converge(self):
-        """Two agents with 2D opinions should converge in both dimensions."""
+        """Two agents with 2D opinions should move toward each other, clamped by MAX_CONV_DELTA.
+
+        Step 8: MAX_CONV_DELTA clamp applies per dimension.
+        agent 0: [0.2, 0.8], target [0.8, 0.2] → delta [0.6, -0.6] → clamped [0.15, -0.15]
+        → new [0.35, 0.65]
+        """
+        from src.app.services.society.opinion_dynamics import MAX_CONV_DELTA
+
         agents = [
             {"id": "agent_0", "opinion_vector": [0.2, 0.8], "stubbornness": 0.0},
             {"id": "agent_1", "opinion_vector": [0.8, 0.2], "stubbornness": 0.0},
@@ -301,9 +331,9 @@ class TestMultiDimensionalOpinions:
 
         result = engine.propagation_step(timestep=0)
 
-        # s=0: each fully adopts the other's opinion
-        assert result.updated_opinions[0][0] == pytest.approx(0.8, abs=1e-9)
-        assert result.updated_opinions[0][1] == pytest.approx(0.2, abs=1e-9)
+        # Each dimension is clamped to MAX_CONV_DELTA shift
+        assert result.updated_opinions[0][0] == pytest.approx(0.2 + MAX_CONV_DELTA, abs=1e-9)
+        assert result.updated_opinions[0][1] == pytest.approx(0.8 - MAX_CONV_DELTA, abs=1e-9)
 
     def test_2d_bounded_confidence_uses_euclidean_distance(self):
         """Bounded confidence threshold should use Euclidean distance."""
@@ -344,15 +374,20 @@ class TestPropagationStepResult:
         assert isinstance(result.timestep, int)
 
     def test_max_delta_tracks_largest_change(self):
-        """max_delta should reflect the agent with the largest opinion shift."""
+        """max_delta reflects the clamped shift of the agent that moved most.
+
+        Step 8: agent 2 (0.0 → 0.5 unclamped) is clamped to MAX_CONV_DELTA=0.15.
+        """
+        from src.app.services.society.opinion_dynamics import MAX_CONV_DELTA
+
         agents = _make_agents([0.5, 0.5, 0.0], stubbornness=[1.0, 1.0, 0.0])
         edges = _make_edges([(2, 0), (0, 2)])
         engine = OpinionDynamicsEngine(agents, edges, confidence_threshold=1.0)
 
         result = engine.propagation_step(timestep=0)
 
-        # Only agent 2 changes (moves toward agent 0's 0.5)
-        assert result.max_delta == pytest.approx(0.5, abs=1e-9)
+        # Only agent 2 changes, clamped to MAX_CONV_DELTA
+        assert result.max_delta == pytest.approx(MAX_CONV_DELTA, abs=1e-9)
 
 
 # ===========================================================================
@@ -424,3 +459,123 @@ class TestFullRun:
         assert len(clusters) == 2
         sizes = sorted([c.size for c in clusters])
         assert sizes == [5, 5]
+
+
+# ===========================================================================
+# Phase G: Variance-based early stopping
+# ===========================================================================
+
+class TestVarianceBasedStopping:
+    """Phase G: 分散ベースの早期停止テスト。"""
+
+    def test_detect_variance_plateau(self):
+        """意見分散が安定したら detect_variance_plateau が True を返す。"""
+        # 全員同意見 → 分散変化なし → plateau 検出
+        agents = _make_agents([0.5, 0.5, 0.5, 0.5], stubbornness=[1.0] * 4)
+        edges = _make_edges([(0, 1), (1, 0), (1, 2), (2, 1), (2, 3), (3, 2)])
+        engine = OpinionDynamicsEngine(agents, edges, confidence_threshold=0.5)
+
+        for t in range(4):
+            engine.propagation_step(timestep=t)
+
+        assert engine.detect_variance_plateau(window=3, tolerance=0.01) is True
+
+    def test_no_plateau_when_opinions_shifting(self):
+        """意見が大きく変化中は plateau を検出しない。"""
+        agents = _make_agents([0.0, 1.0], stubbornness=[0.3, 0.3])
+        edges = _make_edges([(0, 1), (1, 0)])
+        engine = OpinionDynamicsEngine(agents, edges, confidence_threshold=1.0)
+
+        engine.propagation_step(timestep=0)
+
+        assert engine.detect_variance_plateau(window=3, tolerance=0.01) is False
+
+
+# ===========================================================================
+# Test: Agreeableness in Confidence Thresholds
+# ===========================================================================
+
+class TestAgreeablenessThreshold:
+    """Agreeableness (A) should widen confidence thresholds and reduce stubbornness."""
+
+    def _make_agents_with_big_five(
+        self, n: int, C: float = 0.5, O: float = 0.5, A: float = 0.5,
+    ) -> list[dict]:
+        """Helper: create agents with Big Five traits for threshold computation."""
+        return [
+            {
+                "id": f"agent_{i}",
+                "big_five": {"C": C, "O": O, "A": A},
+            }
+            for i in range(n)
+        ]
+
+    def test_high_A_wider_threshold(self):
+        """A=0.9 agents should have wider confidence thresholds than A=0.1 agents."""
+        agents_high_a = self._make_agents_with_big_five(5, C=0.5, O=0.5, A=0.9)
+        agents_low_a = self._make_agents_with_big_five(5, C=0.5, O=0.5, A=0.1)
+
+        thresholds_high = compute_heterogeneous_thresholds(
+            agents_high_a, base_epsilon=0.3, alpha=0.15, beta=0.05, gamma=0.1, seed=42,
+        )
+        thresholds_low = compute_heterogeneous_thresholds(
+            agents_low_a, base_epsilon=0.3, alpha=0.15, beta=0.05, gamma=0.1, seed=42,
+        )
+
+        # High A -> wider threshold (more receptive)
+        for th, tl in zip(thresholds_high, thresholds_low):
+            assert th > tl
+
+    def test_gamma_zero_matches_original(self):
+        """gamma=0 should produce identical results to the formula without A."""
+        agents = self._make_agents_with_big_five(10, C=0.6, O=0.4, A=0.8)
+
+        thresholds_with_gamma = compute_heterogeneous_thresholds(
+            agents, base_epsilon=0.3, alpha=0.15, beta=0.05, gamma=0.0,
+            noise_sigma=0.0, seed=42,
+        )
+        # Manual calculation: epsilon = 0.3 + 0.15*(1-0.6) + 0.05*(1-0.4) + 0.0*0.8
+        expected = 0.3 + 0.15 * (1 - 0.6) + 0.05 * (1 - 0.4)
+        for t in thresholds_with_gamma:
+            assert t == pytest.approx(expected, abs=1e-9)
+
+    def test_stubbornness_with_A(self):
+        """A=0.9 agent should have lower stubbornness than A=0.1 agent (same C)."""
+        s_high_a = stubbornness_from_big_five(0.5, agreeableness=0.9)
+        s_low_a = stubbornness_from_big_five(0.5, agreeableness=0.1)
+
+        assert s_high_a < s_low_a
+
+    def test_stubbornness_backward_compat(self):
+        """Calling stubbornness_from_big_five with only C should still work (default A=0.5)."""
+        s_old = stubbornness_from_big_five(0.0)
+        # Original formula: 0.4 + 0.45 * 0 = 0.4, but now with A=0.5 default:
+        # 0.4 + 0.45 * 0 - 0.1 * 0.5 = 0.35, clamped to [0.3, 0.85] -> 0.35
+        assert 0.3 <= s_old <= 0.85
+
+    def test_filter_bubble_reduced_by_A(self):
+        """High-A agent with SNS should have wider threshold than low-A agent with SNS."""
+        agent_high_a = {
+            "id": "agent_high_a",
+            "big_five": {"C": 0.5, "O": 0.5, "A": 0.9},
+            "information_sources": [
+                {"name": "Twitter", "bubble_score": 0.8},
+            ],
+        }
+        agent_low_a = {
+            "id": "agent_low_a",
+            "big_five": {"C": 0.5, "O": 0.5, "A": 0.1},
+            "information_sources": [
+                {"name": "Twitter", "bubble_score": 0.8},
+            ],
+        }
+
+        th_high = compute_filter_bubble_thresholds(
+            [agent_high_a], base_epsilon=0.3,
+        )
+        th_low = compute_filter_bubble_thresholds(
+            [agent_low_a], base_epsilon=0.3,
+        )
+
+        # High A mitigates bubble effect -> wider threshold
+        assert th_high[0] > th_low[0]

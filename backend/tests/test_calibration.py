@@ -13,6 +13,7 @@ from src.app.services.society.calibration import (
     expected_calibration_error,
     calibration_grade,
     apply_transfer_calibration,
+    platt_recalibrate,
 )
 
 
@@ -221,3 +222,82 @@ class TestApplyTransferCalibration:
         brier = brier_external(calibrated, "賛成")
         assert isinstance(brier, float)
         assert 0.0 <= brier <= 2.0
+
+
+# ---------------------------------------------------------------------------
+# Phase H: Platt recalibration
+# ---------------------------------------------------------------------------
+
+
+class TestPlattRecalibrate:
+    """Phase H: 信頼度リキャリブレーションのテスト。"""
+
+    def test_compresses_toward_center(self):
+        """デフォルト（データなし）: confidence を 0.5 方向に圧縮。"""
+        assert platt_recalibrate(0.9) < 0.9
+        assert platt_recalibrate(0.1) > 0.1
+        assert platt_recalibrate(0.5) == pytest.approx(0.5)
+
+    def test_output_in_valid_range(self):
+        """出力は [0, 1] の範囲。"""
+        for c in [0.0, 0.1, 0.5, 0.9, 1.0]:
+            result = platt_recalibrate(c)
+            assert 0.0 <= result <= 1.0, f"platt_recalibrate({c}) = {result}"
+
+    def test_monotonic(self):
+        """キャリブレーション後も順序が保存される（単調変換）。"""
+        vals = [platt_recalibrate(c) for c in [0.1, 0.3, 0.5, 0.7, 0.9]]
+        for i in range(len(vals) - 1):
+            assert vals[i] <= vals[i + 1], f"Not monotonic at {i}: {vals}"
+
+    def test_shrink_factor(self):
+        """shrink_factor=0.5 ならより強く圧縮。"""
+        mild = platt_recalibrate(0.9, shrink_factor=0.8)
+        strong = platt_recalibrate(0.9, shrink_factor=0.5)
+        assert strong < mild
+
+
+# ---------------------------------------------------------------------------
+# Phase J: Extremeness Aversion Correction
+# ---------------------------------------------------------------------------
+
+
+class TestExtremenessAversionCorrection:
+    """Phase J: 学習可能な γ による extremeness aversion 補正テスト。"""
+
+    def test_gamma_less_than_1_amplifies_extremes(self):
+        """γ < 1.0 で両端が増幅される。"""
+        from src.app.services.society.calibration import extremeness_aversion_correction
+
+        dist = {"賛成": 0.10, "条件付き賛成": 0.20, "中立": 0.40, "条件付き反対": 0.20, "反対": 0.10}
+        corrected = extremeness_aversion_correction(dist, gamma=0.7)
+        # 中立が最大だったのが縮小し、両端が増大
+        assert corrected["中立"] < dist["中立"]
+        assert corrected["賛成"] > dist["賛成"]
+        assert corrected["反対"] > dist["反対"]
+
+    def test_gamma_1_no_change(self):
+        """γ = 1.0 で変化なし。"""
+        from src.app.services.society.calibration import extremeness_aversion_correction
+
+        dist = {"賛成": 0.30, "条件付き賛成": 0.20, "中立": 0.20, "条件付き反対": 0.15, "反対": 0.15}
+        corrected = extremeness_aversion_correction(dist, gamma=1.0)
+        for k in dist:
+            assert abs(corrected[k] - dist[k]) < 0.001
+
+    def test_preserves_normalization(self):
+        """補正後の分布合計 = 1.0。"""
+        from src.app.services.society.calibration import extremeness_aversion_correction
+
+        dist = {"賛成": 0.10, "条件付き賛成": 0.20, "中立": 0.40, "条件付き反対": 0.20, "反対": 0.10}
+        corrected = extremeness_aversion_correction(dist, gamma=0.5)
+        assert abs(sum(corrected.values()) - 1.0) < 0.001
+
+    def test_no_negative_values(self):
+        """補正後に負の確率が生まれない。"""
+        from src.app.services.society.calibration import extremeness_aversion_correction
+
+        dist = {"賛成": 0.01, "条件付き賛成": 0.01, "中立": 0.96, "条件付き反対": 0.01, "反対": 0.01}
+        corrected = extremeness_aversion_correction(dist, gamma=0.3)
+        for v in corrected.values():
+            assert v >= 0

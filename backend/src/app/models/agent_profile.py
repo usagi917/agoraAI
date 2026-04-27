@@ -3,10 +3,28 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, Integer, Text, JSON, Float, ForeignKey
+from sqlalchemy import String, DateTime, Integer, Text, JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.app.database import Base, utcnow_naive
+
+
+def resolve_information_sources(
+    information_sources: list[str] | None,
+    information_source: str,
+) -> list[str]:
+    """情報源リストを解決するヘルパー（legacy → new → default フォールバック）。
+
+    優先順位:
+    1. information_sources が None でなければそのまま返す（空リストも有効）
+    2. information_sources が None かつ information_source が空でなければ単一リストに変換
+    3. どちらも空・None の場合は空リストを返す
+    """
+    if information_sources is not None:
+        return information_sources
+    if information_source:
+        return [information_source]
+    return []
 
 
 class AgentProfile(Base):
@@ -30,7 +48,10 @@ class AgentProfile(Base):
     # 生活背景・矛盾・情報源
     life_event: Mapped[str] = mapped_column(Text, default="")
     contradiction: Mapped[str] = mapped_column(Text, default="")
+    # Legacy: 文字列フィールド（後方互換のため保持）
     information_source: Mapped[str] = mapped_column(Text, default="")
+    # New: JSON リスト（nullable、マイグレーションで既存 information_source から移行）
+    information_sources: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     # ローカルコンテキスト・隠された動機・発話スタイル
     local_context: Mapped[str] = mapped_column(Text, default="")
@@ -43,7 +64,12 @@ class AgentProfile(Base):
     # LLMバックエンド割当
     llm_backend: Mapped[str] = mapped_column(String(50), default="openai")
 
-    # 記憶要約（Phase 3 で活用）
+    # 記憶要約（Phase 3 で活用） — deprecated: rolling_summary + episodes を使用
     memory_summary: Mapped[str] = mapped_column(Text, default="")
+
+    # 二層メモリ: Layer A — LLM で圧縮された性格傾向要約（~200字、固定サイズ）
+    rolling_summary: Mapped[str] = mapped_column(Text, default="")
+    # 二層メモリ: Layer B — テーマ付きエピソードリスト（JSON配列、MAX 50件 FIFO）
+    episodes: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)

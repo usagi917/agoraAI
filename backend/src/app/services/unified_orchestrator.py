@@ -10,35 +10,16 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from src.app.database import async_session
-from src.app.models.simulation import Simulation
 from src.app.models.kg_node import KGNode
 from src.app.models.kg_edge import KGEdge
+from src.app.models.simulation import Simulation
 from src.app.services.phases.society_pulse import run_society_pulse
-from src.app.services.phases.council_deliberation import CouncilResult, run_council
-from src.app.services.phases.intervention import run_intervention
-from src.app.services.phases.issue_mining import run_issue_mining
-from src.app.services.phases.multi_perspective import run_multi_perspective
-from src.app.services.phases.pm_analysis import run_pm_analysis
+from src.app.services.phases.council_deliberation import run_council
 from src.app.services.phases.synthesis import run_synthesis
-from src.app.services.validation_summary import merge_scenario_backtest_status
+from src.app.services.scenario_pair_status import refresh_scenario_pair_status
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
-
-
-def _empty_council_result() -> CouncilResult:
-    return CouncilResult(
-        participants=[],
-        rounds=[],
-        synthesis={
-            "consensus_points": [],
-            "disagreement_points": [],
-            "recommendations": [],
-            "overall_assessment": "",
-        },
-        devil_advocate_summary="",
-        usage={},
-    )
 
 
 async def run_unified(simulation_id: str) -> None:
@@ -104,19 +85,11 @@ async def run_unified(simulation_id: str) -> None:
                 except Exception as e:
                     logger.warning("Failed to load KG data, proceeding without: %s", e)
 
-            mode = sim.mode if isinstance(sim.mode, str) and sim.mode else "standard"
-            phase_total = {
-                "quick": 2,
-                "standard": 3,
-                "deep": 5,
-                "research": 5,
-            }.get(mode, 3)
-
             # === Phase 1: Society Pulse ===
             await sse_manager.publish(simulation_id, "unified_phase_changed", {
                 "phase": "society_pulse",
                 "index": 1,
-                "total": phase_total,
+                "total": 3,
             })
 
             pulse = await run_society_pulse(
@@ -136,129 +109,34 @@ async def run_unified(simulation_id: str) -> None:
             }
             await session.commit()
 
-            context = {
-                "theme": theme,
-                "pulse_result": {
-                    "aggregation": pulse.aggregation,
-                    "evaluation": pulse.evaluation,
-                    "usage": pulse.usage,
+            # === Phase 2: Council Deliberation ===
+            await sse_manager.publish(simulation_id, "unified_phase_changed", {
+                "phase": "council",
+                "index": 2,
+                "total": 3,
+            })
+
+            council = await run_council(
+                session, sim, pulse, theme,
+                kg_entities=kg_entities or None,
+                kg_relations=kg_relations or None,
+            )
+
+            sim.metadata_json = {
+                **dict(sim.metadata_json or {}),
+                "council_result": {
+                    "participants": council.participants,
+                    "devil_advocate_summary": council.devil_advocate_summary,
+                    "usage": council.usage,
                 },
-                "world_state": {},
-                "template_prompts": {},
             }
-            multi_perspective = None
-            pm_analysis = None
-            issue_mining = None
-            intervention = None
-            council = _empty_council_result()
-            phase_index = 2
-
-            if mode == "research":
-                await sse_manager.publish(simulation_id, "unified_phase_changed", {
-                    "phase": "issue_mining",
-                    "index": phase_index,
-                    "total": phase_total,
-                })
-                issue_mining = await run_issue_mining(session, sim, context)
-                context["issues"] = issue_mining.selected_issues
-                sim.metadata_json = {
-                    **dict(sim.metadata_json or {}),
-                    "issue_mining_result": {
-                        "issue_candidates": issue_mining.issues,
-                        "selected_issues": issue_mining.selected_issues,
-                        "intervention_comparison": issue_mining.intervention_comparison,
-                    },
-                }
-                await session.commit()
-                phase_index += 1
-
-            if mode in {"deep", "research"}:
-                await sse_manager.publish(simulation_id, "unified_phase_changed", {
-                    "phase": "multi_perspective",
-                    "index": phase_index,
-                    "total": phase_total,
-                })
-                multi_perspective = await run_multi_perspective(session, sim, context)
-                context["scenarios"] = multi_perspective.scenarios
-                sim.metadata_json = {
-                    **dict(sim.metadata_json or {}),
-                    "multi_perspective_result": {
-                        "scenarios": multi_perspective.scenarios,
-                        "diversity_score": multi_perspective.diversity_score,
-                        "entropy": multi_perspective.entropy,
-                        "agreement_matrix": multi_perspective.agreement_matrix,
-                        "usage": multi_perspective.usage,
-                    },
-                }
-                await session.commit()
-                phase_index += 1
-
-            if mode == "research":
-                await sse_manager.publish(simulation_id, "unified_phase_changed", {
-                    "phase": "intervention",
-                    "index": phase_index,
-                    "total": phase_total,
-                })
-                intervention = await run_intervention(session, sim, context, max_cycles=2)
-                sim.metadata_json = {
-                    **dict(sim.metadata_json or {}),
-                    "intervention_result": {
-                        "cycles": intervention.cycles,
-                        "best_cycle": intervention.best_cycle,
-                        "interventions": intervention.interventions,
-                        "convergence_score": intervention.convergence_score,
-                    },
-                }
-                await session.commit()
-                phase_index += 1
-
-            if mode in {"standard", "deep"}:
-                await sse_manager.publish(simulation_id, "unified_phase_changed", {
-                    "phase": "council",
-                    "index": phase_index,
-                    "total": phase_total,
-                })
-
-                council = await run_council(
-                    session, sim, pulse, theme,
-                    kg_entities=kg_entities or None,
-                    kg_relations=kg_relations or None,
-                )
-
-                sim.metadata_json = {
-                    **dict(sim.metadata_json or {}),
-                    "council_result": {
-                        "participants": council.participants,
-                        "devil_advocate_summary": council.devil_advocate_summary,
-                        "usage": council.usage,
-                    },
-                }
-                await session.commit()
-                phase_index += 1
-
-            if mode == "deep":
-                await sse_manager.publish(simulation_id, "unified_phase_changed", {
-                    "phase": "pm_analysis",
-                    "index": phase_index,
-                    "total": phase_total,
-                })
-                pm_analysis = await run_pm_analysis(session, sim, context)
-                sim.metadata_json = {
-                    **dict(sim.metadata_json or {}),
-                    "pm_analysis_result": {
-                        "sections": pm_analysis.sections,
-                        "decision_brief": pm_analysis.decision_brief,
-                        "usage": pm_analysis.usage,
-                    },
-                }
-                await session.commit()
-                phase_index += 1
+            await session.commit()
 
             # === Phase 3: Synthesis ===
             await sse_manager.publish(simulation_id, "unified_phase_changed", {
                 "phase": "synthesis",
-                "index": phase_index,
-                "total": phase_total,
+                "index": 3,
+                "total": 3,
             })
 
             # Council で進化したKGがあればそちらを優先
@@ -272,37 +150,15 @@ async def run_unified(simulation_id: str) -> None:
                 use_react=True,
             )
 
-            validation_summary = merge_scenario_backtest_status(
-                pulse.validation_summary,
-                None,
-            )
-
             # 最終結果保存
             sim.metadata_json = {
                 **dict(sim.metadata_json or {}),
-                "validation_summary": validation_summary,
                 "unified_result": {
                     "type": "unified",
                     "decision_brief": synthesis.decision_brief,
                     "agreement_score": synthesis.agreement_score,
                     "content": synthesis.content,
                     "sections": synthesis.sections,
-                    "scenarios": multi_perspective.scenarios if multi_perspective else [],
-                    "diversity_score": multi_perspective.diversity_score if multi_perspective else 0,
-                    "entropy": multi_perspective.entropy if multi_perspective else 0,
-                    "agreement_matrix": multi_perspective.agreement_matrix if multi_perspective else None,
-                    "issue_candidates": issue_mining.issues if issue_mining else [],
-                    "selected_issues": issue_mining.selected_issues if issue_mining else [],
-                    "intervention_comparison": (
-                        issue_mining.intervention_comparison if issue_mining else []
-                    ),
-                    "intervention_cycles": intervention.cycles if intervention else [],
-                    "pm_board": {
-                        "type": "pm_board",
-                        "sections": pm_analysis.sections,
-                        "decision_brief": pm_analysis.decision_brief,
-                    } if pm_analysis else None,
-                    "validation_summary": validation_summary,
                     "society_summary": {
                         "population_count": pulse.population_count,
                         "selected_count": len(pulse.agents),
@@ -319,11 +175,12 @@ async def run_unified(simulation_id: str) -> None:
             }
             sim.status = "completed"
             sim.completed_at = datetime.now(timezone.utc)
+            await refresh_scenario_pair_status(session, sim.scenario_pair_id)
             await session.commit()
 
             await sse_manager.publish(simulation_id, "simulation_completed", {
                 "simulation_id": simulation_id,
-                "mode": mode,
+                "mode": "unified",
                 "agreement_score": synthesis.agreement_score,
                 "recommendation": synthesis.decision_brief.get("recommendation", ""),
             })
@@ -335,6 +192,7 @@ async def run_unified(simulation_id: str) -> None:
             await session.rollback()
             sim.status = "failed"
             sim.error_message = f"{type(e).__name__}: {e}"[:500]
+            await refresh_scenario_pair_status(session, sim.scenario_pair_id)
             await session.commit()
 
             await sse_manager.publish(simulation_id, "simulation_failed", {

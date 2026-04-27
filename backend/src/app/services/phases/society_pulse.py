@@ -13,12 +13,16 @@ from src.app.services.society.society_orchestrator import (
     _estimate_theme_category,
     _get_or_create_population,
     _save_network,
+    _load_population_edges,
 )
 from src.app.services.society.population_generator import get_default_population_size
 from src.app.services.society.agent_selector import select_agents
 from src.app.services.society.activation_layer import run_activation
 from src.app.services.society.evaluation import evaluate_society_simulation
-from src.app.services.society.persona_generator import generate_persona_narratives
+from src.app.services.society.persona_generator import (
+    generate_persona_narratives,
+    generate_persona_narratives_post_activation,
+)
 from src.app.services.society.representative_selector import select_representatives
 from src.app.services.society.demographic_analyzer import analyze_demographics
 from src.app.services.society.kg_enricher import enrich_agents_from_kg
@@ -73,6 +77,8 @@ async def run_society_pulse(
 
     pop_id, agents = await _get_or_create_population(
         session, sim.population_id, pop_count,
+        seed=sim.seed,
+        strict=bool(getattr(sim, "scenario_pair_id", None)),
     )
     sim.population_id = pop_id
     await session.commit()
@@ -85,14 +91,16 @@ async def run_society_pulse(
 
     await _save_network(session, agents, pop_id)
 
-    # === Selection ===
-    selected_agents = await select_agents(agents, theme, target_count=100)
+    # === Selection (network centrality-aware) ===
+    all_edges = await _load_population_edges(session, pop_id)
+    selected_agents = await select_agents(agents, theme, target_count=100, edges=all_edges)
 
     await sse_manager.publish(simulation_id, "society_selection_completed", {
         "selected_count": len(selected_agents),
         "total_population": len(agents),
         "selected_agents": [
             {
+                "id": a.get("id", ""),
                 "agent_index": a.get("agent_index", i),
                 "name": f"Agent-{a.get('agent_index', i)}",
                 "occupation": a.get("demographics", {}).get("occupation", ""),
@@ -112,17 +120,6 @@ async def run_society_pulse(
             theme,
         )
         logger.info("KG enrichment applied to %d selected agents", len(selected_agents))
-
-    # === Persona Narrative Generation ===
-    await sse_manager.publish(simulation_id, "persona_generation_started", {
-        "agent_count": len(selected_agents),
-    })
-    try:
-        selected_agents = await generate_persona_narratives(selected_agents, theme)
-        generated = sum(1 for a in selected_agents if a.get("persona_narrative"))
-        logger.info("Persona narratives: %d/%d generated", generated, len(selected_agents))
-    except Exception as e:
-        logger.warning("Persona generation failed, continuing without: %s", e)
 
     # === Activation ===
     await sse_manager.publish(simulation_id, "society_activation_started", {
@@ -219,6 +216,19 @@ async def run_society_pulse(
         "selected_agent_ids": selected_agent_ids,
         "usage": activation_result["usage"],
     })
+
+    # === Post-Activation Persona Narrative Generation ===
+    await sse_manager.publish(simulation_id, "persona_generation_started", {
+        "agent_count": len(selected_agents),
+    })
+    try:
+        selected_agents = await generate_persona_narratives_post_activation(
+            selected_agents, activation_result["responses"], theme,
+        )
+        generated = sum(1 for a in selected_agents if a.get("persona_narrative"))
+        logger.info("Post-activation persona narratives: %d/%d generated", generated, len(selected_agents))
+    except Exception as e:
+        logger.warning("Post-activation persona generation failed, continuing without: %s", e)
 
     # === KG Evolution: activation回答からKGを抽出しSSE配信 ===
     try:

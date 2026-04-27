@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,7 +13,7 @@ router = APIRouter()
 async def list_templates(session: AsyncSession = Depends(get_session)):
     result = await session.execute(select(Template))
     templates = result.scalars().all()
-    return [
+    payload = [
         {
             "id": t.id,
             "name": t.name,
@@ -22,3 +23,7 @@ async def list_templates(session: AsyncSession = Depends(get_session)):
         }
         for t in templates
     ]
+    return JSONResponse(
+        content=payload,
+        headers={"Cache-Control": "public, max-age=300"},
+    )

@@ -159,7 +159,7 @@ const launchDisabled = computed(() => {
   if (!canLaunchLive.value) return true
   const hasWizardInput = wizardComplete.value
   const hasManualInput = promptText.value.trim() || files.value.length > 0
-  return (!hasWizardInput && !hasManualInput) || isLoading.value
+  return !hasWizardInput && !hasManualInput
 })
 const selectedModeInfo = computed(() => (
   analysisModes.find(mode => mode.id === selectedPreset.value) ?? analysisModes[0]
@@ -182,7 +182,9 @@ onMounted(async () => {
 })
 
 async function handleLaunch() {
-  if (!canLaunchLive.value) return
+  // Keep duplicate submission protection in the handler so the native
+  // disabled attribute does not flip during the click action itself.
+  if (isLoading.value || !canLaunchLive.value) return
 
   // Build final prompt: wizard prompt takes priority, then manual input
   const wizardPrompt = buildPromptFromWizard()
@@ -265,7 +267,7 @@ function getPipelineStageLabel(stage: string) {
     <!-- Hero -->
     <section class="hero">
       <h2 class="hero-title">ひとつの問いから、<br />社会の反応を予測する</h2>
-      <p class="hero-desc">AIエージェント1,000人が議論し、代表評議会が検証し、あなたの意思決定を支える Decision Brief を生成します。</p>
+      <p class="hero-desc">仮想空間でAIが議論し、代表評議会が検証し、あなたの意思決定を支える Decision Brief を生成します。</p>
     </section>
 
     <section v-if="bootstrapError || (runtimeHealth && !runtimeHealth.live_simulation_available)" class="runtime-notice" :class="{ warning: runtimeHealth && !runtimeHealth.live_simulation_available, error: bootstrapError }">

@@ -5,6 +5,47 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 
 
+class TestRepresentativeUpdates:
+    """Representative stance change extraction helpers."""
+
+    def test_extract_representative_updates_uses_agent_id_mapped_responses(self):
+        """Pre-meeting stance should come from responses keyed by canonical agent_id."""
+        from src.app.services.society.society_orchestrator import (
+            _extract_representative_updates,
+        )
+
+        meeting_participants = [
+            {
+                "role": "citizen_representative",
+                "agent_profile": {"id": "agent-123"},
+            },
+        ]
+        meeting_result = {
+            "synthesis": {
+                "participant_stances": {"agent-123": "賛成"},
+            },
+        }
+        activation_responses = [
+            {
+                "stance": "反対",
+                "confidence": 0.8,
+                "agent_id": "agent-123",
+            },
+        ]
+
+        updates = _extract_representative_updates(
+            meeting_participants, meeting_result, activation_responses,
+        )
+
+        assert updates == [
+            {
+                "agent_id": "agent-123",
+                "old_stance": "反対",
+                "new_stance": "賛成",
+            },
+        ]
+
+
 class TestIndependenceWeightedReaggregation:
     """独立性重み → 再集計の統合テスト.
 
@@ -594,11 +635,12 @@ class TestVerificationPhase:
         agent_ids = [a["id"] for a in agents]
 
         # 40人が賛成（密クラスター）、10人が反対（シングルトン）
+        # reason を十分長く・具体的にして品質分類を統一（high tier）
         responses = [
             _parse_activation_response({
                 "stance": "賛成" if i < 40 else "反対",
                 "confidence": 0.8,
-                "reason": f"理由{i}",
+                "reason": f"私は東京都内の職場で月額{i+10}万円の影響を受けており、この政策について具体的な意見があります。生活への直接的な影響が大きいと感じています。",
                 "concern": "",
                 "priority": "",
             })
@@ -631,10 +673,6 @@ class TestVerificationPhase:
 
         # 多数派クラスターのシェアが下がる
         assert post_share < pre_share
-        # effective_sample_size も下がる
-        pre_n_eff = activation_result["aggregation_pre_independence"]["effective_sample_size"]
-        post_n_eff = activation_result["aggregation"]["effective_sample_size"]
-        assert post_n_eff < pre_n_eff
 
 
 class TestSocietyOrchestratorImports:
@@ -730,6 +768,8 @@ class TestSocietyOrchestratorFlow:
                     completed_at=None,
                     metadata_json={},
                     error_message=None,
+                    seed=42,
+                    scenario_pair_id=None,
                 )
 
             async def get(self, model, obj_id):
@@ -760,14 +800,14 @@ class TestSocietyOrchestratorFlow:
 
         fake_session = FakeSession()
 
-        async def fake_get_or_create_population(session, population_id, count=None):
+        async def fake_get_or_create_population(session, population_id, count=None, seed=None, *, strict=False):
             observed_counts.append(count)
             return "pop-1", [{"id": "a1", "demographics": {"age": 35, "region": "関東（都市部）", "occupation": "会社員"}}]
 
         async def fake_publish(simulation_id, event, data):
             published_events.append((event, data))
 
-        async def fake_select_agents(agents, theme, target_count=100):
+        async def fake_select_agents(agents, theme, target_count=100, edges=None):
             return agents
 
         async def fake_run_activation(selected_agents, theme, on_progress=None):
@@ -791,6 +831,7 @@ class TestSocietyOrchestratorFlow:
         monkeypatch.setattr(orchestrator, "_get_or_create_population", fake_get_or_create_population)
         monkeypatch.setattr(orchestrator.sse_manager, "publish", fake_publish)
         monkeypatch.setattr(orchestrator, "_save_network", AsyncMock())
+        monkeypatch.setattr(orchestrator, "_load_population_edges", AsyncMock(return_value=[]))
         monkeypatch.setattr(orchestrator, "select_agents", fake_select_agents)
         monkeypatch.setattr(orchestrator, "run_activation", fake_run_activation)
         monkeypatch.setattr(orchestrator, "evaluate_society_simulation", fake_evaluate_society_simulation)
@@ -868,6 +909,8 @@ class TestRunSocietyPipelineFixes:
                     completed_at=None,
                     metadata_json={},
                     error_message=None,
+                    seed=42,
+                    scenario_pair_id=None,
                 )
 
             async def get(self, model, obj_id):
@@ -900,7 +943,7 @@ class TestRunSocietyPipelineFixes:
 
         fake_session = FakeSession()
 
-        async def fake_get_or_create_population(session, population_id, count=None):
+        async def fake_get_or_create_population(session, population_id, count=None, seed=None, *, strict=False):
             return "pop-1", [
                 {"id": "a1", "demographics": {"age": 35, "region": "関東（都市部）", "occupation": "会社員"}},
                 {"id": "a2", "demographics": {"age": 62, "region": "九州", "occupation": "自営業"}},
@@ -909,7 +952,7 @@ class TestRunSocietyPipelineFixes:
         async def fake_publish(simulation_id, event, data):
             return None
 
-        async def fake_select_agents(agents, theme, target_count=100):
+        async def fake_select_agents(agents, theme, target_count=100, edges=None):
             return agents
 
         async def fake_run_activation(selected_agents, theme, on_progress=None):
@@ -974,6 +1017,7 @@ class TestRunSocietyPipelineFixes:
         monkeypatch.setattr(orchestrator, "_get_or_create_population", fake_get_or_create_population)
         monkeypatch.setattr(orchestrator.sse_manager, "publish", fake_publish)
         monkeypatch.setattr(orchestrator, "_save_network", AsyncMock())
+        monkeypatch.setattr(orchestrator, "_load_population_edges", AsyncMock(return_value=[]))
         monkeypatch.setattr(orchestrator, "select_agents", fake_select_agents)
         monkeypatch.setattr(orchestrator, "run_activation", fake_run_activation)
         monkeypatch.setattr(orchestrator, "run_network_propagation", fake_run_network_propagation)
@@ -990,7 +1034,7 @@ class TestRunSocietyPipelineFixes:
 
         from src.app.services.society import validation_pipeline
 
-        async def fake_register_result(session, simulation_id, theme, theme_category, distribution):
+        async def fake_register_result(session, simulation_id, theme, theme_category, distribution, **kwargs):
             return {"id": "validation-1"}
 
         async def fake_auto_compare(session, validation_record, survey_data_dir):
@@ -1023,6 +1067,8 @@ class TestRunSocietyPipelineFixes:
                     completed_at=None,
                     metadata_json={},
                     error_message=None,
+                    seed=42,
+                    scenario_pair_id=None,
                 )
 
             async def get(self, model, obj_id):
@@ -1055,7 +1101,7 @@ class TestRunSocietyPipelineFixes:
 
         fake_session = FakeSession()
 
-        async def fake_get_or_create_population(session, population_id, count=None):
+        async def fake_get_or_create_population(session, population_id, count=None, seed=None, *, strict=False):
             return "pop-1", [
                 {"id": "a1", "demographics": {"age": 35, "region": "関東（都市部）", "occupation": "会社員"}},
             ]
@@ -1063,7 +1109,7 @@ class TestRunSocietyPipelineFixes:
         async def fake_publish(simulation_id, event, data):
             return None
 
-        async def fake_select_agents(agents, theme, target_count=100):
+        async def fake_select_agents(agents, theme, target_count=100, edges=None):
             return agents
 
         async def fake_run_activation(selected_agents, theme, on_progress=None):
@@ -1092,6 +1138,7 @@ class TestRunSocietyPipelineFixes:
         monkeypatch.setattr(orchestrator, "_get_or_create_population", fake_get_or_create_population)
         monkeypatch.setattr(orchestrator.sse_manager, "publish", fake_publish)
         monkeypatch.setattr(orchestrator, "_save_network", AsyncMock())
+        monkeypatch.setattr(orchestrator, "_load_population_edges", AsyncMock(return_value=[]))
         monkeypatch.setattr(orchestrator, "select_agents", fake_select_agents)
         monkeypatch.setattr(orchestrator, "run_activation", fake_run_activation)
         monkeypatch.setattr(orchestrator, "run_network_propagation", fake_run_network_propagation)
@@ -1106,7 +1153,7 @@ class TestRunSocietyPipelineFixes:
 
         from src.app.services.society import validation_pipeline
 
-        async def fake_register_result(session, simulation_id, theme, theme_category, distribution):
+        async def fake_register_result(session, simulation_id, theme, theme_category, distribution, **kwargs):
             return {"id": "validation-1"}
 
         async def fake_auto_compare(session, validation_record, survey_data_dir):

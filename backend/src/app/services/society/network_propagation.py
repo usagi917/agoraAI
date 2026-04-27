@@ -18,9 +18,14 @@ from typing import Any, Callable
 
 import numpy as np
 
+from src.app.services.society.event_exposure import (
+    ablation_heterogeneous_exposure,
+    event_residual,
+)
 from src.app.services.society.opinion_dynamics import (
     ClusterInfo,
     OpinionDynamicsEngine,
+    apply_belief_decay,
     stubbornness_from_big_five,
 )
 
@@ -263,6 +268,7 @@ async def run_network_propagation(
     reflection_delta_threshold: float = 0.3,
     on_timestep: Callable | None = None,
     llm_client: Any | None = None,
+    events: list[dict] | None = None,
 ) -> PropagationResult:
     """Run multi-round network opinion propagation.
 
@@ -278,6 +284,10 @@ async def run_network_propagation(
         on_timestep: Optional callback per timestep.
         llm_client: Optional LLM client (e.g. MultiLLMClient) for reflection.
             If None, reflection is skipped (pure math only).
+        events: Optional list of external event dicts injected at each timestep.
+            Each event dict must have: source, framing, magnitude, and optionally
+            timestep (the step at which the event fires; default=0).
+            Residual effects accumulate across subsequent steps.
 
     Returns:
         PropagationResult with final opinions, history, clusters, and metrics.
@@ -294,10 +304,12 @@ async def run_network_propagation(
         resp = response_map.get(agent_id, {})
         stance = resp.get("stance", "中立")
         confidence = resp.get("confidence", 0.5)
-        big_five_c = agent.get("big_five", {}).get("C", 0.5)
+        big_five = agent.get("big_five", {})
+        big_five_c = big_five.get("C", 0.5)
+        big_five_a = big_five.get("A", 0.5)
 
         opinion = _convert_stance_to_opinion(stance, confidence)
-        stubbornness = stubbornness_from_big_five(big_five_c)
+        stubbornness = stubbornness_from_big_five(big_five_c, agreeableness=big_five_a)
 
         engine_agents.append({
             "id": agent_id,
@@ -320,12 +332,57 @@ async def run_network_propagation(
     # Store initial opinions for later reflection comparison
     initial_opinions = [ea["opinion_vector"][:] for ea in engine_agents]
 
+    # Pre-compute which events fire at each timestep and their initial deltas.
+    # event_schedule: {timestep: [(agent_deltas, fired_at_step)]}
+    # Residual effects: list of (initial_delta_per_agent, fired_at_step) still active.
+    active_residuals: list[tuple[list[float], int]] = []
+    _events = events or []
+
     for t in range(max_timesteps):
         prev_opinions = [ea["opinion_vector"] for ea in engine_agents] if t == 0 else [
             list(row) for row in engine._opinions
         ]
 
+        # Phase 1: Compute per-agent cumulative event delta for this timestep.
+        # New events that fire at step t are computed and added to residuals.
+        cumulative_deltas = [0.0] * len(agents)
+        for event in _events:
+            fire_at = event.get("timestep", 0)
+            if fire_at == t:
+                initial_deltas = ablation_heterogeneous_exposure(agents, event)
+                active_residuals.append((initial_deltas, t))
+
+        # Accumulate residual effects from all previously fired events.
+        for initial_deltas, fired_at in active_residuals:
+            elapsed = t - fired_at
+            for i, raw in enumerate(initial_deltas):
+                cumulative_deltas[i] += event_residual(raw, elapsed)
+
+        # Apply event deltas to current opinions before propagation step.
+        if any(d != 0.0 for d in cumulative_deltas):
+            for i in range(len(agents)):
+                engine._opinions[i][0] = float(
+                    np.clip(engine._opinions[i][0] + cumulative_deltas[i], 0.0, 1.0)
+                )
+
         result = engine.propagation_step(timestep=t)
+
+        # Phase 3: Belief decay — opinion drifts back toward initial anchor.
+        # Applied AFTER propagation_step so TimestepRecord captures the raw
+        # conversation result, while engine._opinions reflects the decayed value
+        # that carries forward to the next timestep.
+        if engine._dim == 1:
+            for i in range(len(agents)):
+                engine._opinions[i][0] = float(
+                    np.clip(
+                        apply_belief_decay(
+                            engine._opinions[i][0],
+                            engine._initial_opinions[i][0],
+                        ),
+                        0.0,
+                        1.0,
+                    )
+                )
 
         # Record timestep
         dist = _compute_stance_distribution(result.updated_opinions)
@@ -446,3 +503,160 @@ async def run_network_propagation(
         reflection_count=total_reflections,
         reflections=reflections,
     )
+
+
+# ---------------------------------------------------------------------------
+# Meeting Feedback Propagation (Improvement 4)
+# ---------------------------------------------------------------------------
+
+async def run_meeting_feedback_propagation(
+    agents: list[dict],
+    edges: list[dict],
+    representative_updates: list[dict],
+    *,
+    activation_responses: list[dict],
+    seed: int | None = None,
+) -> dict:
+    """Propagate meeting representative stance changes to the population (1 round).
+
+    Unlike the full ``run_network_propagation``, this function:
+    - Runs exactly **1 propagation round** (does not iterate to convergence).
+    - Only overwrites opinions for representatives that changed stance;
+      all other agents keep their pre-meeting opinion.
+    - Preserves each agent's original ``confidence`` value (no inverse
+      conversion from opinion back to confidence).
+
+    Args:
+        agents: Agent profile dicts (must have id, big_five).
+        edges: SocialEdge dicts with agent_id, target_id, strength.
+        representative_updates: List of ``{"agent_id", "old_stance", "new_stance"}``.
+        activation_responses: Original activation responses (used to read
+            each agent's stance, confidence, and other fields).
+        seed: Optional RNG seed (unused currently, reserved for future use).
+
+    Returns:
+        dict with keys:
+        - ``opinions``: list[list[float]] -- post-feedback opinion vectors
+        - ``changed_agents``: list[dict] -- agents whose stance label changed
+        - ``propagation_record``: dict -- summary metadata
+        - ``feedback_responses``: list[dict] -- updated response dicts with
+          new stance labels but original confidence values preserved
+    """
+    # Build response lookup
+    response_map: dict[str, dict] = {}
+    for r in activation_responses:
+        response_map[r["agent_id"]] = r
+
+    # Build set of shifted representative IDs
+    update_map: dict[str, str] = {}  # agent_id -> new_stance
+    for upd in representative_updates:
+        update_map[upd["agent_id"]] = upd["new_stance"]
+
+    # Convert all agents to opinion dynamics format
+    engine_agents = []
+    for agent in agents:
+        agent_id = agent["id"]
+        resp = response_map.get(agent_id, {})
+        stance = resp.get("stance", "中立")
+        confidence = resp.get("confidence", 0.5)
+        big_five = agent.get("big_five", {})
+        big_five_c = big_five.get("C", 0.5)
+        big_five_a = big_five.get("A", 0.5)
+
+        # For representatives who changed, override stance with new_stance
+        if agent_id in update_map:
+            stance = update_map[agent_id]
+
+        opinion = _convert_stance_to_opinion(stance, confidence)
+        stubbornness = stubbornness_from_big_five(big_five_c, agreeableness=big_five_a)
+
+        engine_agents.append({
+            "id": agent_id,
+            "opinion_vector": opinion,
+            "stubbornness": stubbornness,
+        })
+
+    # Short-circuit: if no updates, return original opinions unchanged
+    if not representative_updates:
+        opinions = [ea["opinion_vector"][:] for ea in engine_agents]
+        feedback_responses = _build_feedback_responses_from_opinions(
+            agents, opinions, response_map,
+        )
+        return {
+            "opinions": opinions,
+            "changed_agents": [],
+            "propagation_record": {"rounds": 0, "max_delta": 0.0},
+            "feedback_responses": feedback_responses,
+        }
+
+    # Initialize engine & run exactly 1 propagation round.
+    # Use confidence_threshold=1.0 to disable bounded confidence filtering,
+    # since meeting feedback should propagate regardless of opinion distance.
+    engine = OpinionDynamicsEngine(
+        agents=engine_agents,
+        edges=edges,
+        confidence_threshold=1.0,
+    )
+
+    pre_opinions = [ea["opinion_vector"][:] for ea in engine_agents]
+    result = engine.propagation_step(timestep=0)
+    post_opinions = [list(row) for row in result.updated_opinions]
+
+    # Detect which agents' stance labels changed
+    changed_agents = []
+    for i, agent in enumerate(agents):
+        old_stance = _convert_opinion_to_stance(pre_opinions[i])
+        new_stance = _convert_opinion_to_stance(post_opinions[i])
+        if old_stance != new_stance:
+            changed_agents.append({
+                "agent_id": agent["id"],
+                "old_stance": old_stance,
+                "new_stance": new_stance,
+                "opinion_delta": abs(post_opinions[i][0] - pre_opinions[i][0]),
+            })
+
+    # Build feedback responses (preserve original confidence)
+    feedback_responses = _build_feedback_responses_from_opinions(
+        agents, post_opinions, response_map,
+    )
+
+    return {
+        "opinions": post_opinions,
+        "changed_agents": changed_agents,
+        "propagation_record": {
+            "rounds": 1,
+            "max_delta": result.max_delta,
+            "representative_count": len(representative_updates),
+        },
+        "feedback_responses": feedback_responses,
+    }
+
+
+def _build_feedback_responses_from_opinions(
+    agents: list[dict],
+    opinions: list[list[float]],
+    response_map: dict[str, dict],
+) -> list[dict]:
+    """Build feedback response dicts from opinion vectors.
+
+    Stance labels are derived from the new opinion, but confidence values
+    are preserved from the original activation responses (no inverse
+    conversion from opinion to confidence).
+    """
+    feedback_responses = []
+    for i, agent in enumerate(agents):
+        agent_id = agent["id"]
+        orig_resp = response_map.get(agent_id, {})
+        new_stance = _convert_opinion_to_stance(opinions[i])
+
+        feedback_responses.append({
+            "agent_id": agent_id,
+            "stance": new_stance,
+            "confidence": orig_resp.get("confidence", 0.5),
+            "reason": orig_resp.get("reason", ""),
+            "concern": orig_resp.get("concern", ""),
+            "priority": orig_resp.get("priority", ""),
+            "opinion_vector": opinions[i],
+        })
+
+    return feedback_responses

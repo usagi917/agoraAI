@@ -185,3 +185,43 @@ class TestNumericalStability:
         prices = market.get_prices()
         for p in prices.values():
             assert p == pytest.approx(1 / 3, abs=0.01)
+
+
+class TestAdaptiveLiquidity:
+    """adaptive_b=True: ベット数に応じて liquidity が適応すること。"""
+
+    def test_adaptive_b_increases_with_many_agents(self):
+        """エージェント数が多いほど effective_liquidity が大きくなる。"""
+        market = PredictionMarket(outcomes=["A", "B"], liquidity=10.0, adaptive_b=True)
+        for i in range(50):
+            market.submit_bet(f"agent_{i}", "A" if i % 2 == 0 else "B", confidence=0.7)
+        assert market.effective_liquidity > 10.0
+
+    def test_adaptive_b_small_with_few_bets(self):
+        """ベット数が少ない場合は base_b 以下。"""
+        market = PredictionMarket(outcomes=["A", "B"], liquidity=10.0, adaptive_b=True)
+        market.submit_bet("agent_0", "A", confidence=0.7)
+        assert market.effective_liquidity <= 10.0
+
+    def test_adaptive_prices_sum_to_one(self):
+        """adaptive b でも価格合計は ≈ 1.0。"""
+        market = PredictionMarket(outcomes=["A", "B", "C"], liquidity=10.0, adaptive_b=True)
+        for i in range(20):
+            market.submit_bet(f"a{i}", ["A", "B", "C"][i % 3], confidence=0.6 + i * 0.01)
+        assert sum(market.get_prices().values()) == pytest.approx(1.0, abs=0.01)
+
+    def test_fixed_b_backward_compatible(self):
+        """adaptive_b=False (デフォルト) で既存動作が変わらない。"""
+        market = PredictionMarket(outcomes=["A", "B"], liquidity=10.0)
+        market.submit_bet("agent_0", "A", confidence=0.8)
+        prices = market.get_prices()
+        assert prices["A"] > prices["B"]
+        assert market.effective_liquidity == 10.0
+
+    def test_adaptive_b_numerical_stability(self):
+        """adaptive b + 大量ベットでオーバーフローしない。"""
+        market = PredictionMarket(outcomes=["A", "B"], liquidity=10.0, adaptive_b=True)
+        for i in range(500):
+            market.submit_bet(f"agent_{i}", "A", confidence=0.95)
+        prices = market.get_prices()
+        assert sum(prices.values()) == pytest.approx(1.0, abs=0.01)

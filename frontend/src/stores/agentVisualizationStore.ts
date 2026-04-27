@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 
 export type AgentVisualStatus = 'idle' | 'thinking' | 'executing' | 'speaking' | 'debating'
 
-export interface RecentThought {
+interface RecentThought {
   agentId: string
   agentName: string
   reasoningChain: string
@@ -19,16 +19,16 @@ export interface CommunicationFlow {
   timestamp: number
 }
 
-export interface DialogueEvent {
+interface DialogueEvent {
   participantName: string
   argument: string
   round: number
   timestamp: number
 }
 
-export type TickerEventType = 'thought' | 'communication' | 'dialogue' | 'system'
+type TickerEventType ='thought' | 'communication' | 'dialogue' | 'system'
 
-export interface TickerEvent {
+interface TickerEvent {
   id: string
   type: TickerEventType
   agentName: string
@@ -37,7 +37,7 @@ export interface TickerEvent {
   icon: string
 }
 
-export interface SystemTickerEvent {
+interface SystemTickerEvent {
   icon: string
   label: string
   detail?: string

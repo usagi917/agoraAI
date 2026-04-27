@@ -5,10 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.app.models.audit_event import AuditEvent
 from src.app.models.scenario_pair import ScenarioPair
 from src.app.services.audit_trail_service import get_opinion_shifts
 from src.app.services.decision_briefing import build_single_decision_brief
@@ -288,17 +286,20 @@ async def build_scenario_comparison(
         )
 
     # Build decision briefs from simulation metadata
+    baseline_meta = baseline_sim.metadata_json or {}
+    intervention_meta = intervention_sim.metadata_json or {}
+
     baseline_brief = build_single_decision_brief(
         prompt_text=baseline_sim.prompt_text,
-        report_content=baseline_sim.metadata_json.get("report_content", ""),
-        sections=baseline_sim.metadata_json.get("sections"),
-        quality=baseline_sim.metadata_json.get("quality"),
+        report_content=baseline_meta.get("report_content", ""),
+        sections=baseline_meta.get("sections"),
+        quality=baseline_meta.get("quality"),
     )
     intervention_brief = build_single_decision_brief(
         prompt_text=intervention_sim.prompt_text,
-        report_content=intervention_sim.metadata_json.get("report_content", ""),
-        sections=intervention_sim.metadata_json.get("sections"),
-        quality=intervention_sim.metadata_json.get("quality"),
+        report_content=intervention_meta.get("report_content", ""),
+        sections=intervention_meta.get("sections"),
+        quality=intervention_meta.get("quality"),
     )
 
     # Delta
@@ -321,11 +322,11 @@ async def build_scenario_comparison(
     opinion_shifts_top5 = extract_opinion_shifts_top5(all_shift_dicts)
 
     # Coalition map from agents in metadata (if available)
-    agents = intervention_sim.metadata_json.get("agents", [])
+    agents = intervention_meta.get("agents", [])
     coalition_map = build_coalition_map(agents, all_shift_dicts)
 
     # Enrich delta with coalition shifts (compare baseline vs intervention groups)
-    baseline_agents = baseline_sim.metadata_json.get("agents", [])
+    baseline_agents = baseline_meta.get("agents", [])
     if baseline_agents and agents:
         baseline_coalition = build_coalition_map(baseline_agents)
         coalition_shifts = _compute_coalition_shifts(baseline_coalition, coalition_map)

@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 from typing import TypedDict
@@ -141,22 +140,68 @@ def _jaccard(left: set[str], right: set[str]) -> float:
     return len(left & right) / len(union)
 
 
+# 日本語政策用語の同義語テーブル
+_SYNONYMS: dict[str, list[str]] = {
+    "インフレ": ["物価上昇", "インフレーション"],
+    "物価上昇": ["インフレ", "インフレーション"],
+    "景気後退": ["リセッション", "不景気"],
+    "リセッション": ["景気後退", "不景気"],
+    "増税": ["税率引き上げ", "税負担増"],
+    "税率引き上げ": ["増税", "税負担増"],
+    "少子化": ["出生率低下", "人口減少"],
+    "高齢化": ["超高齢社会", "老齢化"],
+    "円安": ["通貨安", "為替下落"],
+    "賃上げ": ["賃金上昇", "ベースアップ"],
+}
+
+_MIN_MATCH_THRESHOLD = 0.05
+
+
+def _expand_synonyms(text: str) -> str:
+    """テキスト中のキーワードを同義語で展開する。"""
+    expanded = text
+    for keyword, synonyms in _SYNONYMS.items():
+        if keyword in text:
+            expanded += " " + " ".join(synonyms)
+    return expanded
+
+
 def find_relevant_surveys(
     theme: str,
     surveys: list[SurveyRecord],
     top_k: int = 5,
+    theme_category: str | None = None,
+    exclude_survey_ids: list[str] | None = None,
 ) -> list[SurveyRecord]:
-    """テーマキーワードでの関連調査検索。n-gram Jaccard によるマッチング。"""
-    theme_ngrams = _ngrams(theme)
+    """テーマキーワードでの関連調査検索。
+
+    改善点:
+    - theme_category によるプレフィルタ
+    - 同義語展開
+    - 最低マッチ閾値 (Jaccard >= 0.05)
+    - exclude_survey_ids による leakage 防止（source で除外）
+    """
+    # カテゴリプレフィルタ
+    candidates = surveys
+    if theme_category is not None:
+        candidates = [s for s in surveys if s.get("theme_category") == theme_category]
+
+    # leakage 防止: exclude_survey_ids に含まれる source を除外
+    if exclude_survey_ids:
+        candidates = [s for s in candidates if s.get("source") not in exclude_survey_ids]
+
+    # 同義語展開
+    expanded_theme = _expand_synonyms(theme)
+    theme_ngrams = _ngrams(expanded_theme)
     if not theme_ngrams:
         return []
 
     scored: list[tuple[float, SurveyRecord]] = []
-    for survey in surveys:
-        # テーマ名とキーワードを結合してマッチング
+    for survey in candidates:
         searchable = survey["theme"] + " " + " ".join(survey["relevance_keywords"])
-        score = _jaccard(theme_ngrams, _ngrams(searchable))
-        if score > 0:
+        expanded_searchable = _expand_synonyms(searchable)
+        score = _jaccard(theme_ngrams, _ngrams(expanded_searchable))
+        if score >= _MIN_MATCH_THRESHOLD:
             scored.append((score, survey))
 
     scored.sort(key=lambda x: x[0], reverse=True)
@@ -167,13 +212,17 @@ def compare_with_surveys(
     simulation_distribution: dict[str, float],
     theme: str,
     data_dir: str,
+    theme_category: str | None = None,
 ) -> ComparisonReport | None:
-    """シミュレーション出力と調査データの比較レポートを生成する。"""
+    """シミュレーション出力と調査データの比較レポートを生成する。
+
+    theme_category を指定すると find_relevant_surveys のプレフィルタに使用される。
+    """
     surveys = load_survey_data(data_dir)
     if not surveys:
         return None
 
-    matched = find_relevant_surveys(theme, surveys)
+    matched = find_relevant_surveys(theme, surveys, theme_category=theme_category)
     if not matched:
         return None
 
@@ -207,6 +256,64 @@ def compare_with_surveys(
         per_survey_deviations=per_survey_deviations,
         best_match_source=best["source"],
     )
+
+
+def get_anchor_distribution(
+    theme: str,
+    theme_category: str,
+    surveys: list[SurveyRecord],
+) -> dict[str, float] | None:
+    """テーマカテゴリに対応するアンカー分布を取得する。
+
+    関連する調査のスタンス分布の加重平均を返す。
+    マッチする調査がない場合は None を返す。
+
+    Args:
+        theme: シミュレーションのテーマ文
+        theme_category: 推定済みのカテゴリ名
+        surveys: 検索対象の SurveyRecord リスト
+    """
+    matched = find_relevant_surveys(theme, surveys, theme_category=theme_category)
+    if not matched:
+        return None
+
+    avg: dict[str, float] = {k: 0.0 for k in STANCE_ORDER}
+    n = len(matched)
+    for survey in matched:
+        for k in STANCE_ORDER:
+            avg[k] += survey["stance_distribution"].get(k, 0.0)
+    return {k: v / n for k, v in avg.items()}
+
+
+def apply_survey_anchor(
+    distribution: dict[str, float],
+    anchor_distribution: dict[str, float] | None,
+    alpha: float = 0.3,
+) -> dict[str, float]:
+    """シミュレーション分布をアンカー調査分布に向けてブレンドする。
+
+    anchor_distribution が None の場合は distribution をそのまま返す（スキップ）。
+
+    Args:
+        distribution: シミュレーション出力の意見分布
+        anchor_distribution: アンカーとなる調査の分布。None の場合はスキップ。
+        alpha: アンカーの重み (0.0=変更なし, 1.0=完全にアンカーへ置換)
+
+    Returns:
+        ブレンド後の正規化済み分布。anchor_distribution=None の場合は元の分布。
+    """
+    if anchor_distribution is None:
+        return distribution
+
+    all_keys = set(distribution.keys()) | set(anchor_distribution.keys())
+    blended = {
+        k: (1.0 - alpha) * distribution.get(k, 0.0) + alpha * anchor_distribution.get(k, 0.0)
+        for k in all_keys
+    }
+    total = sum(blended.values())
+    if total <= 0:
+        return distribution
+    return {k: v / total for k, v in blended.items()}
 
 
 def map_to_five_stances(

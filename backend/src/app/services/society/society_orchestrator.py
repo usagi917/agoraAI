@@ -12,6 +12,13 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
+from src.app.services.society.theme_category import (
+    ThemeCategoryEstimate,
+    MVP_CATEGORIES,
+    ANCHOR_MIN_CONFIDENCE,
+    CONFIDENCE_PER_KEYWORD,
+)
+
 from sqlalchemy import func, select
 
 from src.app.config import settings
@@ -49,8 +56,15 @@ from src.app.services.society.stigmergy_service import StigmergyBoard
 from src.app.services.society.prediction_market import PredictionMarket
 from src.app.services.society.statistical_inference import compute_independence_weights
 from src.app.services.society.activation_layer import _aggregate_opinions
+from src.app.services.society.calibration import platt_recalibrate
 from src.app.services.society.emergence_tracker import EmergenceTracker
 from src.app.services.society.output_validator import explain_activation_meeting_gap
+from src.app.services.society.survey_anchor import (
+    apply_survey_anchor,
+    get_anchor_distribution,
+    load_survey_data,
+)
+from src.app.services.scenario_pair_status import refresh_scenario_pair_status
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -64,17 +78,38 @@ _CATEGORY_KEYWORDS: dict[str, list[str]] = {
 }
 
 
-def _estimate_theme_category(theme: str, grounding_facts: list[dict] | None = None) -> str:
-    """テーマ文やグラウンディングファクトからテーマカテゴリを推定する。"""
-    # grounding_facts にカテゴリ情報があればそれを優先
+def _estimate_theme_category(
+    theme: str,
+    grounding_facts: list[dict] | None = None,
+    override: str | None = None,
+) -> ThemeCategoryEstimate:
+    """テーマ文やグラウンディングファクトからテーマカテゴリを推定する。
+
+    優先順位: override > grounding_facts > keyword_match > fallback(unknown)
+    """
+    # 1. override 最優先
+    if override is not None and override in _CATEGORY_KEYWORDS:
+        return ThemeCategoryEstimate(
+            category=override,
+            confidence=1.0,
+            source="override",
+            is_anchor_eligible=True,
+        )
+
+    # 2. grounding_facts にカテゴリ情報があればキーワードより優先
     if grounding_facts:
         for fact in grounding_facts:
             cat = fact.get("theme_category") or fact.get("category")
             if cat and cat in _CATEGORY_KEYWORDS:
-                return cat
+                return ThemeCategoryEstimate(
+                    category=cat,
+                    confidence=0.8,
+                    source="grounding_facts",
+                    is_anchor_eligible=True,
+                )
 
-    # テーマ文からキーワードマッチでカテゴリを推定
-    best_category = "social"
+    # 3. テーマ文からキーワードマッチでカテゴリを推定
+    best_category: str | None = None
     best_count = 0
     for category, keywords in _CATEGORY_KEYWORDS.items():
         count = sum(1 for kw in keywords if kw in theme)
@@ -82,7 +117,26 @@ def _estimate_theme_category(theme: str, grounding_facts: list[dict] | None = No
             best_count = count
             best_category = category
 
-    return best_category
+    # キーワード 0 件 → unknown
+    if best_count == 0:
+        return ThemeCategoryEstimate(
+            category="unknown",
+            confidence=0.0,
+            source="fallback",
+            is_anchor_eligible=False,
+        )
+
+    confidence = min(1.0, best_count * CONFIDENCE_PER_KEYWORD)
+    # MVP カテゴリで confidence が閾値未満の場合はアンカリング禁止
+    is_anchor_eligible = not (
+        best_category in MVP_CATEGORIES and confidence < ANCHOR_MIN_CONFIDENCE
+    )
+    return ThemeCategoryEstimate(
+        category=best_category,
+        confidence=confidence,
+        source="keyword_match",
+        is_anchor_eligible=is_anchor_eligible,
+    )
 
 
 def _build_activation_phase_data(
@@ -191,12 +245,88 @@ def _apply_independence_re_aggregation(
     return independence_weights
 
 
+def _get_prediction_market_config(mix_config: dict) -> dict:
+    """予測市場のコンフィグを返す。
+
+    Design Decision:
+        デフォルトでは pre-propagation stance を使用する。
+        ネットワーク伝播前のエージェント初期意見が、各エージェントの独立した判断を
+        より正確に反映するため。post-propagation は社会的影響を受けた後の意見であり、
+        独立性の低い（＝予測市場の情報集約効果が薄い）データとなる。
+
+        use_post_propagation=True に切り替えると、ネットワーク伝播後の
+        （社会的影響を反映した）スタンスで予測市場のベットを行う。
+    """
+    pm_config = mix_config.get("prediction_market", {})
+    return {
+        "use_post_propagation": bool(pm_config.get("use_post_propagation", False)),
+    }
+
+
+def _extract_representative_updates(
+    meeting_participants: list[dict],
+    meeting_result: dict,
+    activation_responses: list[dict],
+) -> list[dict]:
+    """Compare representative stances before/after meeting and return changes.
+
+    Reads each citizen_representative's pre-meeting stance from
+    activation_responses and compares against the meeting synthesis
+    participant summaries. Only returns entries where the stance actually
+    changed.
+
+    Returns:
+        [{"agent_id": str, "old_stance": str, "new_stance": str}, ...]
+    """
+    # Build lookup: agent_id -> pre-meeting stance
+    resp_map: dict[str, str] = {}
+    for r in activation_responses:
+        resp_map[r.get("agent_id", "")] = r.get("stance", "中立")
+
+    synthesis = meeting_result.get("synthesis", {})
+    # Try to get per-participant final stances from synthesis
+    participant_stances = synthesis.get("participant_stances", {})
+
+    updates: list[dict] = []
+    for p in meeting_participants:
+        if p.get("role") != "citizen_representative":
+            continue
+        agent_profile = p.get("agent_profile", {})
+        agent_id = agent_profile.get("id", "")
+        if not agent_id:
+            continue
+
+        old_stance = resp_map.get(agent_id, "中立")
+        # Check synthesis for participant's final stance
+        new_stance = participant_stances.get(agent_id, "")
+
+        # Fallback: if synthesis doesn't have per-participant stances,
+        # use the majority_stance for representatives (conservative approach)
+        if not new_stance:
+            new_stance = synthesis.get("majority_stance", old_stance)
+
+        if new_stance and new_stance != old_stance:
+            updates.append({
+                "agent_id": agent_id,
+                "old_stance": old_stance,
+                "new_stance": new_stance,
+            })
+
+    return updates
+
+
 async def _get_or_create_population(
     session,
     population_id: str | None = None,
     count: int | None = None,
+    seed: int | None = None,
+    *,
+    strict: bool = False,
 ) -> tuple[str, list[dict]]:
-    """既存の Population を取得するか、新規生成する。"""
+    """既存の Population を取得するか、新規生成する。
+
+    strict=True の場合、population_id が無効なときはエラーを返す（フォールバックしない）。
+    """
     resolved_count = get_default_population_size() if count is None else validate_population_size(count)
 
     if population_id:
@@ -225,8 +355,28 @@ async def _get_or_create_population(
                         "shock_sensitivity": a.shock_sensitivity,
                         "llm_backend": a.llm_backend,
                         "memory_summary": a.memory_summary,
+                        "rolling_summary": a.rolling_summary,
+                        "episodes": a.episodes,
                     })
                 return population_id, agents
+            elif strict:
+                raise ValueError(
+                    f"Population {population_id} has no agent profiles"
+                )
+        elif strict:
+            if pop is None:
+                raise ValueError(f"Population not found: {population_id}")
+            else:
+                raise ValueError(
+                    f"Population {population_id} is not ready (status={pop.status})"
+                )
+        else:
+            logger.warning(
+                "Population %s not usable (exists=%s, status=%s), generating new population",
+                population_id,
+                pop is not None,
+                getattr(pop, "status", None),
+            )
 
     # 新規生成
     pop_id = str(uuid.uuid4())
@@ -239,7 +389,7 @@ async def _get_or_create_population(
     session.add(population)
     await session.commit()
 
-    agents = await generate_population(pop_id, resolved_count)
+    agents = await generate_population(pop_id, resolved_count, seed=seed)
 
     # DB に保存
     for agent_data in agents:
@@ -253,12 +403,35 @@ async def _get_or_create_population(
 
 
 async def _save_network(session, agents: list[dict], population_id: str) -> None:
-    """ネットワークを生成して保存する。"""
+    """ネットワークを生成して保存する（冪等: 既存エッジを削除してから挿入）。"""
+    from sqlalchemy import delete
+
+    await session.execute(
+        delete(SocialEdge).where(SocialEdge.population_id == population_id)
+    )
+    await session.flush()
+
     edges = await generate_network(agents, population_id)
     for edge_data in edges:
         edge = SocialEdge(**edge_data)
         session.add(edge)
     await session.commit()
+
+
+async def _load_population_edges(session, population_id: str) -> list[dict]:
+    """population_id に紐づくエッジを読み込む。"""
+    edge_result = await session.execute(
+        select(SocialEdge).where(SocialEdge.population_id == population_id)
+    )
+    edges_db = edge_result.scalars().all()
+    return [
+        {
+            "agent_id": e.agent_id,
+            "target_id": e.target_id,
+            "strength": e.strength,
+        }
+        for e in edges_db
+    ]
 
 
 async def run_society(simulation_id: str) -> None:
@@ -288,7 +461,8 @@ async def run_society(simulation_id: str) -> None:
             })
 
             pop_id, agents = await _get_or_create_population(
-                session, sim.population_id, pop_count,
+                session, sim.population_id, pop_count, seed=sim.seed,
+                strict=bool(getattr(sim, "scenario_pair_id", None)),
             )
             sim.population_id = pop_id
             await session.commit()
@@ -302,14 +476,16 @@ async def run_society(simulation_id: str) -> None:
             # ネットワーク生成（バックグラウンド的に）
             await _save_network(session, agents, pop_id)
 
-            # === Phase 2: Selection ===
-            selected_agents = await select_agents(agents, theme, target_count=100)
+            # === Phase 2: Selection (network centrality-aware) ===
+            all_edges = await _load_population_edges(session, pop_id)
+            selected_agents = await select_agents(agents, theme, target_count=100, edges=all_edges)
 
             await sse_manager.publish(simulation_id, "society_selection_completed", {
                 "selected_count": len(selected_agents),
                 "total_population": len(agents),
                 "selected_agents": [
                     {
+                        "id": a.get("id", ""),
                         "agent_index": a.get("agent_index", i),
                         "name": f"Agent-{a.get('agent_index', i)}",
                         "occupation": a.get("demographics", {}).get("occupation", ""),
@@ -333,6 +509,43 @@ async def run_society(simulation_id: str) -> None:
                 logger.warning("Grounding failed, continuing without: %s", exc)
                 for agent in selected_agents:
                     agent["grounding_facts"] = []
+
+            # === Phase 2.8: theme_category 推定とアンカー事前準備 ===
+            # activation 前に推定を確定させ、アンカー適用タイミングを固定する
+            survey_data_dir = settings.config_dir / "grounding" / "survey_data"
+            theme_estimate = _estimate_theme_category(theme, grounding_facts)
+            logger.info(
+                "Theme category estimated: category=%s confidence=%.2f source=%s anchor_eligible=%s",
+                theme_estimate.category, theme_estimate.confidence,
+                theme_estimate.source, theme_estimate.is_anchor_eligible,
+            )
+
+            anchor_distribution: dict[str, float] | None = None
+            if theme_estimate.is_anchor_eligible:
+                try:
+                    anchor_surveys = load_survey_data(str(survey_data_dir))
+                    anchor_distribution = get_anchor_distribution(
+                        theme, theme_estimate.category, anchor_surveys
+                    )
+                    if anchor_distribution:
+                        logger.info(
+                            "Anchor distribution pre-loaded for category=%s",
+                            theme_estimate.category,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "Anchor distribution pre-load failed (sim=%s): %s",
+                        simulation_id, exc, exc_info=True,
+                    )
+
+            # === Phase 2.9: エピソードメモリ選択（二層メモリ Layer B） ===
+            from src.app.services.society.accuracy_config import is_enabled as _acc_is_enabled
+            if _acc_is_enabled("episodic_memory"):
+                from src.app.services.society.memory_compressor import select_relevant_episodes
+                for agent in selected_agents:
+                    agent["_relevant_episodes"] = select_relevant_episodes(
+                        agent.get("episodes"), theme, theme_estimate.category, top_k=3,
+                    )
 
             # === Phase 3: Activation ===
             await sse_manager.publish(simulation_id, "society_activation_started", {
@@ -366,6 +579,20 @@ async def run_society(simulation_id: str) -> None:
                     "concern": (resp.get("concern") or "")[:300],
                     "priority": resp.get("priority", ""),
                 })
+
+            # === Phase 3.1: Survey アンカリング（activation 後・propagation 前）===
+            # anchor_distribution が None（not eligible or 調査なし）の場合はスキップ
+            stance_dist_pre_anchor = activation_result["aggregation"].get("stance_distribution", {})
+            anchored_stance_dist = apply_survey_anchor(stance_dist_pre_anchor, anchor_distribution)
+            anchor_applied = anchor_distribution is not None and anchored_stance_dist != stance_dist_pre_anchor
+            if anchor_applied:
+                activation_result["aggregation"]["stance_distribution_pre_anchor"] = stance_dist_pre_anchor
+                activation_result["aggregation"]["stance_distribution"] = anchored_stance_dist
+                logger.info(
+                    "Survey anchor applied: category=%s alpha=0.3 emd_shift=%s",
+                    theme_estimate.category,
+                    anchor_applied,
+                )
 
             activation_record = SocietyResult(
                 id=str(uuid.uuid4()),
@@ -439,13 +666,13 @@ async def run_society(simulation_id: str) -> None:
                     initial_responses=responses_with_ids,
                     edges=edges,
                     theme=theme,
-                    max_timesteps=20,
-                    confidence_threshold=0.4,
+                    max_timesteps=12,
+                    confidence_threshold=0.5,
                     on_timestep=on_propagation_timestep,
                 )
 
                 # Stigmergy: extract topics from agent concerns
-                for resp in activation_result["responses"]:
+                for resp in responses_with_ids:
                     concern = resp.get("concern", "")
                     if concern:
                         # Simple topic extraction from concerns
@@ -472,16 +699,21 @@ async def run_society(simulation_id: str) -> None:
                     individual_responses=individual_responses,
                 )
 
-                # Prediction Market (with independence-weighted bets)
+                # Prediction Market (with independence-weighted bets + adaptive liquidity)
+                # Design Decision: デフォルトでは pre-propagation stance を使用。
+                # 各エージェントの独立した判断を予測市場に反映するため。
+                # use_post_propagation=True で社会的影響後のスタンスに切替可能。
+                pm_config = _get_prediction_market_config(settings.load_population_mix_config())
                 outcomes = list(activation_result["aggregation"]["stance_distribution"].keys())
-                if outcomes:
-                    prediction_market = PredictionMarket(outcomes=outcomes)
+                if outcomes and not pm_config["use_post_propagation"]:
+                    prediction_market = PredictionMarket(outcomes=outcomes, adaptive_b=True)
                     for agent, resp in zip(selected_agents, activation_result["responses"]):
                         stance = resp.get("stance", "中立")
-                        confidence = resp.get("confidence", 0.5)
+                        raw_confidence = resp.get("confidence", 0.5)
+                        calibrated_confidence = platt_recalibrate(raw_confidence)
                         ind_w = independence_weights.get(agent["id"], 1.0)
                         if stance in outcomes:
-                            prediction_market.submit_bet(agent["id"], stance, confidence, weight=ind_w)
+                            prediction_market.submit_bet(agent["id"], stance, calibrated_confidence, weight=ind_w)
 
                 # Emergence tracking from propagation history
                 for ts_record in propagation_result.timestep_history:
@@ -539,6 +771,19 @@ async def run_society(simulation_id: str) -> None:
                                     "agent_id": selected_agents[i]["id"],
                                     "stance": new_stance,
                                 })
+
+                # Post-propagation prediction market (use_post_propagation=True の場合のみ)
+                if outcomes and pm_config["use_post_propagation"]:
+                    prediction_market = PredictionMarket(outcomes=outcomes, adaptive_b=True)
+                    for agent, resp in zip(selected_agents, activation_result["responses"]):
+                        stance = resp.get("propagated_stance", resp.get("stance", "中立"))
+                        raw_confidence = resp.get("confidence", 0.5)
+                        calibrated_confidence = platt_recalibrate(raw_confidence)
+                        ind_w = independence_weights.get(agent["id"], 1.0)
+                        if stance in outcomes:
+                            prediction_market.submit_bet(agent["id"], stance, calibrated_confidence, weight=ind_w)
+                    # Update persisted phase_data with post-propagation prices
+                    propagation_record.phase_data["prediction_market"] = prediction_market.get_prices()
 
                 await sse_manager.publish(simulation_id, "network_propagation_completed", {
                     "converged": propagation_result.converged,
@@ -614,16 +859,15 @@ async def run_society(simulation_id: str) -> None:
                     register_prediction_evaluation,
                     register_result,
                 )
-                survey_data_dir = settings.config_dir / "grounding" / "survey_data"
+                # theme_estimate と survey_data_dir は Phase 2.8 で確定済み
                 stance_dist = activation_result["aggregation"].get("stance_distribution", {})
-                # テーマカテゴリを推定（grounding_facts からカテゴリを取得、なければテーマから推定）
-                theme_category = _estimate_theme_category(theme, grounding_facts)
                 validation_record = await register_result(
                     session,
                     simulation_id=simulation_id,
                     theme=theme,
-                    theme_category=theme_category,
+                    theme_category=theme_estimate.category,
                     distribution=stance_dist,
+                    theme_category_estimate=theme_estimate,
                 )
                 survey_comparison = await auto_compare(
                     session, validation_record, str(survey_data_dir)
@@ -644,7 +888,7 @@ async def run_society(simulation_id: str) -> None:
                     session,
                     simulation_id=simulation_id,
                     prediction_type="distribution",
-                    theme_category=theme_category,
+                    theme_category=theme_estimate.category,
                     source="society_orchestrator",
                     predicted_payload=build_distribution_prediction_payload(
                         activation_result["aggregation"],
@@ -663,11 +907,11 @@ async def run_society(simulation_id: str) -> None:
                     })
                 logger.info("Validation registration completed for simulation %s", simulation_id)
             except (FileNotFoundError, ImportError) as exc:
-                logger.error("Validation registration failed (system error): %s", exc)
+                logger.error("Validation registration failed (system error) sim=%s: %s", simulation_id, exc)
             except (ValueError, KeyError) as exc:
-                logger.warning("Validation registration failed (data issue): %s", exc)
+                logger.warning("Validation registration failed (data issue) sim=%s: %s", simulation_id, exc)
             except Exception as exc:
-                logger.warning("Validation registration failed, continuing: %s", exc, exc_info=True)
+                logger.warning("Validation registration failed, continuing sim=%s: %s", simulation_id, exc, exc_info=True)
 
             # === Phase 4.6: Demographic Analysis ===
             demographic_analysis = analyze_demographics(
@@ -682,6 +926,25 @@ async def run_society(simulation_id: str) -> None:
                 usage={},
             )
             session.add(demo_record)
+
+            # === Phase 4.8: Post-Activation Persona Generation ===
+            try:
+                from src.app.services.society.persona_generator import (
+                    generate_persona_narratives_post_activation,
+                )
+                await sse_manager.publish(simulation_id, "persona_generation_started", {
+                    "agent_count": len(selected_agents),
+                })
+                selected_agents = await generate_persona_narratives_post_activation(
+                    selected_agents, activation_result["responses"], theme,
+                )
+                persona_count = sum(1 for a in selected_agents if a.get("persona_narrative"))
+                logger.info(
+                    "Post-activation persona narratives: %d/%d generated",
+                    persona_count, len(selected_agents),
+                )
+            except Exception as exc:
+                logger.warning("Post-activation persona generation failed, continuing: %s", exc)
 
             # === Phase 5: Meeting Layer ===
             meeting_participants = select_representatives(
@@ -758,6 +1021,111 @@ async def run_society(simulation_id: str) -> None:
             session.add(meeting_record)
             await session.commit()
 
+            # === Phase 5.025: Meeting Feedback Propagation ===
+            feedback_result = None
+            try:
+                from src.app.services.society.accuracy_config import is_enabled
+                if is_enabled("meeting_feedback_propagation") and propagation_result:
+                    await sse_manager.publish(simulation_id, "meeting_feedback_started", {
+                        "representative_count": len(meeting_participants),
+                    })
+
+                    representative_updates = _extract_representative_updates(
+                        meeting_participants, meeting_result, responses_with_ids,
+                    )
+
+                    if representative_updates:
+                        from src.app.services.society.network_propagation import (
+                            run_meeting_feedback_propagation,
+                        )
+                        feedback_result = await run_meeting_feedback_propagation(
+                            agents=selected_agents,
+                            edges=edges,
+                            representative_updates=representative_updates,
+                            activation_responses=responses_with_ids,
+                            seed=sim.seed,
+                        )
+
+                        await sse_manager.publish(simulation_id, "meeting_feedback_timestep", {
+                            "changed_count": len(feedback_result["changed_agents"]),
+                        })
+
+                        # Re-run evaluation with post-feedback responses
+                        fb_responses = feedback_result["feedback_responses"]
+                        post_fb_eval = await evaluate_society_simulation(
+                            selected_agents, fb_responses,
+                        )
+                        post_fb_eval_data = {m["metric_name"]: m["score"] for m in post_fb_eval}
+
+                        # Re-run demographic analysis
+                        post_fb_demographics = analyze_demographics(
+                            selected_agents, fb_responses,
+                        )
+
+                        # Rebuild PredictionMarket with post-feedback opinions
+                        fb_stances = list({r["stance"] for r in fb_responses})
+                        if fb_stances:
+                            post_fb_market = PredictionMarket(outcomes=fb_stances, adaptive_b=True)
+                            for resp in fb_responses:
+                                stance = resp.get("stance", "中立")
+                                if stance in fb_stances:
+                                    post_fb_market.submit_bet(
+                                        resp["agent_id"], stance,
+                                        resp.get("confidence", 0.5),
+                                    )
+
+                            # Resolve with meeting majority_stance
+                            synthesis = meeting_result.get("synthesis", {})
+                            majority_stance = synthesis.get("majority_stance", "")
+                            post_fb_brier = None
+                            if majority_stance and majority_stance in fb_stances:
+                                post_fb_market.resolve(majority_stance)
+                                post_fb_brier = post_fb_market.compute_brier_score(majority_stance)
+
+                        # Save post-feedback results as separate layers
+                        fb_eval_record = SocietyResult(
+                            id=str(uuid.uuid4()),
+                            simulation_id=simulation_id,
+                            population_id=pop_id,
+                            layer="post_feedback_evaluation",
+                            phase_data={"metrics": post_fb_eval_data},
+                            usage={},
+                        )
+                        session.add(fb_eval_record)
+
+                        fb_demo_record = SocietyResult(
+                            id=str(uuid.uuid4()),
+                            simulation_id=simulation_id,
+                            population_id=pop_id,
+                            layer="post_feedback_demographics",
+                            phase_data=post_fb_demographics,
+                            usage={},
+                        )
+                        session.add(fb_demo_record)
+
+                        fb_propagation_record = SocietyResult(
+                            id=str(uuid.uuid4()),
+                            simulation_id=simulation_id,
+                            population_id=pop_id,
+                            layer="post_feedback_propagation",
+                            phase_data={
+                                "propagation_record": feedback_result["propagation_record"],
+                                "changed_agents": feedback_result["changed_agents"],
+                                "market_prices": post_fb_market.get_prices() if fb_stances else {},
+                                "brier_score": post_fb_brier,
+                            },
+                            usage={},
+                        )
+                        session.add(fb_propagation_record)
+
+                    await sse_manager.publish(simulation_id, "meeting_feedback_completed", {
+                        "total_changed": len(feedback_result["changed_agents"]) if feedback_result else 0,
+                    })
+            except (ValueError, ImportError) as exc:
+                logger.warning("Meeting feedback propagation skipped: %s", exc)
+            except Exception as exc:
+                logger.warning("Meeting feedback propagation failed: %s", exc, exc_info=True)
+
             # === Phase 5.05: Prediction Market Resolution ===
             if prediction_market:
                 try:
@@ -814,11 +1182,20 @@ async def run_society(simulation_id: str) -> None:
                 survey_comparison=survey_comparison,
             )
 
+            # Augment provenance with theme_category anchoring provenance
+            provenance["theme_category_anchoring"] = {
+                "category": theme_estimate.category,
+                "confidence": theme_estimate.confidence,
+                "source": theme_estimate.source,
+                "is_anchor_eligible": theme_estimate.is_anchor_eligible,
+                "anchor_applied": anchor_applied,
+            }
+
             # Augment provenance with network propagation data
             if propagation_result:
                 provenance["network_propagation"] = {
                     "model": "Bounded Confidence (Hegselmann-Krause) + Friedkin-Johnsen",
-                    "max_timesteps": 20,
+                    "max_timesteps": 12,
                     "actual_timesteps": propagation_result.total_timesteps,
                     "converged": propagation_result.converged,
                     "cluster_count": len(propagation_result.clusters),
@@ -883,9 +1260,19 @@ async def run_society(simulation_id: str) -> None:
             session.add(narrative_record)
 
             # === Phase 6: Persistent Society (記憶圧縮 + グラフ進化) ===
+            from src.app.services.society.accuracy_config import AccuracyConfig as _AccuracyConfig
+            _acc_flags = _AccuracyConfig(settings.load_population_mix_config())
+            _mem_llm = None
+            if _acc_flags.is_enabled("rolling_summary"):
+                from src.app.llm.multi_client import multi_llm_client as _mem_llm
             await update_agent_memories(
                 session, selected_agents, activation_result["responses"],
                 meeting_result=meeting_result,
+                theme=theme,
+                theme_category=theme_estimate.category,
+                simulation_id=simulation_id,
+                llm_client=_mem_llm,
+                accuracy_flags=_acc_flags,
             )
 
             await evolve_social_graph(
@@ -948,6 +1335,7 @@ async def run_society(simulation_id: str) -> None:
             await session.rollback()
             sim.status = "failed"
             sim.error_message = f"{type(e).__name__}: {e}"[:500]
+            await refresh_scenario_pair_status(session, getattr(sim, "scenario_pair_id", None))
             await session.commit()
 
             await sse_manager.publish(simulation_id, "simulation_failed", {

@@ -232,6 +232,12 @@ export interface DecisionOptionComparison {
   when_to_choose?: string
 }
 
+export interface DecisionScorecardItem {
+  label: string
+  value: string
+  detail?: string
+}
+
 export interface ScenarioReport {
   description: string
   probability?: number
@@ -557,6 +563,15 @@ export interface MetaSimulationReportResponse extends SimulationReportBase {
   scenarios?: ScenarioReport[]
 }
 
+export interface ConversationHighlights {
+  summary: string
+  source_phase: 'council' | 'meeting' | 'discussion'
+  consensus: Array<{ point: string; impact: string }>
+  conflicts: Array<{ point: string; status: string; impact: string }>
+  turning_points: Array<{ moment: string; why_it_changed: string }>
+  key_quotes: Array<{ speaker: string; quote: string; decision_impact: string }>
+}
+
 export interface DecisionBrief {
   recommendation: 'Go' | 'No-Go' | '条件付きGo'
   agreement_score?: number
@@ -570,8 +585,10 @@ export interface DecisionBrief {
   next_decisions?: DecisionNextDecision[]
   recommended_actions?: DecisionAction[]
   option_comparison?: DecisionOptionComparison[]
+  decision_scorecard?: DecisionScorecardItem[]
   confidence_explainer?: string
   evidence_gaps?: string[]
+  followup_prompts?: string[]
   options?: Array<{ label: string; expected_effect: string; risk: string }>
   strongest_counterargument?: string
   risk_factors?: Array<{ condition: string; impact: string }>
@@ -582,6 +599,7 @@ export interface DecisionBrief {
     long_term: { period: string; prediction: string }
   }
   stakeholder_reactions?: Array<{ group: string; reaction: string; percentage: number }>
+  conversation_highlights?: ConversationHighlights
 }
 
 export interface UnifiedReportResponse extends SimulationReportBase {
@@ -842,8 +860,14 @@ export async function getSocialGraph(simId: string): Promise<SocialGraphResponse
   return data
 }
 
-export async function getAgentDetail(simId: string, agentId: string): Promise<AgentDetailResponse> {
-  const { data } = await api.get(`/society/simulations/${simId}/agents/${agentId}`)
+export async function getAgentDetail(
+  simId: string,
+  agentId: string,
+  options?: { signal?: AbortSignal },
+): Promise<AgentDetailResponse> {
+  const { data } = await api.get(`/society/simulations/${simId}/agents/${agentId}`, {
+    signal: options?.signal,
+  })
   return data
 }
 
@@ -951,7 +975,7 @@ export interface TranscriptEntry {
   created_at: string
 }
 
-export interface TranscriptResponse {
+interface TranscriptResponse {
   simulation_id: string
   total_entries: number
   entries: TranscriptEntry[]

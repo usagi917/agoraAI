@@ -10,7 +10,7 @@ from src.app.llm.multi_client import multi_llm_client
 from src.app.models.simulation import Simulation
 from src.app.services.phases.society_pulse import SocietyPulseResult
 from src.app.services.phases.council_deliberation import CouncilResult
-from src.app.services.decision_briefing import render_decision_brief_markdown
+from src.app.services.decision_briefing import build_conversation_highlights, render_decision_brief_markdown
 from src.app.services.react_reporter import react_generate_decision_brief
 from src.app.services.society.conversation_highlights import extract_conversation_highlights
 from src.app.services.theater_events import emit_decision_from_synthesis
@@ -576,6 +576,15 @@ async def run_synthesis(
 
     # decision_brief に合意度を上書き（計算値を優先）
     decision_brief["agreement_score"] = agreement_score
+
+    # 議論ハイライトを注入（未設定の場合のみ）
+    if not decision_brief.get("conversation_highlights"):
+        highlights = build_conversation_highlights(
+            council_synthesis=council.synthesis,
+            recommendation=decision_brief.get("recommendation", ""),
+        )
+        if highlights:
+            decision_brief["conversation_highlights"] = highlights
 
     # フルレポート Markdown 生成（ナラティブ形式）
     content = await _build_narrative_report(

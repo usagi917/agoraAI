@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-export interface CoalitionGroup {
+interface CoalitionGroup {
   label: string
   support: number
   oppose: number

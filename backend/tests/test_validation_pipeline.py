@@ -21,15 +21,10 @@ import src.app.models  # noqa: F401
 from src.app.models.validation_record import ValidationRecord
 from src.app.repositories.validation_repo import ValidationRepository
 from src.app.services.society.validation_pipeline import (
-    evaluate_distribution_prediction,
-    evaluate_intervention_prediction,
-    evaluate_scenario_prediction,
     register_result,
     auto_compare,
     resolve_with_actual,
     generate_accuracy_report,
-    register_prediction_evaluation,
-    resolve_prediction_evaluation,
     update_bias_profile,
 )
 
@@ -183,6 +178,22 @@ class TestValidationRecordModel:
             record.id, ACTUAL_DIST, "test", "2024-01"
         )
         assert resolved.validated_at is not None
+
+    @pytest.mark.asyncio
+    async def test_resolve_validation_computes_jsd(self, db_session):
+        """resolve() で jsd が自動算出される"""
+        repo = ValidationRepository(db_session)
+        record = await repo.save(
+            simulation_id="sim-jsd",
+            theme_text="test",
+            theme_category="politics",
+            simulated_distribution=SIM_DIST,
+        )
+        resolved = await repo.resolve(
+            record.id, ACTUAL_DIST, "test", "2024-01"
+        )
+        assert resolved.jsd is not None
+        assert resolved.jsd >= 0
 
 
 class TestValidationRecordQueries:
@@ -359,93 +370,131 @@ class TestValidationPipeline:
         assert isinstance(profile, dict)
 
 
-class TestPredictionEvaluation:
-    def test_evaluate_distribution_prediction_tracks_calibration_improvement(self):
-        metrics = evaluate_distribution_prediction(
-            {
-                "raw_distribution": {"賛成": 0.9, "反対": 0.1},
-                "calibrated_distribution": {"賛成": 0.6, "反対": 0.4},
-            },
-            {"actual_distribution": {"賛成": 0.55, "反対": 0.45}},
-        )
-        assert metrics["status"] == "validated"
-        assert metrics["best_variant"] == "calibrated"
-        assert metrics["calibration_improvement"] > 0
+# ===== Phase J: γ グリッドサーチ =====
 
-    def test_evaluate_scenario_prediction_probability_brier(self):
-        metrics = evaluate_scenario_prediction(
-            {
-                "predictions": [
-                    {"outcome_label": "価格受容性", "probability": 0.8},
-                    {"outcome_label": "規制対応", "probability": 0.2},
-                ]
-            },
-            {"actual_outcomes": ["価格受容性"]},
-        )
-        assert metrics["status"] == "validated"
-        assert metrics["hit_rate"] == 0.5
-        assert metrics["mean_reciprocal_rank"] == 1.0
-        assert metrics["probability_brier"] < 0.1
 
-    def test_evaluate_intervention_prediction_direction_and_mae(self):
-        metrics = evaluate_intervention_prediction(
-            {
-                "predictions": [
-                    {
-                        "intervention_id": "price_reduction",
-                        "metric": "adoption_rate",
-                        "expected_delta": 0.08,
-                        "direction": "up",
-                    }
-                ]
-            },
-            {
-                "actuals": [
-                    {
-                        "intervention_id": "price_reduction",
-                        "metric": "adoption_rate",
-                        "actual_delta": 0.09,
-                    }
-                ]
-            },
-        )
-        assert metrics["status"] == "validated"
-        assert metrics["direction_accuracy"] == 1.0
-        assert metrics["mae"] == pytest.approx(0.01)
+class TestFindOptimalGamma:
+    @pytest.mark.asyncio
+    async def test_returns_best_gamma(self, db_session):
+        """最適な γ (Brier スコア最小) を返す。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma
+
+        # 検証済みレコードを作成
+        r1 = await register_result(db_session, "sim-G1", "t1", "economy", SIM_DIST)
+        await resolve_with_actual(db_session, r1.id, ACTUAL_DIST, "src", "2024-01")
+        r2 = await register_result(db_session, "sim-G2", "t2", "economy", SIM_DIST)
+        await resolve_with_actual(db_session, r2.id, ACTUAL_DIST, "src", "2024-01")
+
+        result = await find_optimal_gamma(db_session)
+        assert "best_gamma" in result
+        assert isinstance(result["best_gamma"], float)
+        assert 0.3 <= result["best_gamma"] <= 1.5
 
     @pytest.mark.asyncio
-    async def test_register_and_resolve_prediction_evaluation(self, db_session):
-        record = await register_prediction_evaluation(
-            db_session,
-            simulation_id="sim-PE1",
-            prediction_type="intervention",
-            theme_category="economy",
-            predicted_payload={
-                "predictions": [
-                    {
-                        "intervention_id": "price_reduction",
-                        "metric": "conversion_rate",
-                        "expected_delta": 0.04,
-                        "direction": "up",
-                    }
-                ]
-            },
-        )
-        assert record.metrics["status"] == "pending_validation"
-        assert record.validated_at is None
+    async def test_returns_gamma_scores(self, db_session):
+        """各 γ 候補の Brier スコアを返す。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma
 
-        resolved = await resolve_prediction_evaluation(
-            db_session,
-            record_id=record.id,
-            actual_payload={
-                "actuals": [
-                    {
-                        "intervention_id": "price_reduction",
-                        "metric": "conversion_rate",
-                        "actual_delta": 0.05,
-                    }
-                ]
-            },
+        r1 = await register_result(db_session, "sim-G3", "t1", "economy", SIM_DIST)
+        await resolve_with_actual(db_session, r1.id, ACTUAL_DIST, "src", "2024-01")
+
+        result = await find_optimal_gamma(db_session)
+        assert "gamma_scores" in result
+        assert len(result["gamma_scores"]) > 0
+        for entry in result["gamma_scores"]:
+            assert "gamma" in entry
+            assert "avg_brier" in entry
+
+    @pytest.mark.asyncio
+    async def test_category_filter(self, db_session):
+        """theme_category でフィルタできる。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma
+
+        r1 = await register_result(db_session, "sim-G4", "t1", "economy", SIM_DIST)
+        await resolve_with_actual(db_session, r1.id, ACTUAL_DIST, "src", "2024-01")
+        r2 = await register_result(db_session, "sim-G5", "t2", "social", SIM_DIST)
+        await resolve_with_actual(db_session, r2.id, ACTUAL_DIST, "src", "2024-01")
+
+        result = await find_optimal_gamma(db_session, theme_category="economy")
+        assert result["best_gamma"] is not None
+        assert result.get("theme_category") == "economy"
+
+    @pytest.mark.asyncio
+    async def test_no_data_returns_default(self, db_session):
+        """検証済みデータがない場合はデフォルト γ=0.7 を返す。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma
+
+        result = await find_optimal_gamma(db_session)
+        assert result["best_gamma"] == 0.7
+
+
+class TestFindOptimalGammaByCategory:
+    @pytest.mark.asyncio
+    async def test_returns_per_category_gammas(self, db_session):
+        """カテゴリ別に最適 γ を返す。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma_by_category
+
+        r1 = await register_result(db_session, "sim-GC1", "t1", "economy", SIM_DIST)
+        await resolve_with_actual(db_session, r1.id, ACTUAL_DIST, "src", "2024-01")
+        r2 = await register_result(db_session, "sim-GC2", "t2", "social", SIM_DIST)
+        await resolve_with_actual(db_session, r2.id, ACTUAL_DIST, "src", "2024-01")
+
+        result = await find_optimal_gamma_by_category(db_session)
+        assert "by_category" in result
+        assert "economy" in result["by_category"]
+        assert "social" in result["by_category"]
+        for cat_result in result["by_category"].values():
+            assert "best_gamma" in cat_result
+            assert 0.3 <= cat_result["best_gamma"] <= 1.5
+
+    @pytest.mark.asyncio
+    async def test_empty_categories_use_default(self, db_session):
+        """データなしカテゴリはデフォルト γ。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma_by_category
+
+        result = await find_optimal_gamma_by_category(db_session)
+        assert result["by_category"] == {}
+
+
+# ===== Issue 3: gate_eligible + JSD テスト =====
+
+
+class TestGateEligibilityInSummary:
+    """build_validation_summary が gate_eligible を正しく扱うことを検証."""
+
+    def test_unknown_theme_is_not_gate_eligible(self):
+        """theme_category='unknown' のレコードは gate_eligible=False であるべき."""
+        from src.app.services.society.validation_pipeline import build_validation_summary
+
+        records = [
+            {
+                "status": "validated",
+                "gate_eligible": False,  # unknown カテゴリなので False
+                "emd": 0.05,
+                "jsd": 0.03,
+                "brier_score": 0.02,
+            }
+        ]
+        result = build_validation_summary(records, theme_category="unknown")
+        assert result["gate"] == "inconclusive"
+
+    def test_jsd_threshold_triggers_fail(self):
+        """JSD > 閾値で gate=fail になること."""
+        from src.app.services.society.validation_pipeline import (
+            build_validation_summary,
+            GATE_JSD_THRESHOLD,
         )
-        assert resolved.validated_at is not None
-        assert resolved.metrics["direction_accuracy"] == 1.0
+
+        # EMD/Brier は pass レベル、JSD だけ閾値超え
+        records = [
+            {
+                "status": "validated",
+                "gate_eligible": True,
+                "emd": 0.03,
+                "jsd": GATE_JSD_THRESHOLD + 0.05,
+                "brier_score": 0.02,
+            }
+            for _ in range(5)
+        ]
+        result = build_validation_summary(records, theme_category="politics")
+        assert result["gate"] == "fail"

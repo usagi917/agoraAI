@@ -8,6 +8,7 @@ from src.app.services.society.population_generator import (
     generate_agent_profile,
     get_population_size_bounds,
     validate_population_size,
+    _generate_big_five,
 )
 
 
@@ -155,3 +156,69 @@ class TestGeneratePopulation:
         backends = set(a["llm_backend"] for a in agents)
         assert backends <= {"openai", "gemini"}
         assert len(backends) >= 2
+
+
+# ---------------------------------------------------------------------------
+# Phase D: 多変量正規分布 Big Five テスト
+# ---------------------------------------------------------------------------
+
+
+class TestMultivariateBigFive:
+    """Phase D: Big Five が多変量正規分布で生成され、相関・非対称性を持つことを検証。"""
+
+    def _generate_many(self, n: int = 1000) -> list[dict]:
+        """n 件の Big Five を生成するヘルパー。"""
+        import random
+        random.seed(42)
+        return [_generate_big_five({}) for _ in range(n)]
+
+    def test_traits_are_correlated(self):
+        """O-E 間に正の相関があること (multivariate Normal の結果)。"""
+        samples = self._generate_many(2000)
+        o_vals = [s["O"] for s in samples]
+        e_vals = [s["E"] for s in samples]
+
+        # ピアソン相関を手計算
+        n = len(o_vals)
+        mean_o = sum(o_vals) / n
+        mean_e = sum(e_vals) / n
+        cov = sum((o - mean_o) * (e - mean_e) for o, e in zip(o_vals, e_vals)) / n
+        std_o = (sum((o - mean_o) ** 2 for o in o_vals) / n) ** 0.5
+        std_e = (sum((e - mean_e) ** 2 for e in e_vals) / n) ** 0.5
+        corr = cov / (std_o * std_e) if std_o > 0 and std_e > 0 else 0
+
+        # 多変量正規分布の相関行列で O-E = 0.3 を設定しているので、
+        # サンプル相関は 0.1 以上であるべき
+        assert corr > 0.1, f"O-E correlation {corr:.3f} is too low (expected > 0.1)"
+
+    def test_agreeableness_mean_is_higher(self):
+        """日本人ノルムでは Agreeableness の平均が 0.5 より高い。"""
+        samples = self._generate_many(2000)
+        a_vals = [s["A"] for s in samples]
+        mean_a = sum(a_vals) / len(a_vals)
+        # 設定 mean=0.58 なので、サンプル平均は 0.53 以上
+        assert mean_a > 0.53, f"A mean {mean_a:.3f} is too low (expected > 0.53)"
+
+    def test_openness_mean_is_lower(self):
+        """日本人ノルム（集団主義文化）では Openness の平均が 0.5 より低い。"""
+        samples = self._generate_many(2000)
+        o_vals = [s["O"] for s in samples]
+        mean_o = sum(o_vals) / len(o_vals)
+        # 設定 mean=0.45 なので、サンプル平均は 0.49 以下
+        assert mean_o < 0.49, f"O mean {mean_o:.3f} is too high (expected < 0.49)"
+
+    def test_all_traits_in_valid_range(self):
+        """全特性値が [0, 1] の範囲に収まること。"""
+        samples = self._generate_many(500)
+        for s in samples:
+            for trait in ["O", "C", "E", "A", "N"]:
+                assert 0.0 <= s[trait] <= 1.0, f"{trait}={s[trait]} is out of range"
+
+    def test_backward_compatibility_with_config(self):
+        """pop_config に big_five 設定がある場合でもエラーなく動作すること。"""
+        import random
+        random.seed(42)
+        bf = _generate_big_five({"big_five": {"mean": 0.5, "std": 0.2}})
+        for trait in ["O", "C", "E", "A", "N"]:
+            assert trait in bf
+            assert 0.0 <= bf[trait] <= 1.0

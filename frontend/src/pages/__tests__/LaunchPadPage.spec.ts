@@ -23,6 +23,12 @@ vi.mock('../../api/client', () => apiMocks)
 describe('LaunchPadPage', () => {
   beforeEach(() => {
     push.mockReset()
+    apiMocks.getHealth.mockReset()
+    apiMocks.getTemplates.mockReset()
+    apiMocks.listSimulations.mockReset()
+    apiMocks.createProject.mockReset()
+    apiMocks.uploadDocument.mockReset()
+    apiMocks.createSimulation.mockReset()
     apiMocks.getHealth.mockResolvedValue({
       status: 'ok',
       version: '1.0.0',
@@ -59,8 +65,6 @@ describe('LaunchPadPage', () => {
     // New simplified UI shows "何を分析しますか？" instead of old flow card
     expect(wrapper.text()).toContain('何を分析しますか？')
     expect(wrapper.text()).toContain('分析を開始')
-    expect(wrapper.find('[data-testid="preset-standard"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="preset-research"]').exists()).toBe(false)
 
     // Type in the free prompt textarea
     await wrapper.get('.prompt-textarea').setValue('EV battery market analysis')
@@ -123,23 +127,52 @@ describe('LaunchPadPage', () => {
     expect(completedBadge!.text()).toBe('完了')
   })
 
-  it('shows only standard and validation-focused modes inside advanced settings', async () => {
+  it('keeps the launch button clickable-state stable while a launch is pending', async () => {
+    let resolveSimulation!: (value: { id: string }) => void
+    const pendingSimulation = new Promise<{ id: string }>((resolve) => {
+      resolveSimulation = resolve
+    })
+    apiMocks.createSimulation.mockReturnValueOnce(pendingSimulation)
+
+    const wrapper = mount(LaunchPadPage, {
+      global: {
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('.prompt-textarea').setValue('EV battery market analysis')
+
+    const launchButton = wrapper.get('[data-testid="launch-button"]')
+    await launchButton.trigger('click')
+    await flushPromises()
+
+    expect(apiMocks.createSimulation).toHaveBeenCalledTimes(1)
+    expect(launchButton.attributes('disabled')).toBeUndefined()
+
+    await launchButton.trigger('click')
+    await flushPromises()
+
+    expect(apiMocks.createSimulation).toHaveBeenCalledTimes(1)
+
+    resolveSimulation({ id: 'sim-1' })
+    await flushPromises()
+
+    expect(push).toHaveBeenCalledWith('/sim/sim-1')
+  })
+
+  it('highlights Standard preset card with recommended badge', async () => {
     const wrapper = mount(LaunchPadPage, {
       global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
     })
     await flushPromises()
 
-    await wrapper.get('.advanced-details').trigger('toggle')
-    ;(wrapper.vm as any).advancedOpen = true
-    await wrapper.vm.$nextTick()
-
     const standardCard = wrapper.get('[data-testid="preset-standard"]')
     expect(standardCard.find('.preset-recommended').exists()).toBe(true)
     expect(standardCard.find('.preset-recommended').text()).toBe('おすすめ')
     expect(standardCard.classes()).toContain('recommended')
-    expect(wrapper.get('[data-testid="preset-research"]').text()).toContain('検証強化')
-    expect(wrapper.find('[data-testid="preset-quick"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="preset-deep"]').exists()).toBe(false)
   })
 
   it('does not render scenario comparison section on the launchpad', async () => {

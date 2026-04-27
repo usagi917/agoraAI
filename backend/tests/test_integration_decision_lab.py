@@ -7,6 +7,7 @@ round-tripping, and scenario comparison assembly.
 
 import pytest
 
+from src.app.models.agent_profile import AgentProfile
 from src.app.models.population import Population
 from src.app.models.simulation import Simulation
 from src.app.models.scenario_pair import ScenarioPair
@@ -29,6 +30,23 @@ from src.app.services.scenario_pair_factory import create_scenario_pair
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+async def _seed_population_with_agents(session, count: int = 3) -> Population:
+    """Population + AgentProfile を作成して返す。"""
+    pop = Population(agent_count=count, status="ready")
+    session.add(pop)
+    await session.flush()
+    for i in range(count):
+        session.add(AgentProfile(
+            population_id=pop.id,
+            agent_index=i,
+            demographics={"age": 30 + i, "occupation": "engineer"},
+            big_five={"O": 0.5, "C": 0.5, "E": 0.5, "A": 0.5, "N": 0.5},
+            values={"fairness": 0.5},
+        ))
+    await session.commit()
+    return pop
+
 
 def _make_rich_agents(count: int = 5) -> list[dict]:
     """Generate agent dicts with demographics, big_five, values, etc."""
@@ -79,10 +97,8 @@ def _make_rich_agents(count: int = 5) -> list[dict]:
 @pytest.mark.asyncio
 async def test_full_scenario_pair_flow(db_session):
     """End-to-end: create pair -> record audits -> build comparison."""
-    # Setup: create a population record
-    pop = Population(agent_count=5)
-    db_session.add(pop)
-    await db_session.commit()
+    # Setup: create a population record with agents
+    pop = await _seed_population_with_agents(db_session, count=3)
 
     # Step 1: create_scenario_pair
     pair = await create_scenario_pair(
@@ -109,8 +125,15 @@ async def test_full_scenario_pair_flow(db_session):
     assert intervention_sim is not None
     assert baseline_sim.scenario_pair_id == pair.id
     assert intervention_sim.scenario_pair_id == pair.id
-    assert baseline_sim.population_id == pop.id
-    assert intervention_sim.population_id == pop.id
+    # Each child simulation gets its own cloned population
+    assert baseline_sim.population_id != pop.id
+    assert intervention_sim.population_id != pop.id
+    assert baseline_sim.population_id != intervention_sim.population_id
+    # Cloned populations should trace back to the source
+    baseline_pop = await db_session.get(Population, baseline_sim.population_id)
+    intervention_pop = await db_session.get(Population, intervention_sim.population_id)
+    assert baseline_pop.parent_id == pop.id
+    assert intervention_pop.parent_id == pop.id
     assert baseline_sim.seed == 42
     assert intervention_sim.seed == 42
 
@@ -211,7 +234,7 @@ async def test_full_scenario_pair_flow(db_session):
 @pytest.mark.asyncio
 async def test_snapshot_restore_consistency(db_session):
     """Verify snapshot -> restore produces identical agent data."""
-    pop = Population(agent_count=5)
+    pop = Population(agent_count=5, status="ready")
     db_session.add(pop)
     await db_session.commit()
 
@@ -333,9 +356,7 @@ async def test_audit_trail_across_rounds(db_session):
 @pytest.mark.asyncio
 async def test_scenario_pair_with_intervention_params(db_session):
     """Verify intervention_params flow through the full chain."""
-    pop = Population(agent_count=100)
-    db_session.add(pop)
-    await db_session.commit()
+    pop = await _seed_population_with_agents(db_session, count=3)
 
     intervention_params = {
         "policy_type": "tax_reform",
@@ -363,12 +384,12 @@ async def test_scenario_pair_with_intervention_params(db_session):
     assert reloaded is not None
     assert reloaded.intervention_params == intervention_params
 
-    # Verify both simulations reference same population
+    # Verify both simulations have isolated cloned populations
     baseline = await db_session.get(Simulation, pair.baseline_simulation_id)
     intervention = await db_session.get(Simulation, pair.intervention_simulation_id)
-    assert baseline.population_id == pop.id
-    assert intervention.population_id == pop.id
-    assert baseline.population_id == intervention.population_id
+    assert baseline.population_id != pop.id
+    assert intervention.population_id != pop.id
+    assert baseline.population_id != intervention.population_id
 
     # Verify both simulations share the same scenario_pair_id
     assert baseline.scenario_pair_id == pair.id
@@ -393,9 +414,7 @@ async def test_scenario_pair_with_intervention_params(db_session):
 @pytest.mark.asyncio
 async def test_multiple_pairs_same_population(db_session):
     """Multiple scenario pairs can be created for the same population."""
-    pop = Population(agent_count=50)
-    db_session.add(pop)
-    await db_session.commit()
+    pop = await _seed_population_with_agents(db_session, count=3)
 
     pair_a = await create_scenario_pair(
         session=db_session,
