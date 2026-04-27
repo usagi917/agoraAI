@@ -11,6 +11,8 @@ import re
 from collections import Counter, defaultdict
 from typing import Any
 
+from src.app.services.society.backtest import INTERVENTION_METRICS, METRIC_DEFINITIONS
+
 
 ISSUE_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
     (re.compile(r"価格|値段|コスト|費用|負担"), "価格受容性", 0.92),
@@ -271,6 +273,20 @@ def build_intervention_comparison(
             if top_scenario.get("description"):
                 supporting_signals.append(top_scenario["description"])
 
+        expected_delta = round(0.03 + normalized_score * 0.12, 4)
+        predicted_effects = []
+        for metric in INTERVENTION_METRICS.get(intervention["intervention_id"], []):
+            metric_direction = str(METRIC_DEFINITIONS.get(metric, {}).get("direction") or "up")
+            effect_direction = "down" if metric_direction == "down" else "up"
+            predicted_effects.append({
+                "intervention_id": intervention["intervention_id"],
+                "metric": metric,
+                "expected_delta": -expected_delta if effect_direction == "down" else expected_delta,
+                "direction": effect_direction,
+                "confidence": round(min(0.9, 0.45 + normalized_score * 0.35), 3),
+                "time_horizon": "next_observation",
+            })
+
         comparisons.append({
             "intervention_id": intervention["intervention_id"],
             "label": intervention["label"],
@@ -283,6 +299,7 @@ def build_intervention_comparison(
             "uncertainty": None,
             "supporting_signals": supporting_signals[:3],
             "supporting_evidence": [],
+            "predicted_effects": predicted_effects,
         })
 
     return comparisons

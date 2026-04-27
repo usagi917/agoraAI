@@ -128,6 +128,40 @@ export interface QualitySummary {
   issues: string[]
 }
 
+export interface ValidationSummary {
+  survey_anchor_status: string
+  distribution_error: {
+    kl_divergence?: number | null
+    emd?: number | null
+  } | null
+  scenario_backtest_status: string
+  hit_rate: number | null
+  calibration_status: string
+  matched_survey_count?: number
+  best_match_source?: string
+  corrected_distribution?: Record<string, number> | null
+  transfer_uncertainty?: number | null
+}
+
+export interface PredictionEvaluationBucket {
+  count: number
+  validated_count: number
+  best_variant?: string
+  avg_calibration_improvement?: number
+  hit_rate?: number | null
+  mean_reciprocal_rank?: number | null
+  probability_brier?: number | null
+  direction_accuracy?: number | null
+  mae?: number | null
+}
+
+export interface PredictionEvaluationSummary {
+  distribution?: PredictionEvaluationBucket
+  scenario?: PredictionEvaluationBucket
+  intervention?: PredictionEvaluationBucket
+  [key: string]: PredictionEvaluationBucket | undefined
+}
+
 export interface RunConfig {
   evidence_mode: 'strict' | 'prefer' | 'off'
   trust_mode: string
@@ -230,6 +264,8 @@ export interface SimulationReportBase {
   evidence_refs: EvidenceRef[]
   run_config: RunConfig
   quality: QualitySummary
+  validation_summary?: ValidationSummary
+  prediction_evaluations?: PredictionEvaluationSummary
   verification?: VerificationSummary | null
 }
 
@@ -328,8 +364,32 @@ export interface SocietyFirstIntervention {
   observed_downside?: number | null
   uncertainty?: number | null
   observed_case_count?: number
+  direction_accuracy?: number | null
+  effect_mae?: number | null
+  predicted_effects?: SocietyFirstInterventionEffect[]
+  effect_comparisons?: SocietyFirstInterventionEffectComparison[]
   supporting_signals?: string[]
   supporting_evidence?: SocietyFirstInterventionEvidence[]
+}
+
+export interface SocietyFirstInterventionEffect {
+  intervention_id: string
+  metric: string
+  expected_delta: number
+  direction: string
+  confidence: number
+  time_horizon: string
+}
+
+export interface SocietyFirstInterventionEffectComparison {
+  metric: string
+  metric_label: string
+  expected_delta: number
+  actual_delta: number
+  direction: string
+  actual_direction: string
+  direction_match: boolean
+  absolute_error: number
 }
 
 export interface SocietyFirstInterventionEvidence {
@@ -347,14 +407,22 @@ export interface SocietyFirstInterventionEvidence {
 export interface SocietyFirstBacktestMatch {
   issue_id: string
   issue_label: string
+  outcome_label?: string
   scenario_description: string
+  probability?: number
+  horizon?: string
+  leading_indicators?: string[]
+  affected_segments?: string[]
   predicted_score: number
   actual_summary: string
   actual_scenario: string
   match_score: number
   label_match: number
+  outcome_label_match?: number
   text_overlap: number
+  indicator_overlap?: number
   tag_overlap: number
+  probability_brier?: number
   verdict: 'hit' | 'partial_hit' | 'miss'
   reasons: string[]
 }
@@ -407,8 +475,11 @@ export interface SocietyFirstBacktestSummary {
   partial_hit_count: number
   miss_count: number
   hit_rate: number
+  partial_hit_rate?: number
   issue_hit_count: number
   issue_hit_rate: number
+  scenario_probability_brier?: number | null
+  mean_reciprocal_rank?: number | null
 }
 
 export interface SocietyFirstBacktestResponse {
@@ -897,4 +968,3 @@ export async function getTranscript(
   const { data } = await api.get(`/society/simulations/${simId}/transcript`, { params })
   return data
 }
-

@@ -59,6 +59,8 @@ describe('LaunchPadPage', () => {
     // New simplified UI shows "何を分析しますか？" instead of old flow card
     expect(wrapper.text()).toContain('何を分析しますか？')
     expect(wrapper.text()).toContain('分析を開始')
+    expect(wrapper.find('[data-testid="preset-standard"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="preset-research"]').exists()).toBe(false)
 
     // Type in the free prompt textarea
     await wrapper.get('.prompt-textarea').setValue('EV battery market analysis')
@@ -121,16 +123,23 @@ describe('LaunchPadPage', () => {
     expect(completedBadge!.text()).toBe('完了')
   })
 
-  it('highlights Standard preset card with recommended badge', async () => {
+  it('shows only standard and validation-focused modes inside advanced settings', async () => {
     const wrapper = mount(LaunchPadPage, {
       global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
     })
     await flushPromises()
 
+    await wrapper.get('.advanced-details').trigger('toggle')
+    ;(wrapper.vm as any).advancedOpen = true
+    await wrapper.vm.$nextTick()
+
     const standardCard = wrapper.get('[data-testid="preset-standard"]')
     expect(standardCard.find('.preset-recommended').exists()).toBe(true)
     expect(standardCard.find('.preset-recommended').text()).toBe('おすすめ')
     expect(standardCard.classes()).toContain('recommended')
+    expect(wrapper.get('[data-testid="preset-research"]').text()).toContain('検証強化')
+    expect(wrapper.find('[data-testid="preset-quick"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="preset-deep"]').exists()).toBe(false)
   })
 
   it('does not render scenario comparison section on the launchpad', async () => {

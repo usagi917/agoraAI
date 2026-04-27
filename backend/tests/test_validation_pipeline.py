@@ -21,10 +21,15 @@ import src.app.models  # noqa: F401
 from src.app.models.validation_record import ValidationRecord
 from src.app.repositories.validation_repo import ValidationRepository
 from src.app.services.society.validation_pipeline import (
+    evaluate_distribution_prediction,
+    evaluate_intervention_prediction,
+    evaluate_scenario_prediction,
     register_result,
     auto_compare,
     resolve_with_actual,
     generate_accuracy_report,
+    register_prediction_evaluation,
+    resolve_prediction_evaluation,
     update_bias_profile,
 )
 
@@ -352,3 +357,95 @@ class TestValidationPipeline:
         profile = await update_bias_profile(db_session, FIXTURES_DIR)
         # プロファイルが返される（データが1件しかないので中身はシンプル）
         assert isinstance(profile, dict)
+
+
+class TestPredictionEvaluation:
+    def test_evaluate_distribution_prediction_tracks_calibration_improvement(self):
+        metrics = evaluate_distribution_prediction(
+            {
+                "raw_distribution": {"賛成": 0.9, "反対": 0.1},
+                "calibrated_distribution": {"賛成": 0.6, "反対": 0.4},
+            },
+            {"actual_distribution": {"賛成": 0.55, "反対": 0.45}},
+        )
+        assert metrics["status"] == "validated"
+        assert metrics["best_variant"] == "calibrated"
+        assert metrics["calibration_improvement"] > 0
+
+    def test_evaluate_scenario_prediction_probability_brier(self):
+        metrics = evaluate_scenario_prediction(
+            {
+                "predictions": [
+                    {"outcome_label": "価格受容性", "probability": 0.8},
+                    {"outcome_label": "規制対応", "probability": 0.2},
+                ]
+            },
+            {"actual_outcomes": ["価格受容性"]},
+        )
+        assert metrics["status"] == "validated"
+        assert metrics["hit_rate"] == 0.5
+        assert metrics["mean_reciprocal_rank"] == 1.0
+        assert metrics["probability_brier"] < 0.1
+
+    def test_evaluate_intervention_prediction_direction_and_mae(self):
+        metrics = evaluate_intervention_prediction(
+            {
+                "predictions": [
+                    {
+                        "intervention_id": "price_reduction",
+                        "metric": "adoption_rate",
+                        "expected_delta": 0.08,
+                        "direction": "up",
+                    }
+                ]
+            },
+            {
+                "actuals": [
+                    {
+                        "intervention_id": "price_reduction",
+                        "metric": "adoption_rate",
+                        "actual_delta": 0.09,
+                    }
+                ]
+            },
+        )
+        assert metrics["status"] == "validated"
+        assert metrics["direction_accuracy"] == 1.0
+        assert metrics["mae"] == pytest.approx(0.01)
+
+    @pytest.mark.asyncio
+    async def test_register_and_resolve_prediction_evaluation(self, db_session):
+        record = await register_prediction_evaluation(
+            db_session,
+            simulation_id="sim-PE1",
+            prediction_type="intervention",
+            theme_category="economy",
+            predicted_payload={
+                "predictions": [
+                    {
+                        "intervention_id": "price_reduction",
+                        "metric": "conversion_rate",
+                        "expected_delta": 0.04,
+                        "direction": "up",
+                    }
+                ]
+            },
+        )
+        assert record.metrics["status"] == "pending_validation"
+        assert record.validated_at is None
+
+        resolved = await resolve_prediction_evaluation(
+            db_session,
+            record_id=record.id,
+            actual_payload={
+                "actuals": [
+                    {
+                        "intervention_id": "price_reduction",
+                        "metric": "conversion_rate",
+                        "actual_delta": 0.05,
+                    }
+                ]
+            },
+        )
+        assert resolved.validated_at is not None
+        assert resolved.metrics["direction_accuracy"] == 1.0

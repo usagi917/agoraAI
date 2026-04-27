@@ -608,7 +608,12 @@ async def run_society(simulation_id: str) -> None:
             # === Phase 4.5: Validation Registration ===
             survey_comparison = None
             try:
-                from src.app.services.society.validation_pipeline import register_result, auto_compare
+                from src.app.services.society.validation_pipeline import (
+                    auto_compare,
+                    build_distribution_prediction_payload,
+                    register_prediction_evaluation,
+                    register_result,
+                )
                 survey_data_dir = settings.config_dir / "grounding" / "survey_data"
                 stance_dist = activation_result["aggregation"].get("stance_distribution", {})
                 # テーマカテゴリを推定（grounding_facts からカテゴリを取得、なければテーマから推定）
@@ -622,6 +627,32 @@ async def run_society(simulation_id: str) -> None:
                 )
                 survey_comparison = await auto_compare(
                     session, validation_record, str(survey_data_dir)
+                )
+                actual_payload = None
+                if survey_comparison:
+                    best_survey = next(
+                        (
+                            survey
+                            for survey in survey_comparison.get("matched_surveys", [])
+                            if survey.get("source") == survey_comparison.get("best_match_source")
+                        ),
+                        None,
+                    )
+                    if best_survey:
+                        actual_payload = {"actual_distribution": best_survey["stance_distribution"]}
+                await register_prediction_evaluation(
+                    session,
+                    simulation_id=simulation_id,
+                    prediction_type="distribution",
+                    theme_category=theme_category,
+                    source="society_orchestrator",
+                    predicted_payload=build_distribution_prediction_payload(
+                        activation_result["aggregation"],
+                        prediction_market_distribution=(
+                            prediction_market.get_prices() if prediction_market else None
+                        ),
+                    ),
+                    actual_payload=actual_payload,
                 )
                 if survey_comparison:
                     await sse_manager.publish(simulation_id, "validation_comparison_completed", {

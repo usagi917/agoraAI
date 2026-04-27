@@ -74,80 +74,25 @@ describe('DecisionBrief', () => {
     expect(wrapper.get('[data-testid="recommendation-badge"]').text()).toContain('No-Go')
   })
 
-  it('renders agreement score and breakdown', () => {
+  it('renders agreement score without detailed breakdown', () => {
     const wrapper = mount(DecisionBrief, {
       props: { brief: makeBrief() },
     })
     const text = wrapper.text()
     expect(text).toContain('82')
-    expect(text).toContain('78')
-    expect(text).toContain('85')
-    expect(text).toContain('83')
+    expect(text).not.toContain('統合分析')
   })
 
-  it('renders options list', () => {
-    const wrapper = mount(DecisionBrief, {
-      props: { brief: makeBrief() },
-    })
-    expect(wrapper.text()).toContain('条件付きで進める')
-    expect(wrapper.text()).toContain('即時参入')
-    expect(wrapper.text()).toContain('段階参入')
-    expect(wrapper.text()).toContain('先行者優位を獲得')
-  })
-
-  it('renders decision-oriented sections', () => {
+  it('renders compact decision sections', () => {
     const wrapper = mount(DecisionBrief, {
       props: { brief: makeBrief() },
     })
     const text = wrapper.text()
     expect(text).toContain('市場参入を進めるが')
-    expect(text).toContain('価格受容性が成立すること')
-    expect(text).toContain('競合が先に同機能を展開する')
-    expect(text).toContain('価格ヒアリングを実施')
-    expect(text).toContain('価格受容性の一次情報が不足')
-  })
-
-  it('renders strongest counterargument', () => {
-    const wrapper = mount(DecisionBrief, {
-      props: { brief: makeBrief() },
-    })
-    expect(wrapper.text()).toContain('市場が成熟しすぎている可能性')
-  })
-
-  it('renders risk factors', () => {
-    const wrapper = mount(DecisionBrief, {
-      props: { brief: makeBrief() },
-    })
-    expect(wrapper.text()).toContain('為替変動')
-    expect(wrapper.text()).toContain('利益率が 5% 低下')
-  })
-
-  it('renders time horizon predictions', () => {
-    const wrapper = mount(DecisionBrief, {
-      props: { brief: makeBrief() },
-    })
-    expect(wrapper.text()).toContain('3ヶ月')
-    expect(wrapper.text()).toContain('市場調査完了')
-    expect(wrapper.text()).toContain('3年')
-    expect(wrapper.text()).toContain('黒字化達成')
-  })
-
-  it('renders stakeholder reactions', () => {
-    const wrapper = mount(DecisionBrief, {
-      props: { brief: makeBrief() },
-    })
-    expect(wrapper.text()).toContain('消費者')
-    expect(wrapper.text()).toContain('65')
-    expect(wrapper.text()).toContain('競合')
-    expect(wrapper.text()).toContain('警戒')
-  })
-
-  it('renders next steps', () => {
-    const wrapper = mount(DecisionBrief, {
-      props: { brief: makeBrief() },
-    })
-    expect(wrapper.text()).toContain('市場調査の深掘り')
-    expect(wrapper.text()).toContain('パイロット準備')
+    expect(text).toContain('市場成長率が高い')
+    expect(text).toContain('価格仮説は成立するか')
+    expect(text).not.toContain('価格受容性が成立すること')
+    expect(text).not.toContain('市場が成熟しすぎている可能性')
   })
 
   it('applies go class for Go recommendation', () => {
@@ -197,14 +142,14 @@ describe('DecisionBrief', () => {
     expect(wrapper.find('[data-testid="confidence-gauge"]').exists()).toBe(false)
   })
 
-  it('renders detail sections as cards with data-testid', () => {
+  it('renders only key reasons and critical unknown sections as cards', () => {
     const wrapper = mount(DecisionBrief, {
       props: { brief: makeBrief() },
     })
     expect(wrapper.find('[data-testid="section-key-reasons"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="section-guardrails"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="section-deal-breakers"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="section-critical-unknowns"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="section-guardrails"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="section-deal-breakers"]').exists()).toBe(false)
   })
 
   it('renders the hero card with summary and recommendation', () => {

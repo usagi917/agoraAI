@@ -16,6 +16,7 @@ from src.app.models.simulation import Simulation
 from src.app.models.society_result import SocietyResult
 from src.app.models.evaluation_result import EvaluationResult
 from src.app.models.conversation_log import ConversationLog
+from src.app.services.society.validation_pipeline import summarize_prediction_evaluations
 from src.app.services.society.population_generator import (
     generate_population,
     get_default_population_size,
@@ -257,7 +258,7 @@ async def get_evaluation_result(
     if not metrics:
         raise HTTPException(status_code=404, detail="評価結果が見つかりません")
 
-    return [
+    metric_rows = [
         {
             "id": m.id,
             "metric_name": m.metric_name,
@@ -269,6 +270,13 @@ async def get_evaluation_result(
         }
         for m in metrics
     ]
+    return {
+        "metrics": metric_rows,
+        "prediction_evaluations": await summarize_prediction_evaluations(
+            session,
+            simulation_id=sim_id,
+        ),
+    }
 
 
 @router.get("/simulations/{sim_id}/narrative")

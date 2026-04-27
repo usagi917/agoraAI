@@ -13,24 +13,8 @@ const scoreLabel = computed(() => (
 const scoreValue = computed(() => (
   typeof props.brief.agreement_score === 'number' ? props.brief.agreement_score : null
 ))
-const agreementBreakdown = computed(() => props.brief.agreement_breakdown || null)
-const optionComparison = computed(() => props.brief.option_comparison || [])
-const recommendedActions = computed(() => props.brief.recommended_actions || [])
-const guardrails = computed(() => props.brief.guardrails || [])
-const dealBreakers = computed(() => props.brief.deal_breakers || [])
-const criticalUnknowns = computed(() => props.brief.critical_unknowns || [])
-const nextDecisions = computed(() => props.brief.next_decisions || [])
-const keyReasons = computed(() => props.brief.key_reasons || [])
-const timeHorizonEntries = computed(() => (
-  props.brief.time_horizon
-    ? Object.values(props.brief.time_horizon)
-    : []
-))
-const stakeholderReactions = computed(() => props.brief.stakeholder_reactions || [])
-const evidenceGaps = computed(() => props.brief.evidence_gaps || [])
-const legacyOptions = computed(() => props.brief.options || [])
-const legacyRisks = computed(() => props.brief.risk_factors || [])
-const legacyNextSteps = computed(() => props.brief.next_steps || [])
+const criticalUnknowns = computed(() => (props.brief.critical_unknowns || []).slice(0, 3))
+const keyReasons = computed(() => (props.brief.key_reasons || []).slice(0, 3))
 
 function recommendationClass(rec: string): string {
   if (rec === 'Go') return 'recommendation-go'
@@ -73,11 +57,6 @@ function pct(value?: number | null): string {
       </div>
     </div>
 
-    <div v-if="brief.confidence_explainer" class="brief-section">
-      <h4 class="brief-section-title">確信度の見立て</h4>
-      <p class="section-prose">{{ brief.confidence_explainer }}</p>
-    </div>
-
     <div v-if="keyReasons.length" class="brief-section" data-testid="section-key-reasons">
       <h4 class="brief-section-title">主な判断根拠</h4>
       <div class="reason-list">
@@ -93,32 +72,6 @@ function pct(value?: number | null): string {
       </div>
     </div>
 
-    <div v-if="guardrails.length" class="brief-section" data-testid="section-guardrails">
-      <h4 class="brief-section-title">この判断が成り立つ条件</h4>
-      <div class="detail-list">
-        <div v-for="(item, index) in guardrails" :key="index" class="detail-card">
-          <div class="detail-header">
-            <span class="detail-title">{{ item.condition }}</span>
-            <span v-if="item.status" class="detail-status">{{ item.status }}</span>
-          </div>
-          <p v-if="item.why_it_matters" class="detail-body">{{ item.why_it_matters }}</p>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="dealBreakers.length" class="brief-section" data-testid="section-deal-breakers">
-      <h4 class="brief-section-title">判断を覆すトリガー</h4>
-      <div class="detail-list">
-        <div v-for="(item, index) in dealBreakers" :key="index" class="detail-card detail-card-danger">
-          <div class="detail-header">
-            <span class="detail-title">{{ item.trigger }}</span>
-          </div>
-          <p class="detail-body">{{ item.impact }}</p>
-          <p v-if="item.recommended_response" class="detail-foot">対応: {{ item.recommended_response }}</p>
-        </div>
-      </div>
-    </div>
-
     <div v-if="criticalUnknowns.length" class="brief-section" data-testid="section-critical-unknowns">
       <h4 class="brief-section-title">追加で潰すべき論点</h4>
       <div class="detail-list">
@@ -129,128 +82,6 @@ function pct(value?: number | null): string {
           </div>
           <p v-if="item.importance" class="detail-body">{{ item.importance }}</p>
           <p v-if="item.how_to_validate" class="detail-foot">検証: {{ item.how_to_validate }}</p>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="nextDecisions.length" class="brief-section">
-      <h4 class="brief-section-title">次に決めるべきこと</h4>
-      <div class="detail-list">
-        <div v-for="(item, index) in nextDecisions" :key="index" class="detail-card">
-          <div class="detail-header">
-            <span class="detail-title">{{ item.decision }}</span>
-          </div>
-          <p class="detail-foot">
-            <span v-if="item.owner">担当: {{ item.owner }}</span>
-            <span v-if="item.deadline">期限: {{ item.deadline }}</span>
-            <span v-if="item.input_needed">必要入力: {{ item.input_needed }}</span>
-          </p>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="recommendedActions.length" class="brief-section">
-      <h4 class="brief-section-title">推奨アクション</h4>
-      <div class="detail-list">
-        <div v-for="(item, index) in recommendedActions" :key="index" class="detail-card">
-          <div class="detail-header">
-            <span class="detail-title">{{ item.action }}</span>
-            <span v-if="item.priority" class="detail-status">{{ item.priority }}</span>
-          </div>
-          <p class="detail-foot">
-            <span v-if="item.owner">担当: {{ item.owner }}</span>
-            <span v-if="item.deadline">期限: {{ item.deadline }}</span>
-          </p>
-          <p v-if="item.expected_learning" class="detail-body">学べること: {{ item.expected_learning }}</p>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="optionComparison.length || legacyOptions.length" class="brief-section">
-      <h4 class="brief-section-title">選択肢比較</h4>
-      <div class="options-grid">
-        <div v-for="(opt, index) in optionComparison" :key="`new-${index}`" class="option-card">
-          <div class="option-label">{{ opt.label }}</div>
-          <div v-if="opt.upside" class="option-effect">Upside: {{ opt.upside }}</div>
-          <div v-if="opt.downside" class="option-risk">Downside: {{ opt.downside }}</div>
-          <div v-if="opt.fit" class="option-fit">Fit: {{ opt.fit }}</div>
-          <div v-if="opt.when_to_choose" class="option-fit">When: {{ opt.when_to_choose }}</div>
-        </div>
-        <div v-for="(opt, index) in legacyOptions" :key="`legacy-${index}`" class="option-card">
-          <div class="option-label">{{ opt.label }}</div>
-          <div class="option-effect">{{ opt.expected_effect }}</div>
-          <div class="option-risk">{{ opt.risk }}</div>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="brief.strongest_counterargument" class="brief-section">
-      <h4 class="brief-section-title">最強の反論</h4>
-      <p class="counterargument-text">{{ brief.strongest_counterargument }}</p>
-    </div>
-
-    <div v-if="legacyRisks.length" class="brief-section">
-      <h4 class="brief-section-title">リスク要因</h4>
-      <div class="risk-list">
-        <div v-for="(rf, index) in legacyRisks" :key="index" class="risk-item">
-          <span class="risk-condition">{{ rf.condition }}</span>
-          <span class="risk-impact">{{ rf.impact }}</span>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="timeHorizonEntries.length" class="brief-section">
-      <h4 class="brief-section-title">タイムホライズン</h4>
-      <div class="horizon-grid">
-        <div v-for="(entry, index) in timeHorizonEntries" :key="index" class="horizon-card">
-          <span class="horizon-period">{{ entry.period }}</span>
-          <span class="horizon-prediction">{{ entry.prediction }}</span>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="stakeholderReactions.length" class="brief-section">
-      <h4 class="brief-section-title">ステークホルダー反応</h4>
-      <div class="stakeholder-list">
-        <div v-for="(sr, index) in stakeholderReactions" :key="index" class="stakeholder-row">
-          <span class="stakeholder-group">{{ sr.group }}</span>
-          <span class="stakeholder-reaction">{{ sr.reaction }}</span>
-          <div class="stakeholder-bar-track">
-            <div class="stakeholder-bar-fill" :style="{ width: sr.percentage + '%' }" />
-          </div>
-          <span class="stakeholder-pct">{{ sr.percentage }}%</span>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="evidenceGaps.length" class="brief-section">
-      <h4 class="brief-section-title">まだ足りない根拠</h4>
-      <ul class="next-steps-list">
-        <li v-for="(gap, index) in evidenceGaps" :key="index">{{ gap }}</li>
-      </ul>
-    </div>
-
-    <div v-if="legacyNextSteps.length" class="brief-section">
-      <h4 class="brief-section-title">次のステップ</h4>
-      <ol class="next-steps-list">
-        <li v-for="(step, index) in legacyNextSteps" :key="index">{{ step }}</li>
-      </ol>
-    </div>
-
-    <div v-if="agreementBreakdown" class="brief-section">
-      <h4 class="brief-section-title">合意内訳</h4>
-      <div class="breakdown-grid">
-        <div class="breakdown-item">
-          <span class="breakdown-label">社会</span>
-          <span class="breakdown-value">{{ pct(agreementBreakdown.society) }}%</span>
-        </div>
-        <div class="breakdown-item">
-          <span class="breakdown-label">評議会</span>
-          <span class="breakdown-value">{{ pct(agreementBreakdown.council) }}%</span>
-        </div>
-        <div class="breakdown-item">
-          <span class="breakdown-label">統合分析</span>
-          <span class="breakdown-value">{{ pct(agreementBreakdown.synthesis) }}%</span>
         </div>
       </div>
     </div>

@@ -5,10 +5,12 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from src.app.config import settings
 from src.app.models.simulation import Simulation
 from src.app.models.society_result import SocietyResult
 from src.app.models.evaluation_result import EvaluationResult
 from src.app.services.society.society_orchestrator import (
+    _estimate_theme_category,
     _get_or_create_population,
     _save_network,
 )
@@ -23,6 +25,13 @@ from src.app.services.society.kg_enricher import enrich_agents_from_kg
 from src.app.services.society.kg_evolution_service import KGEvolutionService
 from src.app.models.conversation_log import ConversationLog
 from src.app.services.conversation_log_store import persist_conversation_logs
+from src.app.services.validation_summary import build_validation_summary
+from src.app.services.society.validation_pipeline import (
+    auto_compare,
+    build_distribution_prediction_payload,
+    register_prediction_evaluation,
+    register_result,
+)
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -37,6 +46,7 @@ class SocietyPulseResult:
     representatives: list[dict]
     usage: dict
     population_count: int = 0
+    validation_summary: dict | None = None
 
 
 async def run_society_pulse(
@@ -254,6 +264,71 @@ async def run_society_pulse(
         "metrics": eval_data,
     })
 
+    # === Validation Summary ===
+    theme_category = _estimate_theme_category(theme, [])
+    validation_summary = build_validation_summary(
+        theme=theme,
+        theme_category=theme_category,
+        distribution=activation_result["aggregation"].get("stance_distribution", {}),
+    )
+    if validation_summary.get("corrected_distribution"):
+        activation_result["aggregation"]["calibrated_stance_distribution"] = validation_summary[
+            "corrected_distribution"
+        ]
+        activation_result["aggregation"]["calibration_status"] = validation_summary[
+            "calibration_status"
+        ]
+    sim.metadata_json = {
+        **dict(sim.metadata_json or {}),
+        "validation_summary": validation_summary,
+    }
+    await session.commit()
+
+    if validation_summary.get("survey_anchor_status") == "実調査アンカーあり":
+        await sse_manager.publish(simulation_id, "validation_comparison_completed", {
+            "distribution_error": validation_summary.get("distribution_error"),
+            "best_match_source": validation_summary.get("best_match_source"),
+            "matched_survey_count": validation_summary.get("matched_survey_count"),
+        })
+
+    try:
+        validation_record = await register_result(
+            session,
+            simulation_id=simulation_id,
+            theme=theme,
+            theme_category=theme_category,
+            distribution=activation_result["aggregation"].get("stance_distribution", {}),
+            calibrated_distribution=validation_summary.get("corrected_distribution"),
+        )
+        comparison = await auto_compare(
+            session,
+            validation_record,
+            str(settings.config_dir / "grounding" / "survey_data"),
+        )
+        actual_payload = None
+        if comparison:
+            best_survey = next(
+                (
+                    survey
+                    for survey in comparison.get("matched_surveys", [])
+                    if survey.get("source") == comparison.get("best_match_source")
+                ),
+                None,
+            )
+            if best_survey:
+                actual_payload = {"actual_distribution": best_survey["stance_distribution"]}
+        await register_prediction_evaluation(
+            session,
+            simulation_id=simulation_id,
+            prediction_type="distribution",
+            theme_category=theme_category,
+            source="society_pulse",
+            predicted_payload=build_distribution_prediction_payload(activation_result["aggregation"]),
+            actual_payload=actual_payload,
+        )
+    except Exception as exc:
+        logger.warning("Validation record persistence failed, continuing: %s", exc)
+
     # === Demographic Analysis ===
     demographic_analysis = analyze_demographics(
         selected_agents, activation_result["responses"],
@@ -284,4 +359,5 @@ async def run_society_pulse(
         representatives=representatives,
         usage=total_usage,
         population_count=len(agents),
+        validation_summary=validation_summary,
     )
