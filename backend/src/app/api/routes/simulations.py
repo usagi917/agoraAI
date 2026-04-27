@@ -1,15 +1,14 @@
 """統一 Simulation API エンドポイント"""
 
 import asyncio
-import json
 import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.responses import StreamingResponse
 
 from src.app.api.deps import get_session
 from src.app.config import settings
@@ -386,6 +385,25 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
         }
 
     raise HTTPException(status_code=404, detail="レポートが見つかりません")
+
+
+@router.get("/{sim_id}/colonies")
+async def get_simulation_colonies(sim_id: str, session: AsyncSession = Depends(get_session)):
+    """Return issue colony summaries for legacy society-first result views."""
+    sim = await session.get(Simulation, sim_id)
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation が見つかりません")
+
+    metadata = dict(sim.metadata_json or {})
+    unified_result = dict(metadata.get("unified_result") or {})
+    if isinstance(unified_result.get("issue_colonies"), list):
+        return unified_result["issue_colonies"]
+
+    society_first = dict(metadata.get("society_first_result") or {})
+    if isinstance(society_first.get("issue_colonies"), list):
+        return society_first["issue_colonies"]
+
+    return []
 
 
 @router.get("/{sim_id}/backtest")

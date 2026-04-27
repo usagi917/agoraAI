@@ -6,8 +6,6 @@
        ビンに分割して各ビンの予測確率平均と実際の的中率の差を重み付き平均。
 """
 
-import math
-
 from src.app.services.society.transfer_calibrator import (
     BiasProfile,
     apply_transfer_correction,

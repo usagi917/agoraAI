@@ -4,14 +4,28 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from datetime import datetime, timezone
 
+from src.app.models.simulation import Simulation
+
+
+async def _create_simulation(db_session, **kwargs):
+    sim = Simulation(
+        mode=kwargs.pop("mode", "standard"),
+        prompt_text=kwargs.pop("prompt_text", "test"),
+        template_name=kwargs.pop("template_name", "g"),
+        execution_profile=kwargs.pop("execution_profile", "preview"),
+        **kwargs,
+    )
+    db_session.add(sim)
+    await db_session.commit()
+    await db_session.refresh(sim)
+    return sim
+
 
 class TestDispatchSimulation:
     @pytest.mark.asyncio
     async def test_dispatch_standard_calls_run_unified(self, db_session):
-        from src.app.repositories.simulation_repo import SimulationRepository
-
-        repo = SimulationRepository(db_session)
-        sim = await repo.create(
+        sim = await _create_simulation(
+            db_session,
             mode="standard", prompt_text="test prompt",
             template_name="g", execution_profile="preview",
         )
@@ -30,10 +44,8 @@ class TestDispatchSimulation:
 
     @pytest.mark.asyncio
     async def test_dispatch_baseline_calls_run_baseline(self, db_session):
-        from src.app.repositories.simulation_repo import SimulationRepository
-
-        repo = SimulationRepository(db_session)
-        sim = await repo.create(
+        sim = await _create_simulation(
+            db_session,
             mode="baseline", prompt_text="test",
             template_name="g", execution_profile="preview",
         )
@@ -53,10 +65,8 @@ class TestDispatchSimulation:
     @pytest.mark.asyncio
     async def test_dispatch_old_mode_normalizes(self, db_session):
         """旧モード名 'pipeline' が 'deep' に正規化されて unified が呼ばれる。"""
-        from src.app.repositories.simulation_repo import SimulationRepository
-
-        repo = SimulationRepository(db_session)
-        sim = await repo.create(
+        sim = await _create_simulation(
+            db_session,
             mode="pipeline", prompt_text="test",
             template_name="g", execution_profile="preview",
         )
@@ -73,7 +83,7 @@ class TestDispatchSimulation:
                     mock_unified.assert_called_once()
 
         # DB上のmodeが正規化されていることを確認
-        updated = await repo.get(sim.id)
+        updated = await db_session.get(Simulation, sim.id)
         assert updated.mode == "deep"
 
     @pytest.mark.asyncio
@@ -90,10 +100,8 @@ class TestDispatchSimulation:
 
     @pytest.mark.asyncio
     async def test_dispatch_error_sets_failed(self, db_session):
-        from src.app.repositories.simulation_repo import SimulationRepository
-
-        repo = SimulationRepository(db_session)
-        sim = await repo.create(
+        sim = await _create_simulation(
+            db_session,
             mode="standard", prompt_text="test",
             template_name="g", execution_profile="preview",
         )
@@ -108,7 +116,7 @@ class TestDispatchSimulation:
                     from src.app.services.simulation_dispatcher import dispatch_simulation
                     await dispatch_simulation(sim.id)
 
-        updated = await repo.get(sim.id)
+        updated = await db_session.get(Simulation, sim.id)
         assert updated.status == "failed"
         assert "LLM error" in updated.error_message
 
@@ -116,11 +124,10 @@ class TestDispatchSimulation:
 class TestEnsureProject:
     @pytest.mark.asyncio
     async def test_creates_project_when_none(self, db_session):
-        from src.app.repositories.simulation_repo import SimulationRepository
         from src.app.services.simulation_dispatcher import _ensure_project
 
-        repo = SimulationRepository(db_session)
-        sim = await repo.create(
+        sim = await _create_simulation(
+            db_session,
             mode="standard", prompt_text="test prompt",
             template_name="g", execution_profile="preview",
         )
@@ -136,7 +143,6 @@ class TestEnsureProject:
     @pytest.mark.asyncio
     async def test_returns_existing_project(self, db_session):
         from src.app.models.project import Project
-        from src.app.repositories.simulation_repo import SimulationRepository
         from src.app.services.simulation_dispatcher import _ensure_project
         import uuid
 
@@ -144,8 +150,8 @@ class TestEnsureProject:
         db_session.add(project)
         await db_session.commit()
 
-        repo = SimulationRepository(db_session)
-        sim = await repo.create(
+        sim = await _create_simulation(
+            db_session,
             mode="standard", prompt_text="test",
             template_name="g", execution_profile="preview",
         )

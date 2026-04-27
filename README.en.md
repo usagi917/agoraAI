@@ -19,6 +19,33 @@
 - Decision Lab runs two scenarios against the same population side-by-side, comparing opinion shifts, coalition changes, and audit trails.
 - Theater UI shows debate cards, live dialogue streams, and real-time stance shifts during simulation.
 
+## 30-Second Big Picture
+
+Agent AI takes a question and optional evidence documents, runs them through synthetic population reactions, representative and expert deliberation, and quality checks, then turns the result into a decision-ready Decision Brief.
+
+```mermaid
+flowchart LR
+    Q["Question / Template / Documents"] --> L["LaunchPad<br/>Vue UI"]
+    L --> A["FastAPI<br/>Simulation API"]
+    A --> P["Project / Document<br/>storage + GraphRAG"]
+    A --> D["Dispatcher<br/>preset normalization"]
+    D --> S["Society Pulse<br/>synthetic population reactions"]
+    S --> C["Council<br/>representatives + experts"]
+    C --> Y["Synthesis<br/>Decision Brief generation"]
+    Y --> R["Results<br/>evidence, rationale, next actions"]
+    Y --> X["Decision Lab<br/>scenario comparison"]
+    S -. SSE .-> V["Live Simulation<br/>progress, dialogue, social graph"]
+    C -. SSE .-> V
+    Y -. SSE .-> V
+```
+
+How to read it:
+
+- Users choose a question, template, file attachments, and execution preset on the LaunchPad.
+- The backend normalizes the request to `quick`, `standard`, `deep`, `research`, or `baseline`, then runs only the required phases.
+- Runtime state is streamed over SSE, and frontend Pinia stores reflect it in the Activity Feed, social graph, dialogue views, and Theater UI.
+- Results can be reused as Decision Briefs, scenario comparisons, propagation analysis, transcripts, and follow-up questions.
+
 ## Screens And Workflow
 
 | Route | Purpose | Main contents |
@@ -49,6 +76,27 @@ Combine social signals, debate output, and quality metadata into a Decision Brie
 | `baseline` | single-LLM baseline execution | Comparison and validation |
 
 Legacy mode names are normalized internally. For example, `unified -> standard`, `society_first -> research`, and `single -> quick`.
+
+## Code Reading Map
+
+| What you want to understand | Main files |
+| --- | --- |
+| App startup, CORS, template seeding, health check | `backend/src/app/main.py` |
+| Environment variables and config YAML loading | `backend/src/app/config.py` |
+| DB connection, table creation, SQLite/PostgreSQL switching | `backend/src/app/database.py` |
+| API router registration | `backend/src/app/api/routes/__init__.py` |
+| Simulation creation, SSE, reports, reruns | `backend/src/app/api/routes/simulations.py` |
+| Execution preset definitions and legacy mode mapping | `backend/src/app/models/simulation.py` |
+| Dispatch between `baseline` and unified execution | `backend/src/app/services/simulation_dispatcher.py` |
+| `Society Pulse -> Council -> Synthesis` orchestration | `backend/src/app/services/unified_orchestrator.py` |
+| Synthetic populations, social networks, reactions, propagation, evaluation | `backend/src/app/services/society/` |
+| LLM task routing, provider adapters, fallback | `backend/src/app/llm/` |
+| Frontend route definitions | `frontend/src/router.ts` |
+| REST API client and TypeScript types | `frontend/src/api/client.ts` |
+| SSE subscription and live state updates | `frontend/src/composables/useSimulationSSE.ts` |
+| Stores for execution state, graphs, society data, and Decision Lab | `frontend/src/stores/` |
+| Main screens | `frontend/src/pages/` |
+| Visualization and result components | `frontend/src/components/` |
 
 ## Architecture
 
@@ -241,11 +289,6 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/society/simulations/{sim_id}/transcript` | transcript data |
 | `GET` | `/admin/costs` | token and cost aggregation |
 | `GET` | `/admin/quality-metrics` | quality and fallback aggregation |
-
-Notes:
-
-- `/runs/*` is the older single-run API and remains for backward compatibility.
-- `/simulations/{sim_id}/backtest` is a compatibility endpoint for `society_first` style flows.
 
 ## Testing
 

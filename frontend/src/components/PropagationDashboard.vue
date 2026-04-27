@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useSimulationStore } from '../stores/simulationStore'
 import ClusterEvolutionChart from './ClusterEvolutionChart.vue'
+import { getStanceColor, STANCE_ORDER } from '../constants/stances'
 
 /**
  * Props for hydration from API (completed simulations).
@@ -24,16 +25,6 @@ const props = withDefaults(defineProps<{
 })
 
 const store = useSimulationStore()
-
-const stanceColors: Record<string, string> = {
-  '賛成': '#22c55e',
-  '反対': '#ef4444',
-  '中立': '#a3a3a3',
-  '条件付き賛成': '#86efac',
-  '条件付き反対': '#fca5a5',
-}
-
-const stanceOrder = ['賛成', '条件付き賛成', '中立', '条件付き反対', '反対']
 
 // Use SSE store data (live) OR props from API (completed)
 const timesteps = computed(() => store.propagationTimesteps)
@@ -101,7 +92,7 @@ const stackedAreas = computed(() => {
   const ts = timesteps.value
   const areas: Array<{ stance: string; color: string; points: string }> = []
 
-  for (const stance of [...stanceOrder].reverse()) {
+  for (const stance of [...STANCE_ORDER].reverse()) {
     const points: string[] = []
     const bottomPoints: string[] = []
 
@@ -112,7 +103,7 @@ const stackedAreas = computed(() => {
       // Compute cumulative Y for stacking
       let cumBefore = 0
       let cumAfter = 0
-      for (const s of stanceOrder) {
+      for (const s of STANCE_ORDER) {
         const val = dist[s] || 0
         if (s === stance) {
           cumAfter = cumBefore + val
@@ -130,7 +121,7 @@ const stackedAreas = computed(() => {
 
     areas.push({
       stance,
-      color: stanceColors[stance] || '#6366f1',
+      color: getStanceColor(stance),
       points: [...points, ...bottomPoints].join(' '),
     })
   }
@@ -324,7 +315,7 @@ const lastEntropy = computed(() => {
           <div class="market-bar-track">
             <div
               class="market-bar-fill"
-              :style="{ width: (Number(price) * 100) + '%', backgroundColor: stanceColors[String(outcome)] || '#818cf8' }"
+              :style="{ width: (Number(price) * 100) + '%', backgroundColor: getStanceColor(String(outcome), '#818cf8') }"
             />
           </div>
           <span class="market-price">{{ (Number(price) * 100).toFixed(1) }}%</span>

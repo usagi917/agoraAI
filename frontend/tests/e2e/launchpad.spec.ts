@@ -66,7 +66,7 @@ test('launches a simulation from the launchpad', async ({ page }) => {
       ],
     })
   })
-  await page.route('**/api/simulations', async (route) => {
+  await page.route('**/api/simulations*', async (route) => {
     if (route.request().method() === 'GET') {
       await route.fulfill({ json: [] })
       return

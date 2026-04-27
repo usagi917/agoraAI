@@ -19,6 +19,33 @@
 - Decision Lab では2つのシナリオを同一人口で並行実行し、意見シフト・連合変動・監査証跡を比較できます。
 - Theater UI ではディベートカード、ライブ対話ストリーム、スタンス変化をリアルタイムに可視化します。
 
+## 30秒でわかるポンチ図
+
+Agent AI は「問い」と「任意の根拠文書」を受け取り、合成人口の反応、代表者・専門家の議論、品質チェックを通して、意思決定に使える Decision Brief へ変換します。
+
+```mermaid
+flowchart LR
+    Q["問い / テンプレート / 添付文書"] --> L["LaunchPad<br/>Vue UI"]
+    L --> A["FastAPI<br/>Simulation API"]
+    A --> P["Project / Document<br/>保存・GraphRAG"]
+    A --> D["Dispatcher<br/>preset 正規化"]
+    D --> S["Society Pulse<br/>合成人口の反応"]
+    S --> C["Council<br/>代表者 + 専門家の議論"]
+    C --> Y["Synthesis<br/>Decision Brief 生成"]
+    Y --> R["Results<br/>判断材料・根拠・次アクション"]
+    Y --> X["Decision Lab<br/>シナリオ比較"]
+    S -. SSE .-> V["Live Simulation<br/>進捗・会話・社会グラフ"]
+    C -. SSE .-> V
+    Y -. SSE .-> V
+```
+
+読み方:
+
+- ユーザーは LaunchPad で質問、テンプレート、ファイル、実行プリセットを選びます。
+- バックエンドは `quick` / `standard` / `deep` / `research` / `baseline` に正規化し、必要なフェーズだけを実行します。
+- 実行中の状態は SSE で配信され、フロントエンドの Pinia store が Activity Feed、社会グラフ、会話、Theater UI に反映します。
+- 結果は Decision Brief、シナリオ比較、伝播分析、Transcript、follow-up 質問として再利用できます。
+
 ## 画面と実行フロー
 
 | Route | 役割 | 主な内容 |
@@ -49,6 +76,27 @@
 | `baseline` | 単一 LLM のベースライン実行 | 比較・検証用 |
 
 旧モード名は内部で正規化されます。たとえば `unified -> standard`、`society_first -> research`、`single -> quick` です。
+
+## コードを読む入口
+
+| 知りたいこと | 主なファイル |
+| --- | --- |
+| アプリ起動、CORS、テンプレート seed、health check | `backend/src/app/main.py` |
+| 環境変数、config YAML の読み込み | `backend/src/app/config.py` |
+| DB 接続、テーブル作成、SQLite/PostgreSQL 切り替え | `backend/src/app/database.py` |
+| API ルート全体の登録 | `backend/src/app/api/routes/__init__.py` |
+| シミュレーション作成、SSE、レポート、再実行 | `backend/src/app/api/routes/simulations.py` |
+| 実行プリセットの定義と旧モード名の変換 | `backend/src/app/models/simulation.py` |
+| `baseline` と unified 実行の振り分け | `backend/src/app/services/simulation_dispatcher.py` |
+| `Society Pulse -> Council -> Synthesis` の本体 | `backend/src/app/services/unified_orchestrator.py` |
+| 合成人口、社会ネットワーク、反応、伝播、評価 | `backend/src/app/services/society/` |
+| LLM の task routing、provider adapter、fallback | `backend/src/app/llm/` |
+| フロントエンドの route 定義 | `frontend/src/router.ts` |
+| REST API client と型定義 | `frontend/src/api/client.ts` |
+| SSE 購読とライブ状態更新 | `frontend/src/composables/useSimulationSSE.ts` |
+| 実行状態、グラフ、社会、Decision Lab の状態管理 | `frontend/src/stores/` |
+| 主要画面 | `frontend/src/pages/` |
+| 可視化・結果表示コンポーネント | `frontend/src/components/` |
 
 ## アーキテクチャ
 
@@ -241,11 +289,6 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/society/simulations/{sim_id}/transcript` | 発話 Transcript |
 | `GET` | `/admin/costs` | トークン・コスト集計 |
 | `GET` | `/admin/quality-metrics` | 品質・fallback 集計 |
-
-補足:
-
-- `/runs/*` は旧来の single-run API で、後方互換のため残っています。
-- `/simulations/{sim_id}/backtest` は `society_first` 系の互換 API です。
 
 ## テスト
 

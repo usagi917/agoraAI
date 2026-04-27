@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted, watch } from 'vue'
 import { useLiveSocietyGraph } from '../composables/useLiveSocietyGraph'
-import { useSocietyGraphStore, STANCE_COLORS } from '../stores/societyGraphStore'
+import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
 import { RELATION_TYPE_STYLES } from '../composables/useForceGraph'
 import { useSimulationStore } from '../stores/simulationStore'
+import { STANCE_COLORS } from '../constants/stances'
 import type { ThinkingVisualMode } from '../composables/useThinkingParticles'
 import ConversationToast from './ConversationToast.vue'
 import NodeDetailPanel from './NodeDetailPanel.vue'

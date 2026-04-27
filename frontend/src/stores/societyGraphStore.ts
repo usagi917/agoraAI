@@ -65,16 +65,6 @@ interface StanceShiftEvent {
   reason: string
 }
 
-const STANCE_COLORS: Record<string, string> = {
-  '賛成': '#22c55e',
-  '条件付き賛成': '#86efac',
-  '中立': '#a3a3a3',
-  '条件付き反対': '#fca5a5',
-  '反対': '#ef4444',
-}
-
-export { STANCE_COLORS }
-
 export const useSocietyGraphStore = defineStore('societyGraph', () => {
   const liveAgents = ref<Map<string, LiveAgentNode>>(new Map())
   const liveEdges = ref<LiveEdge[]>([])

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useSocietyGraphStore, STANCE_COLORS } from '../stores/societyGraphStore'
+import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
+import { STANCE_COLORS } from '../constants/stances'
 
 const props = defineProps<{
   nodeId: string

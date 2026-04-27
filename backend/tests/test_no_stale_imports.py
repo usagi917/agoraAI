@@ -1,9 +1,9 @@
-"""削除済みモジュールへの参照がないことを確認するテスト"""
+"""削除済みサービスへの参照がないことを確認するテスト"""
 
 import ast
 from pathlib import Path
 
-# 削除対象オーケストレータ（pm_board_orchestrator は pm_analysis.py が利用するため除外）
+# 削除済みオーケストレータ
 DELETED_ORCHESTRATORS = [
     "pipeline_orchestrator",
     "swarm_orchestrator",
@@ -11,13 +11,23 @@ DELETED_ORCHESTRATORS = [
     "society_first_orchestrator",
 ]
 
+DELETED_SERVICE_FILES = [
+    "api/routes/runs.py",
+    "api/routes/stream.py",
+    "services/final_report_generator.py",
+    "services/phases/pm_analysis.py",
+    "services/phases/issue_mining.py",
+    "services/phases/intervention.py",
+    "services/phases/multi_perspective.py",
+    "repositories/simulation_repo.py",
+    "repositories/evaluation_repo.py",
+    "repositories/llm_log_repo.py",
+    "models/llm_call_log.py",
+]
+
 SRC_DIR = Path(__file__).parent.parent / "src" / "app"
 
-# 正当に旧モジュールを利用しているファイル or Phase 5 で対処するファイル
-ALLOWED_EXCEPTIONS = {
-    "services/phases/pm_analysis.py": {"pm_board_orchestrator"},
-    "api/routes/swarms.py": {"swarm_orchestrator"},  # Phase 5 でルートごと削除
-}
+ALLOWED_EXCEPTIONS: dict[str, set[str]] = {}
 
 
 def _collect_python_files(directory: Path) -> list[Path]:
@@ -63,4 +73,9 @@ class TestNoStaleImports:
         services_dir = SRC_DIR / "services"
         for module in DELETED_ORCHESTRATORS:
             filepath = services_dir / f"{module}.py"
+            assert not filepath.exists(), f"削除対象ファイルがまだ存在: {filepath}"
+
+    def test_deleted_service_files_do_not_exist(self):
+        for relative_path in DELETED_SERVICE_FILES:
+            filepath = SRC_DIR / relative_path
             assert not filepath.exists(), f"削除対象ファイルがまだ存在: {filepath}"

@@ -10,6 +10,7 @@ import {
   type SwimMotionState,
 } from './forceGraphMotion'
 import { startThinkingAnimation, type ThinkingVisualMode } from './useThinkingParticles'
+import { STANCE_COLORS } from '../constants/stances'
 
 // Shared geometries (reused across all nodes to reduce GC pressure)
 const sharedSphereCore = new THREE.SphereGeometry(1, 24, 24)
@@ -57,14 +58,6 @@ const TYPE_COLORS: Record<string, string> = {
   event: '#F48FB1',
   agent: '#FFB74D',
   unknown: '#90A4AE',
-}
-
-const STANCE_COLORS: Record<string, string> = {
-  '賛成': '#22c55e',
-  '条件付き賛成': '#86efac',
-  '中立': '#a3a3a3',
-  '条件付き反対': '#fca5a5',
-  '反対': '#ef4444',
 }
 
 export const RELATION_TYPE_STYLES: Record<string, { color: string; width: number; particleColor: string }> = {

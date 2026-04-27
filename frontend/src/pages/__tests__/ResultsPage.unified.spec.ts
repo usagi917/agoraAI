@@ -140,12 +140,7 @@ describe('ResultsPage — unified report', () => {
           ProbabilityChart: true,
           ScenarioCompare: true,
           AgreementHeatmap: true,
-          AgentMindView: true,
-          MemoryStreamViewer: true,
-          EvaluationDashboard: true,
-          ToMMapVisualization: true,
-          SocialNetworkDynamics: true,
-          KnowledgeGraphExplorer: true,
+          PropagationDashboard: true,
         },
       },
     })

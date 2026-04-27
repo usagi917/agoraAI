@@ -118,7 +118,6 @@ export function useSimulationSSE(simulationId: string) {
       // Unified モード イベント
       'unified_phase_changed',
       'persona_generation_started',
-      'report_completed',
       // Meeting Layer イベント
       'meeting_started',
       'meeting_dialogue',
@@ -410,8 +409,13 @@ export function useSimulationSSE(simulationId: string) {
 
       case 'report_completed':
         store.setReportError('')
-        store.setStatus('running')
+        if (store.status === 'generating_report') {
+          store.setStatus('running')
+        }
         activity.addEntry('event', '▣', 'レポート生成完了', {
+          detail: payload.agreement_score != null
+            ? `合意度: ${(payload.agreement_score * 100).toFixed(0)}%`
+            : undefined,
           track: 'report',
           status: 'completed',
         })
@@ -610,16 +614,6 @@ export function useSimulationSSE(simulationId: string) {
         activity.addEntry('event', '✦', `ペルソナ生成開始 (${payload.agent_count || 0}人)`, {
           track: 'agent',
           status: 'running',
-        })
-        break
-
-      case 'report_completed':
-        activity.addEntry('event', '◈', 'レポート生成完了', {
-          detail: payload.agreement_score != null
-            ? `合意度: ${(payload.agreement_score * 100).toFixed(0)}%`
-            : undefined,
-          track: 'report',
-          status: 'completed',
         })
         break
 
