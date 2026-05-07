@@ -680,6 +680,104 @@ class TestUnifiedOrchestrator:
         assert mock_sim.metadata_json["intervention_params"] == {"tax_rate": 0.1}
 
     @pytest.mark.asyncio
+    async def test_run_unified_reuses_synthesis_checkpoint(self):
+        """post-synthesis window の resume では unified_result を再利用する。"""
+        from src.app.services.phases.society_pulse import SocietyPulseResult
+        from src.app.services.phases.council_deliberation import CouncilResult
+
+        mock_pulse = SocietyPulseResult(
+            agents=[{"id": "a1"}],
+            responses=[{"agent_id": "a1", "stance": "賛成"}],
+            aggregation={"average_confidence": 0.8},
+            evaluation={"consistency": 0.7},
+            representatives=[],
+            usage={},
+            population_count=1,
+        )
+        mock_council = CouncilResult(
+            participants=[{"id": "a1"}],
+            rounds=[{"round": 1, "summary": "done"}],
+            synthesis={"consensus_points": ["ok"]},
+            devil_advocate_summary="none",
+            usage={},
+        )
+        stored_unified_result = {
+            "type": "unified",
+            "decision_brief": {"recommendation": "Go", "agreement_score": 0.82},
+            "agreement_score": 0.82,
+            "content": "# Stored Report",
+            "sections": {"decision_brief": {"recommendation": "Go"}},
+        }
+
+        mock_sim = MagicMock()
+        mock_sim.id = "sim-resume-synthesis"
+        mock_sim.prompt_text = "test theme"
+        mock_sim.metadata_json = {"unified_result": stored_unified_result}
+        mock_sim.status = "running"
+        mock_sim.run_id = None
+        mock_sim.scenario_pair_id = None
+        mock_sim.population_id = None
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=mock_sim)
+        mock_session.commit = AsyncMock()
+        mock_session.add = MagicMock()
+
+        with (
+            patch("src.app.services.unified_orchestrator.async_session") as mock_async_session,
+            patch(
+                "src.app.services.unified_orchestrator._load_pulse_checkpoint",
+                new_callable=AsyncMock,
+                return_value=mock_pulse,
+            ),
+            patch(
+                "src.app.services.unified_orchestrator._load_council_checkpoint",
+                return_value=mock_council,
+            ),
+            patch(
+                "src.app.services.unified_orchestrator.run_society_pulse",
+                new_callable=AsyncMock,
+            ) as mock_phase1,
+            patch(
+                "src.app.services.unified_orchestrator.run_council",
+                new_callable=AsyncMock,
+            ) as mock_phase2,
+            patch(
+                "src.app.services.unified_orchestrator.run_synthesis",
+                new_callable=AsyncMock,
+            ) as mock_phase3,
+            patch(
+                "src.app.services.unified_orchestrator._acc_flags.is_enabled",
+                return_value=False,
+            ),
+            patch("src.app.services.unified_orchestrator.sse_manager") as mock_sse,
+        ):
+            mock_sse.publish = AsyncMock()
+            mock_async_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_async_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            from src.app.services.unified_orchestrator import run_unified
+
+            await run_unified("sim-resume-synthesis")
+
+        mock_phase1.assert_not_called()
+        mock_phase2.assert_not_called()
+        mock_phase3.assert_not_called()
+        assert mock_sim.status == "completed"
+        assert mock_sim.metadata_json["unified_result"] == stored_unified_result
+        mock_sse.publish.assert_any_await(
+            "sim-resume-synthesis",
+            "simulation_completed",
+            {
+                "simulation_id": "sim-resume-synthesis",
+                "mode": "unified",
+                "agreement_score": 0.82,
+                "recommendation": "Go",
+                "time_axis_available": False,
+            },
+        )
+
+    @pytest.mark.asyncio
     async def test_run_unified_generates_time_axis_when_enabled(self):
         """active な unified 経路で time_axis_result を保存する。"""
         from types import SimpleNamespace

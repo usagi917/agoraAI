@@ -18,7 +18,7 @@ from src.app.models.social_edge import SocialEdge
 from src.app.models.society_result import SocietyResult
 from src.app.services.phases.society_pulse import SocietyPulseResult, run_society_pulse
 from src.app.services.phases.council_deliberation import CouncilResult, run_council
-from src.app.services.phases.synthesis import run_synthesis
+from src.app.services.phases.synthesis import SynthesisResult, run_synthesis
 from src.app.services.scenario_pair_status import refresh_scenario_pair_status
 from src.app.services.society.representative_selector import select_representatives
 from src.app.services.society import accuracy_config as _acc_flags
@@ -125,6 +125,30 @@ def _load_council_checkpoint(sim: Simulation) -> CouncilResult | None:
         usage=dict(council_data.get("usage") or {}),
         kg_entities=council_data.get("kg_entities"),
         kg_relations=council_data.get("kg_relations"),
+    )
+
+
+def _load_synthesis_checkpoint(sim: Simulation) -> SynthesisResult | None:
+    unified_data = dict((sim.metadata_json or {}).get("unified_result") or {})
+    decision_brief = dict(unified_data.get("decision_brief") or {})
+    content = unified_data.get("content")
+    if not decision_brief or not isinstance(content, str):
+        return None
+
+    agreement_score = unified_data.get("agreement_score")
+    if agreement_score is None:
+        agreement_score = decision_brief.get("agreement_score", 0.0)
+
+    try:
+        agreement_score = float(agreement_score)
+    except (TypeError, ValueError):
+        agreement_score = 0.0
+
+    return SynthesisResult(
+        decision_brief=decision_brief,
+        agreement_score=agreement_score,
+        content=content,
+        sections=dict(unified_data.get("sections") or {}),
     )
 
 
@@ -305,6 +329,7 @@ async def run_unified(simulation_id: str) -> None:
 
             # === Phase 2: Council Deliberation ===
             council = _load_council_checkpoint(sim)
+            council_from_checkpoint = council is not None
             if council:
                 logger.info("Resuming unified simulation %s from council checkpoint", simulation_id)
             else:
@@ -335,46 +360,50 @@ async def run_unified(simulation_id: str) -> None:
                 await session.commit()
 
             # === Phase 3: Synthesis ===
-            await sse_manager.publish(simulation_id, "unified_phase_changed", {
-                "phase": "synthesis",
-                "index": 3,
-                "total": 3,
-            })
+            synthesis = _load_synthesis_checkpoint(sim) if council_from_checkpoint else None
+            if synthesis:
+                logger.info("Resuming unified simulation %s from synthesis checkpoint", simulation_id)
+            else:
+                await sse_manager.publish(simulation_id, "unified_phase_changed", {
+                    "phase": "synthesis",
+                    "index": 3,
+                    "total": 3,
+                })
 
-            # Council で進化したKGがあればそちらを優先
-            synthesis_kg_entities = council.kg_entities if council.kg_entities else (kg_entities or None)
-            synthesis_kg_relations = council.kg_relations if council.kg_relations else (kg_relations or None)
+                # Council で進化したKGがあればそちらを優先
+                synthesis_kg_entities = council.kg_entities if council.kg_entities else (kg_entities or None)
+                synthesis_kg_relations = council.kg_relations if council.kg_relations else (kg_relations or None)
 
-            synthesis = await run_synthesis(
-                session, sim, pulse, council, theme,
-                kg_entities=synthesis_kg_entities,
-                kg_relations=synthesis_kg_relations,
-                use_react=True,
-            )
+                synthesis = await run_synthesis(
+                    session, sim, pulse, council, theme,
+                    kg_entities=synthesis_kg_entities,
+                    kg_relations=synthesis_kg_relations,
+                    use_react=True,
+                )
 
-            # 最終結果保存
-            sim.metadata_json = {
-                **dict(sim.metadata_json or {}),
-                "unified_result": {
-                    "type": "unified",
-                    "decision_brief": synthesis.decision_brief,
-                    "agreement_score": synthesis.agreement_score,
-                    "content": synthesis.content,
-                    "sections": synthesis.sections,
-                    "society_summary": {
-                        "population_count": pulse.population_count,
-                        "selected_count": len(pulse.agents),
-                        "aggregation": pulse.aggregation,
-                        "evaluation": pulse.evaluation,
+                # 最終結果保存
+                sim.metadata_json = {
+                    **dict(sim.metadata_json or {}),
+                    "unified_result": {
+                        "type": "unified",
+                        "decision_brief": synthesis.decision_brief,
+                        "agreement_score": synthesis.agreement_score,
+                        "content": synthesis.content,
+                        "sections": synthesis.sections,
+                        "society_summary": {
+                            "population_count": pulse.population_count,
+                            "selected_count": len(pulse.agents),
+                            "aggregation": pulse.aggregation,
+                            "evaluation": pulse.evaluation,
+                        },
+                        "council": {
+                            "participants": council.participants,
+                            "rounds": council.rounds,
+                            "synthesis": council.synthesis,
+                            "devil_advocate_summary": council.devil_advocate_summary,
+                        },
                     },
-                    "council": {
-                        "participants": council.participants,
-                        "rounds": council.rounds,
-                        "synthesis": council.synthesis,
-                        "devil_advocate_summary": council.devil_advocate_summary,
-                    },
-                },
-            }
+                }
             time_axis_available = await _run_time_axis_if_enabled(
                 session, sim, pulse, theme,
             )
