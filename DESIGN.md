@@ -114,11 +114,19 @@ agoraAI のデザイントークンとUI規約。`frontend/src/style.css` が唯
 
 | Breakpoint | Layout |
 |-----------|--------|
-| Desktop (1440px+) | 2列テンプレ, 3Dグラフ60%+右パネル25% |
+| Desktop (1440px+) | 2列テンプレ, 2Dグラフ60%+右パネル25% |
 | Tablet (640-900px) | 2列テンプレ, グラフ全幅+下部タブ |
 | Mobile (<640px) | 1列, アコーディオン |
 
 900px と 640px で `--page-padding`, `--section-gap`, `--panel-padding` を縮小。
+
+## Graph Visualization Plan
+
+- Knowledge Graph / Social Graph は2D平面グラフを標準とする。
+- 3Dカメラ、WebGL分岐、Bloom、particle演出はUI規約から外す。
+- 2Dグラフはノード選択、隣接ノード強調、エッジhover/click、凡例表示を基本操作とする。
+- Society modeのsocial edge / KG layer / agent-entity linkの切替は2D上で維持する。
+- 画面密度が上がる場合はSVGからCanvasへの置換を検討するが、ユーザー体験は平面グラフのまま保つ。
 
 ## Print Styles
 

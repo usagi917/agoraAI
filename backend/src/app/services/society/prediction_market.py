@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from enum import Enum
 
 
 @dataclass
@@ -92,3 +93,103 @@ class PredictionMarket:
             actual = 1.0 if outcome == actual_outcome else 0.0
             score += (prob - actual) ** 2
         return score
+
+
+class LiquidityProfile(Enum):
+    """Market liquidity profile that scales the LMSR `b` parameter.
+
+    Smaller `b` (EARLY) → higher price impact per trade, useful when the market
+    just opened and signal density is low. Larger `b` (LATE) → smoother prices
+    once consensus has formed.
+    """
+
+    EARLY = "early"
+    MID = "mid"
+    LATE = "late"
+
+    @property
+    def multiplier(self) -> float:
+        return _PROFILE_MULTIPLIERS[self]
+
+
+_PROFILE_MULTIPLIERS: dict[LiquidityProfile, float] = {
+    LiquidityProfile.EARLY: 0.5,
+    LiquidityProfile.MID: 1.0,
+    LiquidityProfile.LATE: 2.0,
+}
+
+
+class MultiOutcomeMarket:
+    """K-outcome LMSR market with adjustable liquidity profile.
+
+    Implements Hanson's LMSR cost function over K outcomes:
+        cost(q) = b * log(sum_k(exp(q_k / b)))
+    Prices are the softmax of `q_k / b`, which always sum to 1.
+
+    Uses the log-sum-exp trick (subtract max(q)) for numerical stability so
+    extreme quantities do not overflow `math.exp`.
+    """
+
+    def __init__(
+        self,
+        outcomes: list[str],
+        b_base: float = 10.0,
+        profile: LiquidityProfile = LiquidityProfile.MID,
+    ) -> None:
+        if not outcomes:
+            raise ValueError("MultiOutcomeMarket requires at least one outcome")
+        if b_base <= 0:
+            raise ValueError("b_base must be positive")
+        self._outcomes = list(outcomes)
+        self._b_base = float(b_base)
+        self._profile = profile
+        self._quantities: list[float] = [0.0] * len(outcomes)
+
+    @property
+    def outcomes(self) -> list[str]:
+        return list(self._outcomes)
+
+    @property
+    def profile(self) -> LiquidityProfile:
+        return self._profile
+
+    @property
+    def b(self) -> float:
+        """Effective liquidity parameter b = b_base * profile.multiplier."""
+        return self._b_base * self._profile.multiplier
+
+    def set_profile(self, profile: LiquidityProfile) -> None:
+        """Switch liquidity profile, rescaling the effective `b` parameter."""
+        self._profile = profile
+
+    def cost(self, quantities: list[float]) -> float:
+        """LMSR cost: b * log(sum(exp(q_i / b))) with log-sum-exp stability."""
+        if len(quantities) != len(self._outcomes):
+            raise ValueError(
+                f"quantities length {len(quantities)} != outcomes length {len(self._outcomes)}"
+            )
+        b = self.b
+        max_q = max(quantities)
+        exp_sum = sum(math.exp((q - max_q) / b) for q in quantities)
+        return max_q + b * math.log(exp_sum)
+
+    def prices(self) -> list[float]:
+        """Softmax prices over outcomes; always sums to 1.0."""
+        b = self.b
+        max_q = max(self._quantities)
+        exps = [math.exp((q - max_q) / b) for q in self._quantities]
+        total = sum(exps)
+        return [e / total for e in exps]
+
+    def buy(self, outcome_idx: int, qty: float) -> float:
+        """Buy `qty` shares of `outcome_idx`. Returns the cost delta paid."""
+        if not 0 <= outcome_idx < len(self._outcomes):
+            raise IndexError(f"outcome_idx {outcome_idx} out of range")
+        if qty < 0:
+            raise ValueError("qty must be non-negative")
+        before = self.cost(self._quantities)
+        new_quantities = list(self._quantities)
+        new_quantities[outcome_idx] += qty
+        after = self.cost(new_quantities)
+        self._quantities = new_quantities
+        return after - before

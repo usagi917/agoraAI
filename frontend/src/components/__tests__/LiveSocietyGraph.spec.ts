@@ -8,29 +8,6 @@ import { useKGEvolutionStore } from '../../stores/kgEvolutionStore'
 import { useSimulationStore } from '../../stores/simulationStore'
 import { useSocietyGraphStore } from '../../stores/societyGraphStore'
 
-const graphMocks = vi.hoisted(() => ({
-  resetCamera: vi.fn(),
-  toggleBloom: vi.fn(),
-  highlightAgentsForEntity: vi.fn(),
-  clearHighlight: vi.fn(),
-}))
-
-vi.mock('../../composables/useLiveSocietyGraph', async () => {
-  const { ref } = await import('vue')
-
-  return {
-    useLiveSocietyGraph: () => ({
-      selectedAgentId: ref<string | null>(null),
-      resetCamera: graphMocks.resetCamera,
-      graphError: null,
-      toggleBloom: graphMocks.toggleBloom,
-      bloomEnabled: ref(false),
-      highlightAgentsForEntity: graphMocks.highlightAgentsForEntity,
-      clearHighlight: graphMocks.clearHighlight,
-    }),
-  }
-})
-
 describe('LiveSocietyGraph', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -80,8 +57,21 @@ describe('LiveSocietyGraph', () => {
       },
       global: {
         stubs: {
+          ForceGraph2D: {
+            props: ['highlightedNodeIds'],
+            emits: ['select-node'],
+            template: `
+              <div data-testid="graph-2d">
+                <button data-testid="select-kg-node" @click="$emit('select-node', { id: 'kg-policy' })" />
+                <span data-testid="highlighted-node-ids">{{ highlightedNodeIds.join(',') }}</span>
+              </div>
+            `,
+          },
           ConversationToast: true,
-          NodeDetailPanel: true,
+          NodeDetailPanel: {
+            emits: ['highlight-agents', 'close', 'select-agent'],
+            template: '<button data-testid="highlight-agents" @click="$emit(\'highlight-agents\', [\'agent-1\'])">Highlight</button>',
+          },
         },
       },
     })
@@ -112,5 +102,14 @@ describe('LiveSocietyGraph', () => {
 
     expect(kgStore.replayRound).toBe(1)
     expect(wrapper.get('.play-btn').text()).toBe('▶')
+  })
+
+  it('passes related KG agents to the 2D graph highlight state', async () => {
+    const wrapper = mountGraph()
+
+    await wrapper.get('[data-testid="select-kg-node"]').trigger('click')
+    await wrapper.get('[data-testid="highlight-agents"]').trigger('click')
+
+    expect(wrapper.get('[data-testid="highlighted-node-ids"]').text()).toBe('agent-1')
   })
 })

@@ -1314,6 +1314,52 @@ async def run_society(simulation_id: str) -> None:
             }
             await session.commit()
 
+            # === Wondrous Crayon: 時間軸予測 (フラグ ON 時のみ) ===
+            time_axis_available = False
+            if _acc_flags.is_enabled("time_axis_orchestrator"):
+                try:
+                    from src.app.services.society.time_axis_runner import (
+                        run_time_axis_pipeline,
+                    )
+                    edge_rows = (await session.execute(
+                        select(SocialEdge).where(SocialEdge.population_id == pop_id)
+                    )).scalars().all()
+                    edges_list: list[tuple] = [
+                        (e.agent_id, e.target_id) for e in edge_rows
+                    ]
+                    base_responses: list[dict] = []
+                    for agent, resp in zip(
+                        selected_agents, activation_result.get("responses", [])
+                    ):
+                        base_responses.append({
+                            **resp,
+                            "agent_id": agent["id"],
+                        })
+                    time_axis_report = await run_time_axis_pipeline(
+                        simulation_id=simulation_id,
+                        base_responses=base_responses,
+                        base_edges=edges_list,
+                        theme=theme,
+                        sse_manager=sse_manager,
+                    )
+                    sim.metadata_json = {
+                        **dict(sim.metadata_json or {}),
+                        "time_axis_result": time_axis_report,
+                    }
+                    await session.commit()
+                    time_axis_available = True
+                except Exception as time_axis_exc:
+                    logger.exception(
+                        "time-axis pipeline failed for sim %s", simulation_id
+                    )
+                    sim.metadata_json = {
+                        **dict(sim.metadata_json or {}),
+                        "time_axis_error": (
+                            f"{type(time_axis_exc).__name__}: {time_axis_exc}"
+                        )[:500],
+                    }
+                    await session.commit()
+
             await sse_manager.publish(simulation_id, "society_completed", {
                 "simulation_id": simulation_id,
                 "aggregation_pre_independence": activation_result.get(
@@ -1325,6 +1371,7 @@ async def run_society(simulation_id: str) -> None:
                 ),
                 "evaluation": eval_data,
                 "meeting_available": True,
+                "time_axis_available": time_axis_available,
                 "usage": total_usage,
             })
 

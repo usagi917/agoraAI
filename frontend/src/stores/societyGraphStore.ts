@@ -79,7 +79,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
   const socialEdgesVisible = ref(true)
   const agentEntityLinksVisible = ref(true)
 
-  // === Computed: useForceGraph 用の GraphNode/GraphEdge 変換 ===
+  // === Computed: 2D graph 用の GraphNode/GraphEdge 変換 ===
 
   const agentList = computed(() => Array.from(liveAgents.value.values()))
 
