@@ -11,8 +11,13 @@ import ConversationToast from './ConversationToast.vue'
 import NodeDetailPanel from './NodeDetailPanel.vue'
 import TemporalSlider from './TemporalSlider.vue'
 
-defineProps<{
+const props = defineProps<{
   simulationId: string
+  spotlightAgentId?: string | null
+}>()
+
+const emit = defineEmits<{
+  (e: 'select-agent', agentId: string): void
 }>()
 
 const graphContainer = ref<HTMLElement | null>(null)
@@ -25,7 +30,7 @@ const thinkingMode = computed<ThinkingVisualMode>(() => {
   return 'society'
 })
 
-const { selectedAgentId, resetCamera, graphError, toggleBloom, bloomEnabled, highlightAgentsForEntity, clearHighlight } = useLiveSocietyGraph(graphContainer, thinkingMode)
+const { selectedAgentId, resetCamera, graphError, toggleBloom, bloomEnabled, highlightAgentsForEntity, clearHighlight, setSpotlight } = useLiveSocietyGraph(graphContainer, thinkingMode)
 
 const phaseLabel = computed(() => {
   // Unified mode phase labels
@@ -103,6 +108,20 @@ function clearSelection() {
   selectedAgentId.value = null
   clearHighlight()
 }
+
+// Non-KG node click → emit select-agent to parent for drawer, then clear
+// so re-clicking the same node only takes one click (not two)
+watch(selectedAgentId, (id) => {
+  if (id && !id.startsWith('kg-')) {
+    emit('select-agent', id)
+    selectedAgentId.value = null
+  }
+})
+
+// Spotlight: dim all agents except the one open in the story drawer
+watch(() => props.spotlightAgentId, (agentId) => {
+  setSpotlight(agentId ?? null)
+})
 
 function clearEdgeSelection() {
   societyGraphStore.setSelectedEdge(null)
@@ -368,12 +387,13 @@ onUnmounted(() => {
       :round="societyGraphStore.currentRound"
     />
 
-    <!-- Node detail panel (on click) -->
-    <div v-if="selectedAgentId" class="agent-detail-overlay">
+    <!-- Node detail panel: KG nodes only (agent nodes open drawer in parent) -->
+    <div v-if="selectedAgentId?.startsWith('kg-')" class="agent-detail-overlay">
       <NodeDetailPanel
         :node-id="selectedAgentId"
         @close="clearSelection"
         @highlight-agents="handleHighlightAgents"
+        @select-agent="emit('select-agent', $event)"
       />
     </div>
   </div>

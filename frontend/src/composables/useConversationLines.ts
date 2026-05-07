@@ -35,6 +35,7 @@ interface LineEntry {
   tube: THREE.Mesh
   particles: THREE.Points
   labelSprite: THREE.Sprite | null
+  arrowHead: THREE.Mesh | null
   curve: THREE.QuadraticBezierCurve3
   material: THREE.MeshBasicMaterial
   particleMaterial: THREE.PointsMaterial
@@ -63,7 +64,8 @@ function createConvLabelSprite(type: ConversationEdge['type']): THREE.Sprite | n
   const canvas = document.createElement('canvas')
   canvas.width = 64
   canvas.height = 64
-  const ctx = canvas.getContext('2d')!
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
 
   // Background circle
   ctx.fillStyle = type === 'question' ? 'rgba(0, 229, 255, 0.7)' : 'rgba(255, 215, 64, 0.7)'
@@ -88,6 +90,65 @@ function createConvLabelSprite(type: ConversationEdge['type']): THREE.Sprite | n
   const sprite = new THREE.Sprite(material)
   sprite.scale.set(2.5, 2.5, 1)
   return sprite
+}
+
+function disposeLabelSprite(sprite: THREE.Sprite) {
+  const material = sprite.material
+  if (Array.isArray(material)) {
+    for (const entry of material) {
+      entry.map?.dispose()
+      entry.dispose()
+    }
+    return
+  }
+
+  material.map?.dispose()
+  material.dispose()
+}
+
+const Y_UP = new THREE.Vector3(0, 1, 0)
+
+function makeArrowHead(curve: THREE.QuadraticBezierCurve3, type: ConversationEdge['type']): THREE.Mesh {
+  const tip = curve.getPoint(1)
+  const nearTip = curve.getPoint(0.92)
+  const dir = new THREE.Vector3().subVectors(tip, nearTip).normalize()
+
+  const geo = new THREE.ConeGeometry(0.5, 2, 6)
+  const mat = new THREE.MeshBasicMaterial({
+    color: CONV_COLORS[type],
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  })
+  const cone = new THREE.Mesh(geo, mat)
+
+  // Center cone so its tip is exactly at curve endpoint
+  cone.position.addVectors(tip, dir.clone().multiplyScalar(-1))
+
+  const dot = dir.dot(Y_UP)
+  if (Math.abs(dot) < 0.9999) {
+    cone.quaternion.setFromUnitVectors(Y_UP, dir)
+  } else if (dot < 0) {
+    cone.quaternion.setFromEuler(new THREE.Euler(Math.PI, 0, 0))
+  }
+
+  return cone
+}
+
+function updateArrowHead(cone: THREE.Mesh, curve: THREE.QuadraticBezierCurve3) {
+  const tip = curve.getPoint(1)
+  const nearTip = curve.getPoint(0.92)
+  const dir = new THREE.Vector3().subVectors(tip, nearTip).normalize()
+
+  cone.position.addVectors(tip, dir.clone().multiplyScalar(-1))
+
+  const dot = dir.dot(Y_UP)
+  if (Math.abs(dot) < 0.9999) {
+    cone.quaternion.setFromUnitVectors(Y_UP, dir)
+  } else if (dot < 0) {
+    cone.quaternion.setFromEuler(new THREE.Euler(Math.PI, 0, 0))
+  }
 }
 
 export function useConversationLines(
@@ -215,6 +276,10 @@ export function useConversationLines(
       group.add(labelSprite)
     }
 
+    // Arrow head pointing at target
+    const arrowHead = makeArrowHead(curve, edge.type)
+    group.add(arrowHead)
+
     return {
       id: edge.id,
       sourceId: edge.source,
@@ -222,6 +287,7 @@ export function useConversationLines(
       tube: poolEntry.tube,
       particles: poolEntry.particles,
       labelSprite,
+      arrowHead,
       curve,
       material: tubeMat,
       particleMaterial: particleMat,
@@ -268,6 +334,7 @@ export function useConversationLines(
         line.material.opacity = opacity
         line.particleMaterial.opacity = opacity
         if (line.labelSprite) line.labelSprite.material.opacity = opacity
+        if (line.arrowHead) (line.arrowHead.material as THREE.MeshBasicMaterial).opacity = opacity
 
         if (fadeProgress >= 1) {
           toRemove.push(id)
@@ -283,6 +350,7 @@ export function useConversationLines(
       const pulse = 0.8 + 0.2 * Math.sin(time * 3)
       line.material.opacity = baseOpacity * pulse
       line.particleMaterial.opacity = baseOpacity * pulse * 1.2
+      if (line.arrowHead) (line.arrowHead.material as THREE.MeshBasicMaterial).opacity = baseOpacity * pulse
 
       // Update curve positions (nodes may move)
       const srcPos = getNodePosition(line.sourceId)
@@ -298,6 +366,7 @@ export function useConversationLines(
           const newGeo = new THREE.TubeGeometry(newCurve, TUBE_SEGMENTS, tubeRadius, 4, false)
           line.tube.geometry.dispose()
           line.tube.geometry = newGeo
+          if (line.arrowHead) updateArrowHead(line.arrowHead, newCurve)
         }
       }
 
@@ -325,8 +394,12 @@ export function useConversationLines(
       if (line) {
         if (line.labelSprite) {
           group.remove(line.labelSprite)
-          line.labelSprite.material.map?.dispose()
-          line.labelSprite.material.dispose()
+          disposeLabelSprite(line.labelSprite)
+        }
+        if (line.arrowHead) {
+          group.remove(line.arrowHead)
+          line.arrowHead.geometry.dispose()
+          ;(line.arrowHead.material as THREE.Material).dispose()
         }
         const poolEntry = pool.find((p) => p.tube === line.tube)
         if (poolEntry) releaseToPool(poolEntry)
@@ -336,6 +409,17 @@ export function useConversationLines(
   }
 
   function dispose() {
+    for (const line of activeLines.values()) {
+      if (line.labelSprite) {
+        group.remove(line.labelSprite)
+        disposeLabelSprite(line.labelSprite)
+      }
+      if (line.arrowHead) {
+        group.remove(line.arrowHead)
+        line.arrowHead.geometry.dispose()
+        ;(line.arrowHead.material as THREE.Material).dispose()
+      }
+    }
     for (const entry of pool) {
       entry.tube.geometry.dispose()
       ;(entry.tube.material as THREE.Material).dispose()

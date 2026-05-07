@@ -203,3 +203,58 @@ class TestStanceMapping:
         result = map_to_five_stances(original, "likert_5")
         assert set(result.keys()) == {"賛成", "条件付き賛成", "中立", "条件付き反対", "反対"}
         assert abs(sum(result.values()) - 1.0) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# Phase I: Survey Matching 改善
+# ---------------------------------------------------------------------------
+
+
+class TestSurveyMatchingImprovements:
+    """Phase I: カテゴリプレフィルタ、同義語展開、時間減衰、最低マッチ閾値。"""
+
+    def _make_survey(self, theme: str, category: str, keywords: list[str],
+                     survey_date: str = "2024-01") -> SurveyRecord:
+        return {
+            "theme": theme,
+            "question": "test question",
+            "source": "test source",
+            "survey_date": survey_date,
+            "sample_size": 1000,
+            "method": "テスト",
+            "stance_distribution": {
+                "賛成": 0.30, "条件付き賛成": 0.20,
+                "中立": 0.20, "条件付き反対": 0.15, "反対": 0.15,
+            },
+            "theme_category": category,
+            "relevance_keywords": keywords,
+        }
+
+    def test_category_prefilter(self):
+        """theme_category を指定するとそのカテゴリのみにフィルタされる。"""
+        surveys = [
+            self._make_survey("経済成長", "economy", ["GDP", "成長"]),
+            self._make_survey("選挙制度", "politics", ["選挙", "投票"]),
+        ]
+        # economy カテゴリでフィルタ
+        matched = find_relevant_surveys("経済成長", surveys, theme_category="economy")
+        for s in matched:
+            assert s["theme_category"] == "economy"
+
+    def test_synonym_expansion(self):
+        """同義語展開: 「インフレ」で検索すると「物価上昇」を含む調査もマッチ。"""
+        surveys = [
+            self._make_survey("物価上昇の影響", "economy", ["物価上昇", "家計"]),
+        ]
+        # "インフレ" → 同義語 "物価上昇" で展開されてマッチすべき
+        matched = find_relevant_surveys("インフレの影響", surveys)
+        assert len(matched) > 0
+
+    def test_minimum_match_threshold(self):
+        """Jaccard < 0.05 のマッチは除外される。"""
+        surveys = [
+            self._make_survey("全く関係ないテーマ", "social", ["無関係", "別件"]),
+        ]
+        # 完全にキーワードが一致しないテーマ
+        matched = find_relevant_surveys("経済政策の効果", surveys)
+        assert len(matched) == 0

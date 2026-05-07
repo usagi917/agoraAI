@@ -1,0 +1,46 @@
+# security カテゴリ gate runner 初期 fixture
+# Step 5: deterministic gate runner の基準ケース
+# seed: 42
+
+preset_id: "security"
+theme_category: "security"
+seed: 42
+description: >
+  security カテゴリの初期 gate fixture。
+  内閣府「自衛隊・防衛問題に関する世論調査」2024年を参照した
+  仮想シミュレーション結果と実績分布の比較。
+
+cases:
+  - case_id: "security_001"
+    theme: "自衛隊の役割と防衛政策の評価"
+    survey_source: "内閣府「自衛隊・防衛問題に関する世論調査」2024年"
+    gate_eligible: true
+    simulated_distribution:
+      賛成: 0.43
+      条件付き賛成: 0.26
+      中立: 0.17
+      条件付き反対: 0.09
+      反対: 0.05
+    actual_distribution:
+      賛成: 0.45
+      条件付き賛成: 0.25
+      中立: 0.15
+      条件付き反対: 0.10
+      反対: 0.05
+
+  - case_id: "security_002"
+    theme: "日米安全保障と集団的自衛権"
+    survey_source: "内閣府「自衛隊・防衛問題に関する世論調査」2024年"
+    gate_eligible: true
+    simulated_distribution:
+      賛成: 0.34
+      条件付き賛成: 0.29
+      中立: 0.21
+      条件付き反対: 0.11
+      反対: 0.05
+    actual_distribution:
+      賛成: 0.33
+      条件付き賛成: 0.30
+      中立: 0.22
+      条件付き反対: 0.10
+      反対: 0.05

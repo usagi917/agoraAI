@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
-export interface TheaterClaim {
+interface TheaterClaim {
   agentId: string
   claimText: string
   stance: string
@@ -9,7 +9,7 @@ export interface TheaterClaim {
   timestamp: number
 }
 
-export interface TheaterStanceShift {
+interface TheaterStanceShift {
   agentId: string
   fromStance: string
   toStance: string
@@ -17,14 +17,14 @@ export interface TheaterStanceShift {
   timestamp: number
 }
 
-export interface TheaterAlliance {
+interface TheaterAlliance {
   agentIds: string[]
   stance: string
   strength: number
   timestamp: number
 }
 
-export interface TheaterDecision {
+interface TheaterDecision {
   decisionText: string
   confidence: number
   dissentCount: number

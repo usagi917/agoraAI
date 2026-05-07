@@ -173,6 +173,13 @@ async def _seed_society_first_simulation(session_factory) -> dict[str, str]:
             status="completed",
             metadata_json={
                 "run_config": {"evidence_mode": "strict", "trust_mode": "strict"},
+                "validation_summary": {
+                    "survey_anchor_status": "未検証",
+                    "distribution_error": None,
+                    "scenario_backtest_status": "no_data",
+                    "hit_rate": None,
+                    "calibration_status": "uncalibrated",
+                },
                 "society_first_result": {
                     "type": "society_first",
                     "content": "# Society First\n\n価格受容性が最大論点です。",
@@ -566,6 +573,8 @@ async def test_get_society_first_report_returns_issue_driven_payload(client, ses
     assert payload["intervention_comparison"][0]["label"] == "価格変更"
     assert payload["scenarios"][0]["description"].startswith("[価格受容性]")
     assert payload["backtest"]["summary"]["case_count"] == 0
+    assert payload["validation_summary"]["survey_anchor_status"] == "未検証"
+    assert payload["validation_summary"]["scenario_backtest_status"] == "no_data"
 
 
 @pytest.mark.asyncio
@@ -624,6 +633,8 @@ async def test_create_society_first_backtest_updates_report_and_interventions(cl
     assert report_payload["backtest"]["summary"]["case_count"] == 1
     assert report_payload["intervention_comparison"][0]["comparison_mode"] == "observed"
     assert report_payload["intervention_comparison"][0]["observed_uplift"] > 0
+    assert report_payload["validation_summary"]["scenario_backtest_status"] == "過去ケース検証あり"
+    assert report_payload["validation_summary"]["hit_rate"] == 1.0
 
 
 @pytest.mark.asyncio
@@ -682,7 +693,7 @@ async def test_create_simulation_normalizes_legacy_evidence_mode_alias(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(type(settings), "live_simulation_available", lambda self: True)
-    monkeypatch.setattr("src.app.api.routes.simulations._spawn_simulation", lambda simulation_id: None)
+    monkeypatch.setattr("src.app.api.routes.simulations.spawn_simulation", lambda simulation_id: None)
 
     response = await client.post(
         "/simulations",
@@ -712,7 +723,7 @@ async def test_create_simulation_accepts_meta_mode(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(type(settings), "live_simulation_available", lambda self: True)
-    monkeypatch.setattr("src.app.api.routes.simulations._spawn_simulation", lambda simulation_id: None)
+    monkeypatch.setattr("src.app.api.routes.simulations.spawn_simulation", lambda simulation_id: None)
 
     response = await client.post(
         "/simulations",
@@ -743,7 +754,7 @@ async def test_create_simulation_accepts_unified_mode(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(type(settings), "live_simulation_available", lambda self: True)
-    monkeypatch.setattr("src.app.api.routes.simulations._spawn_simulation", lambda simulation_id: None)
+    monkeypatch.setattr("src.app.api.routes.simulations.spawn_simulation", lambda simulation_id: None)
 
     response = await client.post(
         "/simulations",
@@ -783,6 +794,13 @@ async def _seed_unified_simulation(session_factory) -> dict[str, str]:
             status="completed",
             metadata_json={
                 "run_config": {"evidence_mode": "prefer", "trust_mode": "strict"},
+                "validation_summary": {
+                    "survey_anchor_status": "実調査アンカーあり",
+                    "distribution_error": {"kl_divergence": 0.12, "emd": 0.08},
+                    "scenario_backtest_status": "no_data",
+                    "hit_rate": None,
+                    "calibration_status": "survey_anchored",
+                },
                 "unified_result": {
                     "type": "unified",
                     "decision_brief": {
@@ -846,3 +864,5 @@ async def test_get_unified_report_returns_decision_brief(client, session_factory
     assert payload["agreement_score"] == 0.72
     assert payload["council"]["devil_advocate_summary"] == "中小企業の負担が懸念"
     assert payload["society_summary"]["aggregation"]["average_confidence"] == 0.78
+    assert payload["validation_summary"]["survey_anchor_status"] == "実調査アンカーあり"
+    assert payload["validation_summary"]["distribution_error"]["emd"] == 0.08

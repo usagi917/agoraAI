@@ -248,6 +248,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
   }
 
   function setSelectedAgents(agents: Array<{
+    id?: string
     agent_index: number
     name: string
     display_name?: string
@@ -257,7 +258,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
   }>) {
     const map = new Map<string, LiveAgentNode>()
     for (const a of agents) {
-      const id = `agent-${a.agent_index}`
+      const id = a.id || `agent-${a.agent_index}`
       const displayName = a.display_name || ''
       const fallbackLabel = `${a.occupation || '不明'}, ${a.age || '?'}歳`
       map.set(id, {

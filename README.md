@@ -6,9 +6,9 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](backend/pyproject.toml)
 [![Node.js 20+](https://img.shields.io/badge/node-20%2B-339933.svg)](frontend/package.json)
 
-> 1つの問いから、社会反応シミュレーション、代表評議会ディベート、Decision Brief 生成までを一気通貫で回せるマルチエージェント分析アプリです。`frontend` は Vue 3 + Vite、`backend` は FastAPI + async SQLAlchemy を中心に構成されています。
+> ひとつの問いを入力すると、合成人口の反応、評議会ディベート、Decision Brief までを一気通貫で生成するマルチエージェント分析アプリです。
 
-## 概要
+## これは何か
 
 - LaunchPad から4種類の質問テンプレート、または自由入力のプロンプトで分析を開始できます。
 - `quick` / `standard` / `deep` / `research` / `baseline` の5つのプリセットで、速度と深さを切り替えられます。
@@ -100,57 +100,85 @@ flowchart LR
 
 ## アーキテクチャ
 
+### システム全体
+
 ```mermaid
-flowchart TB
+flowchart LR
+    User["User"] --> Frontend
+
     subgraph Frontend["Frontend"]
-        UI["Vue 3 + Vite"]
-        STORE["Pinia stores"]
-        GRAPH["Three.js / 3d-force-graph"]
+        LaunchPad["LaunchPad / Compare / Populations"]
+        LiveUI["Live Simulation / Results"]
     end
 
     subgraph Backend["Backend"]
-        API["FastAPI REST + SSE"]
-        ORCH["Simulation dispatcher / orchestrators"]
-        SOC["Society services"]
-        LLM["Task router + multi-provider adapters"]
-        DB["Async SQLAlchemy"]
+        API["FastAPI REST API + SSE"]
+        Dispatcher["Simulation Dispatcher"]
+        Unified["Unified Orchestrator"]
+        Baseline["Baseline Orchestrator"]
     end
 
-    subgraph Data["Data / Infra"]
-        SQLITE["SQLite (local default)"]
-        POSTGRES["PostgreSQL (Compose)"]
-        REDIS["Redis (optional / Compose)"]
-        CFG["config/*.yaml"]
-        TMPL["templates/ja/*.yaml"]
+    subgraph Runtime["Data / Runtime"]
+        DB["SQLite local / PostgreSQL compose"]
+        Redis["Redis compose<br/>optional in local dev"]
+        Config["config/*.yaml"]
+        Templates["templates/ja/*.yaml"]
+        LLM["LiteLLM + provider adapters"]
     end
 
-    UI --> API
-    STORE --> API
-    GRAPH --> API
-    API --> ORCH
-    ORCH --> SOC
-    ORCH --> LLM
-    API --> DB
-    DB --> SQLITE
-    DB --> POSTGRES
-    ORCH --> CFG
-    API -. optional .-> REDIS
-    API --> TMPL
+    Frontend --> API
+    LaunchPad --> API
+    LiveUI --> API
+    API --> Dispatcher
+    Dispatcher --> Unified
+    Dispatcher --> Baseline
+    Backend --> DB
+    Backend --> Redis
+    Backend --> Config
+    Backend --> Templates
+    Unified --> LLM
+    Baseline --> LLM
 ```
 
-補足:
+### 分析パイプライン
 
-- Docker の `frontend` は Nginx で配信され、`/api` を `backend:8000` にプロキシします。
-- `backend` 起動時に `templates/ja/*.yaml` を読み込み、テンプレートを DB に seed します。
-- ローカル最小構成は SQLite 前提、Docker Compose は PostgreSQL + Redis 前提です。
+```mermaid
+flowchart TB
+    Input["1. 質問入力 + ファイル添付"] --> Create["2. POST /simulations"]
+    Create --> Dispatch["3. Dispatcher が mode を選択"]
+
+    Dispatch -->|quick / standard / deep / research| Pulse["4. Society Pulse<br/>人口生成 → 選抜 → 活性化 → 評価"]
+    Pulse --> Council["5. Council<br/>代表者選出 → 反証役設定 → 3 ラウンド議論"]
+    Council --> Synthesis["6. Synthesis<br/>Decision Brief / report 生成"]
+
+    Dispatch -->|baseline| BaselinePath["4b. 単一 LLM ベースライン分析"]
+
+    Pulse --> Stream["SSE / graph / timeline 更新"]
+    Council --> Stream
+    Synthesis --> Stream
+    BaselinePath --> Stream
+
+    Synthesis --> Results["7. Results / follow-up / rerun"]
+    BaselinePath --> Results
+```
+
+- `baseline` はマルチエージェント討議を通さず、単一 LLM で比較用の Decision Brief を生成します。
+- `scenario-pairs` は同じ母集団スナップショットから 2 本の simulation を並列実行し、比較結果をまとめます。
+
+## 使い方
+
+1. LaunchPad で質問を入力します。
+2. 必要ならファイルを添付します。
+3. シミュレーションを開始すると、ライブ画面で SSE ベースの進捗を確認できます。
+4. 完了後はレポートを確認し、follow-up や rerun を実行できます。
+5. 比較が必要な場合は `scenario-pairs` でシナリオ比較を実行できます。
 
 ## Quick Start
 
-### Docker Compose で起動
+### Docker Compose
 
 ```bash
 cp .env.example .env
-# provider が openai のままなら OPENAI_API_KEY を設定
 docker compose up --build
 ```
 
@@ -160,9 +188,9 @@ docker compose up --build
 
 注意:
 
-- `config/models.yaml` の既定 provider は `openai` です。この状態で新規シミュレーションを実行するには `OPENAI_API_KEY` が必要です。
-- `GOOGLE_API_KEY` と `ANTHROPIC_API_KEY` は、`config/llm_providers.yaml` 側で対象 provider を使うときに必要です。
-- API キー未設定でもアプリ自体は起動しますが、新規ライブ実行は無効になります。
+- 既定 provider は `openai` です。
+- 新規シミュレーションを動かすには通常 `OPENAI_API_KEY` が必要です。
+- API キーがなくてもアプリは起動しますが、ライブ実行は無効になります。
 
 ### 最小 API 例
 
@@ -188,9 +216,7 @@ curl http://localhost:8000/simulations/SIM_ID/report
 
 ## ローカル開発
 
-### 1. バックエンド
-
-`.env.example` は SQLite を指しているので、追加インフラなしでバックエンドだけ起動できます。
+### Backend
 
 ```bash
 cp .env.example .env
@@ -200,9 +226,9 @@ uv sync --extra dev
 uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 2. フロントエンド
+ローカル既定の `DATABASE_URL` は SQLite なので、追加インフラなしでも起動できます。
 
-別ターミナルで起動します。
+### Frontend
 
 ```bash
 cd frontend
@@ -211,52 +237,34 @@ pnpm dev
 ```
 
 - Frontend dev server: `http://localhost:5173`
-- Vite は `/api` を `http://localhost:8000` に proxy します。
-- `VITE_API_BASE_URL` を明示したい場合だけ `.env` で上書きしてください。
+- `VITE_API_BASE_URL` 未指定時は `/api` を使います
+- Vite が `/api` を `http://localhost:8000` にプロキシします
 
-### 3. PostgreSQL / Redis を使う場合
+### PostgreSQL / Redis を使う場合
 
 ```bash
 docker compose up -d postgres redis
 ```
 
-`.env` を Docker 構成に寄せるなら次の値を使います。
+必要なら `.env` を次の値に切り替えます。
 
 ```bash
 DATABASE_URL=postgresql+asyncpg://agentai:agentai@localhost:5432/agentai
 REDIS_URL=redis://localhost:6379/0
 ```
 
-## 設定ポイント
+## よく触る設定
 
-### 主要な環境変数
-
-| 変数 | 役割 |
+| 項目 | 場所 |
 | --- | --- |
-| `OPENAI_API_KEY` | 既定 provider (`openai`) の実行キー |
-| `GOOGLE_API_KEY` | Gemini の OpenAI 互換 endpoint を使う場合のキー |
-| `ANTHROPIC_API_KEY` | Anthropic provider 用キー |
-| `LLM_MODEL` | デフォルトモデル。`config/models.yaml` でタスク別上書き可能 |
-| `DATABASE_URL` | ローカルは SQLite、Compose は PostgreSQL を想定 |
-| `REDIS_URL` | Redis 利用時のみ必要 |
-| `COGNITIVE_MODE` | `legacy` / `advanced` の認知モード切り替え |
-| `MAX_ACTIVE_AGENTS` | 同時に管理する認知エージェント上限 |
-| `MAX_CONCURRENT_AGENTS` | 認知サイクルの同時実行上限 |
-| `MAX_CONCURRENT_COLONIES` | Colony の同時実行上限 |
+| API キーや DB 接続先 | `.env` |
+| 既定 provider とモデル | `config/models.yaml` |
+| provider 定義と fallback | `config/llm_providers.yaml` |
+| 認知・スケジューリング設定 | `config/cognitive.yaml` |
+| 実行プロファイル | `config/swarm_profiles.yaml` |
+| LaunchPad テンプレート | `templates/ja/*.yaml` |
 
-### 実装上よく触る設定ファイル
-
-| ファイル | 内容 |
-| --- | --- |
-| `config/models.yaml` | 既定 provider、既定モデル、タスク別モデル割り当て |
-| `config/llm_providers.yaml` | Society 側の provider 定義、API キー参照名、fallback 順 |
-| `config/cognitive.yaml` | BDI / ToM / scheduling / rate limiting の詳細 |
-| `config/swarm_profiles.yaml` | Colony 数や round 数などの profile 設定 |
-| `templates/ja/*.yaml` | LaunchPad のテンプレート定義。起動時に DB へ seed |
-
-## API 概要
-
-### 基本フロー
+## 主要 API
 
 | Method | Endpoint | 役割 |
 | --- | --- | --- |
@@ -273,6 +281,7 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/simulations/{sim_id}/report` | 最終レポート取得 |
 | `POST` | `/simulations/{sim_id}/followups` | 結果に対する follow-up 質問 |
 | `POST` | `/simulations/{sim_id}/rerun` | 同条件で再実行 |
+| `POST` | `/scenario-pairs` | シナリオ比較開始 |
 
 ### Society / 運用系
 
@@ -313,20 +322,20 @@ pnpm test:e2e
 
 ```text
 .
-├── backend/            # FastAPI app, async SQLAlchemy, tests, Dockerfile
-├── frontend/           # Vue 3 + Vite app, Playwright/Vitest, Dockerfile
-├── config/             # LLM / cognitive / grounding / swarm profiles
-├── templates/          # 起動時に seed されるテンプレート
-├── data/               # ローカル DB や実行データ
-├── docker-compose.yml  # frontend + backend + postgres + redis
-├── README.md           # 日本語 README
-└── README.en.md        # English README
+├── backend/       # FastAPI app, services, tests
+├── frontend/      # Vue app
+├── config/        # provider / cognitive / profile settings
+├── templates/     # seeded prompt templates
+├── data/          # local runtime data
+├── DESIGN.md      # 補足設計メモ
+└── CONTRIBUTING.md
 ```
 
-## Contributing
+## 詳細ドキュメント
 
-- 開発フローや参加ルールは [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
-- 行動規範は [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) にあります。
+- 設計メモ: [DESIGN.md](DESIGN.md)
+- コントリビュート: [CONTRIBUTING.md](CONTRIBUTING.md)
+- 行動規範: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 ## License
 

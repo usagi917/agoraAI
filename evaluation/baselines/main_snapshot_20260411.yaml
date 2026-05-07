@@ -1,0 +1,60 @@
+# 現行 main ブランチ基準スナップショット
+# branch: scenario-comparison-validation-followups-20260407
+# git_hash: 9078316b6c7ed2a7da36a527461ad269bb73dc25
+# captured: 2026-04-11
+# purpose: Step 5 deterministic gate runner の基準スナップショット
+#          EMD/JSD/Brier の改善率をこのスナップショットと比較する
+
+metadata:
+  git_hash: "9078316b6c7ed2a7da36a527461ad269bb73dc25"
+  branch: "scenario-comparison-validation-followups-20260407"
+  captured_at: "2026-04-11"
+  primary_metric: "jsd"  # 現行 accuracy_spec.py の設定（Step 3 以降 EMD に変更予定）
+  description: >
+    実装前の baseline。Step 8/9 の改善率評価（EMD 30%改善 / MAE 20%改善）の起点。
+    live 実行は未実施のため指標値は null。
+    gate_runner.py 実装後に deterministic replay で更新すること。
+
+# 現行指標の参照値
+# NOTE: 実際の live 実行結果が取得できていないため null を設定。
+# Step 5 (gate_runner.py) 実装後、fixture ベースの replay 値で更新する。
+baseline_metrics:
+  economy:
+    jsd: null      # 未計測
+    emd: null      # 未計測
+    brier: null    # 未計測
+    mae_pp: null   # 未計測
+    n_validated: 0
+    status: "not_measured"
+
+  security:
+    jsd: null
+    emd: null
+    brier: null
+    mae_pp: null
+    n_validated: 0
+    status: "not_measured"
+
+# CI ゲート参照値（現行の accuracy_spec.py より）
+ci_gate_reference:
+  primary_metric: "jsd"
+  regression_threshold: 0.02  # JSD がベースラインから 0.02 以上悪化で失敗
+
+# 計画中の指標変更（Step 3 以降）
+planned_changes:
+  primary_metric_migration: "jsd → emd"
+  new_ci_gate:
+    emd_threshold: 0.15
+    jsd_threshold: 0.10  # 副指標
+    brier_threshold: 0.30
+  release_gate:
+    min_relative_emd_improvement: 0.30
+    min_relative_mae_improvement: 0.20
+    max_live_replay_gap: 0.03
+
+# 更新手順
+update_procedure:
+  1: "Step 5 で gate_runner.py を実装後、tests/fixtures/gate/ の fixture を使用"
+  2: "run_deterministic_gate() で economy / security の EMD/JSD/Brier を計測"
+  3: "baseline_metrics を実測値で更新し、このファイルを再コミット"
+  4: "以降の実装は上記値を改善基準として使用"

@@ -95,6 +95,107 @@ def calibration_grade(ece: float | None) -> str:
     return "poor"
 
 
+def platt_recalibrate(
+    confidence: float,
+    shrink_factor: float = 0.8,
+) -> float:
+    """エージェント confidence を Platt-style で再キャリブレーションする。
+
+    データ不足時の固定補正: calibrated = 0.5 + shrink_factor * (conf - 0.5)
+    shrink_factor < 1.0 で 0.5 方向に圧縮。
+
+    Args:
+        confidence: 元の confidence (0.0〜1.0)
+        shrink_factor: 圧縮係数 (デフォルト 0.8)
+
+    Returns:
+        再キャリブレーション済み confidence (0.0〜1.0)
+    """
+    calibrated = 0.5 + shrink_factor * (confidence - 0.5)
+    return max(0.0, min(1.0, calibrated))
+
+
+def extremeness_aversion_correction(
+    distribution: dict[str, float],
+    gamma: float = 0.7,
+) -> dict[str, float]:
+    """Extremeness aversion 補正: 中庸バイアスを逆補正する。
+
+    p_k' = p_k^gamma / Σ(p_j^gamma)
+    gamma < 1.0 で両端を膨張（中立寄りバイアスを補正）。
+    gamma = 1.0 で無変更。
+
+    Args:
+        distribution: スタンス分布 (合計1.0)
+        gamma: 補正指数 (デフォルト 0.7)
+
+    Returns:
+        補正後の正規化分布
+    """
+    if gamma == 1.0:
+        return dict(distribution)
+
+    powered = {}
+    for k, v in distribution.items():
+        powered[k] = v ** gamma if v > 0 else 0.0
+
+    total = sum(powered.values())
+    if total > 0:
+        return {k: v / total for k, v in powered.items()}
+    return dict(distribution)
+
+
+class TopicShrinkCalibrator:
+    """トピック別 shrink factor でキャリブレーションする。
+
+    train() でカテゴリ別に最適な shrink factor を学習し、
+    recalibrate() でトピック別に confidence を補正する。
+    未知カテゴリは global shrink factor (デフォルト 0.8) にフォールバック。
+    """
+
+    def __init__(self, global_shrink: float = 0.8) -> None:
+        self._global_shrink = global_shrink
+        self._topic_factors: dict[str, float] = {}
+
+    def recalibrate(self, confidence: float, category: str) -> float:
+        """トピック別 shrink factor で confidence を再キャリブレーション."""
+        shrink = self._topic_factors.get(category, self._global_shrink)
+        calibrated = 0.5 + shrink * (confidence - 0.5)
+        return max(0.0, min(1.0, calibrated))
+
+    def train(self, comparisons: list[dict]) -> None:
+        """カテゴリ別 shrink factor を学習する.
+
+        各 comparison は {"category", "predicted_confidence", "actual_accuracy"} を持つ。
+        カテゴリごとに、predicted_confidence と actual_accuracy の乖離から
+        最適な shrink factor を推定する。
+        """
+        from collections import defaultdict
+
+        by_category: dict[str, list[tuple[float, float]]] = defaultdict(list)
+        for comp in comparisons:
+            cat = comp["category"]
+            by_category[cat].append(
+                (comp["predicted_confidence"], comp["actual_accuracy"])
+            )
+
+        for cat, pairs in by_category.items():
+            # 簡易推定: shrink = mean(actual - 0.5) / mean(predicted - 0.5)
+            pred_devs = [p - 0.5 for p, _ in pairs]
+            actual_devs = [a - 0.5 for _, a in pairs]
+
+            mean_pred = sum(pred_devs) / len(pred_devs) if pred_devs else 0.0
+            mean_actual = sum(actual_devs) / len(actual_devs) if actual_devs else 0.0
+
+            if abs(mean_pred) > 1e-8:
+                shrink = mean_actual / mean_pred
+                shrink = max(0.1, min(1.0, shrink))
+            else:
+                shrink = self._global_shrink
+
+            self._topic_factors[cat] = round(shrink, 4)
+
+
 def apply_transfer_calibration(
     raw_distribution: dict[str, float],
     bias_profile: BiasProfile,

@@ -1,7 +1,7 @@
 import { ref, onMounted, onUnmounted, watch, type Ref } from 'vue'
 import ForceGraph3D, { type ForceGraph3DInstance } from '3d-force-graph'
 import * as THREE from 'three'
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import type { GraphNode, GraphEdge } from '../stores/graphStore'
 import {
   createSwimMotionState,
@@ -144,8 +144,6 @@ interface InternalLink {
   interactionCount: number
   curveIndex: number
 }
-
-export type { InternalLink }
 
 interface TransitionNodeFrame extends Position {
   label: string
@@ -486,11 +484,12 @@ export function useForceGraph(
     mentions: 'M',
   }
 
-  function createEdgeLabelSprite(text: string, color: string): THREE.Sprite {
+  function createEdgeLabelSprite(text: string, color: string): THREE.Sprite | null {
     const canvas = document.createElement('canvas')
     canvas.width = 48
     canvas.height = 48
-    const ctx = canvas.getContext('2d')!
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
     ctx.fillStyle = 'rgba(16, 16, 30, 0.75)'
     ctx.beginPath()
     ctx.arc(24, 24, 20, 0, Math.PI * 2)
@@ -513,6 +512,21 @@ export function useForceGraph(
     sprite.scale.set(3, 3, 1)
     sprite.visible = false
     return sprite
+  }
+
+  function disposeEdgeLabelSprite(sprite: THREE.Sprite) {
+    edgeLabelGroup.remove(sprite)
+    const material = sprite.material
+    if (Array.isArray(material)) {
+      for (const entry of material) {
+        entry.map?.dispose()
+        entry.dispose()
+      }
+      return
+    }
+
+    material.map?.dispose()
+    material.dispose()
   }
 
   // Camera focus priority queue
@@ -902,8 +916,8 @@ export function useForceGraph(
         )
         bloomPassRef = bloomPass
         fg.postProcessingComposer().addPass(bloomPass)
-      } catch {
-        // Graceful fallback if post-processing is unavailable
+      } catch (err) {
+        console.warn('Bloom post-processing unavailable:', err)
         bloomPassRef = null
       }
 
@@ -970,6 +984,7 @@ export function useForceGraph(
         if (tickCount % 10 === 0) {
           const cam = fg.camera()
           const camPos = cam.position
+          const currentLinkIds = new Set(internalLinks.map((link) => link.id))
           const shownIds = new Set<string>()
           let labelCount = 0
 
@@ -997,7 +1012,9 @@ export function useForceGraph(
             let sprite = edgeLabelPool.get(link.id)
             if (!sprite) {
               const style = RELATION_TYPE_STYLES[link.relationType] || RELATION_TYPE_STYLES.default
-              sprite = createEdgeLabelSprite(abbrev, style.color)
+              const newSprite = createEdgeLabelSprite(abbrev, style.color)
+              if (!newSprite) continue
+              sprite = newSprite
               edgeLabelPool.set(link.id, sprite)
               edgeLabelGroup.add(sprite)
             }
@@ -1008,6 +1025,11 @@ export function useForceGraph(
 
           // Hide labels for links no longer shown
           for (const [id, sprite] of edgeLabelPool.entries()) {
+            if (!currentLinkIds.has(id)) {
+              disposeEdgeLabelSprite(sprite)
+              edgeLabelPool.delete(id)
+              continue
+            }
             if (!shownIds.has(id)) {
               sprite.visible = false
             }
@@ -1714,6 +1736,11 @@ export function useForceGraph(
     }
     resizeObserver?.disconnect()
     stopThinkingAnimation()
+    for (const sprite of edgeLabelPool.values()) {
+      disposeEdgeLabelSprite(sprite)
+    }
+    edgeLabelPool.clear()
+    sceneRef?.remove(edgeLabelGroup)
     graph.value?._destructor?.()
     graph.value = null
     graphError.value = ''

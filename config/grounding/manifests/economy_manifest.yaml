@@ -1,0 +1,117 @@
+# Economy preset — トレーニング/評価マニフェスト
+# このファイルは economy カテゴリの調査データを train/eval に分割し、
+# holdout 境界・設問正規化ルール・品質ランクを定義する。
+
+preset_id: economy
+version: "1.0"
+created: "2026-04-11"
+description: "Economy preset の survey train/eval マニフェスト"
+
+# ホールドアウト境界
+holdout_boundary:
+  method: "temporal_plus_topic"
+  description: >
+    調査年月が 2024-01 より前の調査、および技術的専門性が高いテーマは
+    eval セット（ホールドアウト）に割り当てる。
+    train/eval のテーマキーワードが重複しないことを必須とする。
+  train_period_start: "2024-01"
+  train_period_end: "2024-12"
+  eval_criteria:
+    - "調査日が 2023-12 以前（時系列ホールドアウト）"
+    - "金融政策・金利など技術的専門性が高いテーマ"
+
+# 品質ランク定義
+quality_rank_definitions:
+  A: "国家機関・中央銀行による全国調査、サンプル数 n≥2000、標準化手法"
+  B: "地域調査または n=500-1999、標準化手法"
+  C: "オンライン調査、ボランティアサンプル、非標準化手法"
+
+# 設問正規化ルール
+normalization_rules:
+  stance_scale: 5point_likert
+  stance_labels:
+    - "賛成"
+    - "条件付き賛成"
+    - "中立"
+    - "条件付き反対"
+    - "反対"
+  distribution_tolerance: 0.01  # 合計 1.0 からの許容誤差
+  direction_convention: >
+    テーマについて「肯定的・支持・現状改善あり」方向を「賛成」とする。
+    否定的フレームの質問（例: 不安を感じるか）は、元データの多数派が
+    経済懸念を示す場合でも分布を反転せず、文脈注釈 normalization_notes に記載する。
+  steps:
+    - name: "分布合計検証"
+      description: "stance_distribution の合計が 1.0 ±0.01 であることを確認"
+    - name: "欠損カテゴリ補完"
+      description: "5段階のいずれかが欠損する場合は 0.0 を補完"
+    - name: "賛否方向注釈"
+      description: "normalization_notes に賛否フレームの方向を明記"
+
+# トレーニングセット
+train_surveys:
+  - survey_id: "boj_living_2024_economy_景況感"
+    file: "boj/living_consciousness_2024.yaml"
+    theme: "景況感"
+    survey_date: "2024-03"
+    sample_size: 2182
+    method: "郵送法"
+    source: "日本銀行「生活意識に関するアンケート調査」2024年"
+    quality_rank: "A"
+    normalization_notes: "賛否方向=正（景気改善を肯定）。否定回答が多くても分布はそのまま使用。"
+
+  - survey_id: "boj_living_2024_economy_物価上昇"
+    file: "boj/living_consciousness_2024.yaml"
+    theme: "物価上昇"
+    survey_date: "2024-03"
+    sample_size: 2182
+    method: "郵送法"
+    source: "日本銀行「生活意識に関するアンケート調査」2024年"
+    quality_rank: "A"
+    normalization_notes: "賛否方向=事実確認（物価上昇の生活影響を肯定）。生活コスト上昇を懸念する層が多数。"
+
+  - survey_id: "boj_living_2024_economy_収入の見通し"
+    file: "boj/living_consciousness_2024.yaml"
+    theme: "収入の見通し"
+    survey_date: "2024-03"
+    sample_size: 2182
+    method: "郵送法"
+    source: "日本銀行「生活意識に関するアンケート調査」2024年"
+    quality_rank: "A"
+    normalization_notes: "賛否方向=正（収入増加見通しを肯定）。賃上げ期待が低水準であることに注意。"
+
+# 評価セット（ホールドアウト）
+eval_surveys:
+  - survey_id: "boj_living_2024_economy_金利政策"
+    file: "boj/living_consciousness_2024.yaml"
+    theme: "金利政策"
+    survey_date: "2024-03"
+    sample_size: 2182
+    method: "郵送法"
+    source: "日本銀行「生活意識に関するアンケート調査」2024年"
+    quality_rank: "A"
+    holdout_reason: "金融・金利政策は技術的専門性が高く、モデル汎化性評価テーマとして使用"
+    normalization_notes: "賛否方向=正（金融緩和支持を肯定）。専門知識依存度が高いため eval に配置。"
+    gate_eligible: true  # CI/release ゲート判定に使用
+
+  - survey_id: "cabinet_aging_2023_economy_老後の生活設計"
+    file: "cabinet_office/aging_society_2023.yaml"
+    theme: "老後の生活設計"
+    survey_date: "2023-09"
+    sample_size: 3000
+    method: "郵送法"
+    source: "内閣府「高齢社会に関する世論調査」2023年"
+    quality_rank: "A"
+    holdout_reason: "調査年2023年（時系列ホールドアウト。train は2024年調査のみ）"
+    normalization_notes: "賛否方向=正（老後の経済的不安を肯定として扱う）。懸念層が多数（賛成+条件付き賛成 ≈0.63）。"
+    gate_eligible: true
+
+# leakage 防止
+leakage_prevention:
+  exclude_survey_ids_from_training:
+    - "boj_living_2024_economy_金利政策"
+    - "cabinet_aging_2023_economy_老後の生活設計"
+  validation_checks:
+    - "eval survey_id がトレーニングセットに含まれないこと"
+    - "train と eval のテーマキーワードに重複がないこと"
+    - "パラメータ推定（Optuna TPE）に eval データを使用しないこと"

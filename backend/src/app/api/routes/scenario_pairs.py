@@ -15,6 +15,7 @@ from src.app.services.audit_trail_service import get_audit_trail as get_audit_tr
 from src.app.services.population_snapshot_service import create_snapshot
 from src.app.services.scenario_comparison import build_scenario_comparison
 from src.app.services.scenario_pair_factory import create_scenario_pair
+from src.app.services.simulation_dispatcher import spawn_simulation
 
 logger = logging.getLogger(__name__)
 
@@ -98,14 +99,22 @@ async def create_scenario_pair_endpoint(
     session: AsyncSession = Depends(get_session),
 ):
     """Create a new scenario pair and start both simulations."""
-    pair = await create_scenario_pair(
-        session=session,
-        population_id=body.population_id,
-        intervention_params=body.intervention_params,
-        decision_context=body.decision_context,
-        preset=body.preset,
-        seed=body.seed,
-    )
+    try:
+        pair = await create_scenario_pair(
+            session=session,
+            population_id=body.population_id,
+            intervention_params=body.intervention_params,
+            decision_context=body.decision_context,
+            preset=body.preset,
+            seed=body.seed,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    for simulation_id in (pair.baseline_simulation_id, pair.intervention_simulation_id):
+        if simulation_id:
+            spawn_simulation(simulation_id)
+
     return ScenarioPairResponse(
         id=pair.id,
         population_snapshot_id=pair.population_snapshot_id,

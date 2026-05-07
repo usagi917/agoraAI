@@ -12,7 +12,6 @@ DELETED_ORCHESTRATORS = [
 ]
 
 DELETED_SERVICE_FILES = [
-    "api/routes/runs.py",
     "api/routes/stream.py",
     "services/final_report_generator.py",
     "services/phases/pm_analysis.py",

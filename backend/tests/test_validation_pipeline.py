@@ -5,7 +5,6 @@ Phase 5: 検証パイプライン
 """
 
 import os
-import uuid
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import (
@@ -18,9 +17,9 @@ from src.app.database import Base
 # 全モデルを import して Base.metadata に登録する
 import src.app.models  # noqa: F401
 
-from src.app.models.validation_record import ValidationRecord
 from src.app.repositories.validation_repo import ValidationRepository
 from src.app.services.society.validation_pipeline import (
+    evaluate_intervention_prediction,
     register_result,
     auto_compare,
     resolve_with_actual,
@@ -48,6 +47,40 @@ async def db_session():
 
 SIM_DIST = {"賛成": 0.30, "条件付き賛成": 0.25, "中立": 0.20, "条件付き反対": 0.15, "反対": 0.10}
 ACTUAL_DIST = {"賛成": 0.25, "条件付き賛成": 0.20, "中立": 0.25, "条件付き反対": 0.15, "反対": 0.15}
+
+
+def test_evaluate_intervention_prediction_aggregates_repeated_actual_metrics():
+    result = evaluate_intervention_prediction(
+        {
+            "predictions": [
+                {
+                    "intervention_id": "price_reduction",
+                    "metric": "adoption_rate",
+                    "expected_delta": 0.08,
+                    "direction": "up",
+                }
+            ]
+        },
+        {
+            "actuals": [
+                {
+                    "intervention_id": "price_reduction",
+                    "metric": "adoption_rate",
+                    "signed_delta": 0.10,
+                },
+                {
+                    "intervention_id": "price_reduction",
+                    "metric": "adoption_rate",
+                    "signed_delta": 0.02,
+                },
+            ]
+        },
+    )
+
+    assert result["status"] == "validated"
+    assert result["direction_accuracy"] == 1.0
+    assert result["comparisons"][0]["actual_delta"] == pytest.approx(0.06)
+    assert result["mae"] == pytest.approx(0.02)
 
 
 class TestValidationRecordModel:
@@ -178,6 +211,22 @@ class TestValidationRecordModel:
             record.id, ACTUAL_DIST, "test", "2024-01"
         )
         assert resolved.validated_at is not None
+
+    @pytest.mark.asyncio
+    async def test_resolve_validation_computes_jsd(self, db_session):
+        """resolve() で jsd が自動算出される"""
+        repo = ValidationRepository(db_session)
+        record = await repo.save(
+            simulation_id="sim-jsd",
+            theme_text="test",
+            theme_category="politics",
+            simulated_distribution=SIM_DIST,
+        )
+        resolved = await repo.resolve(
+            record.id, ACTUAL_DIST, "test", "2024-01"
+        )
+        assert resolved.jsd is not None
+        assert resolved.jsd >= 0
 
 
 class TestValidationRecordQueries:
@@ -352,3 +401,133 @@ class TestValidationPipeline:
         profile = await update_bias_profile(db_session, FIXTURES_DIR)
         # プロファイルが返される（データが1件しかないので中身はシンプル）
         assert isinstance(profile, dict)
+
+
+# ===== Phase J: γ グリッドサーチ =====
+
+
+class TestFindOptimalGamma:
+    @pytest.mark.asyncio
+    async def test_returns_best_gamma(self, db_session):
+        """最適な γ (Brier スコア最小) を返す。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma
+
+        # 検証済みレコードを作成
+        r1 = await register_result(db_session, "sim-G1", "t1", "economy", SIM_DIST)
+        await resolve_with_actual(db_session, r1.id, ACTUAL_DIST, "src", "2024-01")
+        r2 = await register_result(db_session, "sim-G2", "t2", "economy", SIM_DIST)
+        await resolve_with_actual(db_session, r2.id, ACTUAL_DIST, "src", "2024-01")
+
+        result = await find_optimal_gamma(db_session)
+        assert "best_gamma" in result
+        assert isinstance(result["best_gamma"], float)
+        assert 0.3 <= result["best_gamma"] <= 1.5
+
+    @pytest.mark.asyncio
+    async def test_returns_gamma_scores(self, db_session):
+        """各 γ 候補の Brier スコアを返す。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma
+
+        r1 = await register_result(db_session, "sim-G3", "t1", "economy", SIM_DIST)
+        await resolve_with_actual(db_session, r1.id, ACTUAL_DIST, "src", "2024-01")
+
+        result = await find_optimal_gamma(db_session)
+        assert "gamma_scores" in result
+        assert len(result["gamma_scores"]) > 0
+        for entry in result["gamma_scores"]:
+            assert "gamma" in entry
+            assert "avg_brier" in entry
+
+    @pytest.mark.asyncio
+    async def test_category_filter(self, db_session):
+        """theme_category でフィルタできる。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma
+
+        r1 = await register_result(db_session, "sim-G4", "t1", "economy", SIM_DIST)
+        await resolve_with_actual(db_session, r1.id, ACTUAL_DIST, "src", "2024-01")
+        r2 = await register_result(db_session, "sim-G5", "t2", "social", SIM_DIST)
+        await resolve_with_actual(db_session, r2.id, ACTUAL_DIST, "src", "2024-01")
+
+        result = await find_optimal_gamma(db_session, theme_category="economy")
+        assert result["best_gamma"] is not None
+        assert result.get("theme_category") == "economy"
+
+    @pytest.mark.asyncio
+    async def test_no_data_returns_default(self, db_session):
+        """検証済みデータがない場合はデフォルト γ=0.7 を返す。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma
+
+        result = await find_optimal_gamma(db_session)
+        assert result["best_gamma"] == 0.7
+
+
+class TestFindOptimalGammaByCategory:
+    @pytest.mark.asyncio
+    async def test_returns_per_category_gammas(self, db_session):
+        """カテゴリ別に最適 γ を返す。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma_by_category
+
+        r1 = await register_result(db_session, "sim-GC1", "t1", "economy", SIM_DIST)
+        await resolve_with_actual(db_session, r1.id, ACTUAL_DIST, "src", "2024-01")
+        r2 = await register_result(db_session, "sim-GC2", "t2", "social", SIM_DIST)
+        await resolve_with_actual(db_session, r2.id, ACTUAL_DIST, "src", "2024-01")
+
+        result = await find_optimal_gamma_by_category(db_session)
+        assert "by_category" in result
+        assert "economy" in result["by_category"]
+        assert "social" in result["by_category"]
+        for cat_result in result["by_category"].values():
+            assert "best_gamma" in cat_result
+            assert 0.3 <= cat_result["best_gamma"] <= 1.5
+
+    @pytest.mark.asyncio
+    async def test_empty_categories_use_default(self, db_session):
+        """データなしカテゴリはデフォルト γ。"""
+        from src.app.services.society.validation_pipeline import find_optimal_gamma_by_category
+
+        result = await find_optimal_gamma_by_category(db_session)
+        assert result["by_category"] == {}
+
+
+# ===== Issue 3: gate_eligible + JSD テスト =====
+
+
+class TestGateEligibilityInSummary:
+    """build_validation_summary が gate_eligible を正しく扱うことを検証."""
+
+    def test_unknown_theme_is_not_gate_eligible(self):
+        """theme_category='unknown' のレコードは gate_eligible=False であるべき."""
+        from src.app.services.society.validation_pipeline import build_validation_summary
+
+        records = [
+            {
+                "status": "validated",
+                "gate_eligible": False,  # unknown カテゴリなので False
+                "emd": 0.05,
+                "jsd": 0.03,
+                "brier_score": 0.02,
+            }
+        ]
+        result = build_validation_summary(records, theme_category="unknown")
+        assert result["gate"] == "inconclusive"
+
+    def test_jsd_threshold_triggers_fail(self):
+        """JSD > 閾値で gate=fail になること."""
+        from src.app.services.society.validation_pipeline import (
+            build_validation_summary,
+            GATE_JSD_THRESHOLD,
+        )
+
+        # EMD/Brier は pass レベル、JSD だけ閾値超え
+        records = [
+            {
+                "status": "validated",
+                "gate_eligible": True,
+                "emd": 0.03,
+                "jsd": GATE_JSD_THRESHOLD + 0.05,
+                "brier_score": 0.02,
+            }
+            for _ in range(5)
+        ]
+        result = build_validation_summary(records, theme_category="politics")
+        assert result["gate"] == "fail"
