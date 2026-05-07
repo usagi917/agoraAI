@@ -51,7 +51,7 @@ def _normalize_responses(responses: list[dict]) -> list[dict]:
 async def run_time_axis_pipeline(
     simulation_id: str,
     base_responses: list[dict],
-    base_edges: list[tuple[int, int]],
+    base_edges: list[tuple[Any, Any]],
     theme: str,
     sse_manager: SSEPublisher | None = None,
     num_cascade_rounds: int = 5,

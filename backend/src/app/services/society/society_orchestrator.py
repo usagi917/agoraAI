@@ -1321,15 +1321,23 @@ async def run_society(simulation_id: str) -> None:
                     from src.app.services.society.time_axis_runner import (
                         run_time_axis_pipeline,
                     )
-                    edges_list = [
-                        (int(e.from_agent_id), int(e.to_agent_id))
-                        for e in (await session.execute(
-                            select(SocialEdge).where(SocialEdge.population_id == pop_id)
-                        )).scalars().all()
+                    edge_rows = (await session.execute(
+                        select(SocialEdge).where(SocialEdge.population_id == pop_id)
+                    )).scalars().all()
+                    edges_list: list[tuple] = [
+                        (e.agent_id, e.target_id) for e in edge_rows
                     ]
+                    base_responses: list[dict] = []
+                    for agent, resp in zip(
+                        selected_agents, activation_result.get("responses", [])
+                    ):
+                        base_responses.append({
+                            **resp,
+                            "agent_id": agent["id"],
+                        })
                     time_axis_report = await run_time_axis_pipeline(
                         simulation_id=simulation_id,
-                        base_responses=activation_result.get("responses", []),
+                        base_responses=base_responses,
                         base_edges=edges_list,
                         theme=theme,
                         sse_manager=sse_manager,
@@ -1340,8 +1348,17 @@ async def run_society(simulation_id: str) -> None:
                     }
                     await session.commit()
                     time_axis_available = True
-                except Exception:
-                    logger.exception("time-axis pipeline failed for sim %s", simulation_id)
+                except Exception as time_axis_exc:
+                    logger.exception(
+                        "time-axis pipeline failed for sim %s", simulation_id
+                    )
+                    sim.metadata_json = {
+                        **dict(sim.metadata_json or {}),
+                        "time_axis_error": (
+                            f"{type(time_axis_exc).__name__}: {time_axis_exc}"
+                        )[:500],
+                    }
+                    await session.commit()
 
             await sse_manager.publish(simulation_id, "society_completed", {
                 "simulation_id": simulation_id,

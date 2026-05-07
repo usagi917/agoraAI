@@ -1168,3 +1168,293 @@ class TestRunSocietyPipelineFixes:
         assert observed_dirs == [
             str(orchestrator.settings.config_dir / "grounding" / "survey_data")
         ]
+
+
+class TestTimeAxisIntegration:
+    """time_axis_orchestrator フックが SocialEdge と正しく連携することを検証する."""
+
+    @pytest.mark.asyncio
+    async def test_time_axis_uses_social_edge_canonical_fields_and_persists(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        from src.app.services.society import society_orchestrator as orchestrator
+
+        edge_rows = [
+            SimpleNamespace(agent_id="a1", target_id="a2"),
+            SimpleNamespace(agent_id="a2", target_id="a3"),
+        ]
+
+        class FakeSession:
+            def __init__(self):
+                self.simulation = SimpleNamespace(
+                    id="sim-1",
+                    prompt_text="日本の経済政策について",
+                    population_id=None,
+                    status="running",
+                    completed_at=None,
+                    metadata_json={},
+                    error_message=None,
+                    seed=42,
+                    scenario_pair_id=None,
+                )
+
+            async def get(self, model, obj_id):
+                return self.simulation
+
+            def add(self, obj):
+                pass
+
+            async def commit(self):
+                pass
+
+            async def rollback(self):
+                pass
+
+            async def execute(self, stmt):
+                return SimpleNamespace(
+                    scalar=lambda: len(edge_rows),
+                    scalars=lambda: SimpleNamespace(all=lambda: edge_rows),
+                    scalar_one_or_none=lambda: self.simulation,
+                )
+
+        class FakeSessionContext:
+            def __init__(self, session):
+                self.session = session
+
+            async def __aenter__(self):
+                return self.session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        fake_session = FakeSession()
+
+        async def fake_get_or_create_population(
+            session, population_id, count=None, seed=None, *, strict=False
+        ):
+            return "pop-1", [
+                {"id": "a1", "demographics": {"age": 35, "region": "関東（都市部）", "occupation": "会社員"}},
+                {"id": "a2", "demographics": {"age": 62, "region": "九州", "occupation": "自営業"}},
+                {"id": "a3", "demographics": {"age": 28, "region": "関東（都市部）", "occupation": "学生"}},
+            ]
+
+        async def fake_publish(simulation_id, event, data):
+            return None
+
+        async def fake_select_agents(agents, theme, target_count=100, edges=None):
+            return agents
+
+        async def fake_run_activation(selected_agents, theme, on_progress=None):
+            return {
+                "aggregation": {
+                    "stance_distribution": {"賛成": 0.34, "反対": 0.33, "中立": 0.33},
+                    "total_respondents": 3,
+                },
+                "representatives": [{"id": "a1"}, {"id": "a2"}, {"id": "a3"}],
+                "responses": [
+                    {"stance": "賛成", "confidence": 0.8, "reason": "r1", "concern": ""},
+                    {"stance": "反対", "confidence": 0.7, "reason": "r2", "concern": ""},
+                    {"stance": "中立", "confidence": 0.5, "reason": "r3", "concern": ""},
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+
+        async def fake_evaluate_society_simulation(selected_agents, responses):
+            return [{"metric_name": "diversity", "score": 0.5, "details": {}}]
+
+        async def fake_run_meeting(participants, theme, simulation_id=None, num_rounds=3):
+            return {
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                "rounds": [],
+                "participants": [],
+                "synthesis": {"consensus_points": [], "key_insights": []},
+            }
+
+        async def fake_run_network_propagation(*args, **kwargs):
+            raise RuntimeError("skip propagation")
+
+        captured: dict = {}
+
+        async def fake_run_time_axis_pipeline(
+            simulation_id, base_responses, base_edges, theme, sse_manager=None,
+            num_cascade_rounds=5, n_particles=32,
+        ):
+            captured["simulation_id"] = simulation_id
+            captured["base_responses"] = base_responses
+            captured["base_edges"] = base_edges
+            captured["theme"] = theme
+            return {
+                "timeline": [{"key": "t0", "label": "現在", "distribution": {"賛成": 1.0}}],
+                "horizons": 1,
+            }
+
+        import src.app.services.society.time_axis_runner as time_axis_runner
+        monkeypatch.setattr(
+            time_axis_runner, "run_time_axis_pipeline", fake_run_time_axis_pipeline
+        )
+
+        monkeypatch.setattr(orchestrator, "async_session", lambda: FakeSessionContext(fake_session))
+        monkeypatch.setattr(orchestrator, "_get_or_create_population", fake_get_or_create_population)
+        monkeypatch.setattr(orchestrator.sse_manager, "publish", fake_publish)
+        monkeypatch.setattr(orchestrator, "_save_network", AsyncMock())
+        monkeypatch.setattr(orchestrator, "_load_population_edges", AsyncMock(return_value=[]))
+        monkeypatch.setattr(orchestrator, "select_agents", fake_select_agents)
+        monkeypatch.setattr(orchestrator, "run_activation", fake_run_activation)
+        monkeypatch.setattr(orchestrator, "run_network_propagation", fake_run_network_propagation)
+        monkeypatch.setattr(orchestrator, "_apply_independence_re_aggregation", lambda *a, **kw: {})
+        monkeypatch.setattr(orchestrator, "evaluate_society_simulation", fake_evaluate_society_simulation)
+        monkeypatch.setattr(orchestrator, "select_representatives", lambda *args, **kwargs: [])
+        monkeypatch.setattr(orchestrator, "run_meeting", fake_run_meeting)
+        monkeypatch.setattr(orchestrator, "generate_meeting_report", lambda meeting_result: {"summary": "ok"})
+        monkeypatch.setattr(orchestrator, "update_agent_memories", AsyncMock())
+        monkeypatch.setattr(orchestrator, "evolve_social_graph", AsyncMock())
+        monkeypatch.setattr(orchestrator, "load_grounding_facts", lambda theme: [])
+        monkeypatch.setattr(orchestrator, "distribute_facts_to_agents", lambda agents, facts: {})
+        monkeypatch.setattr(orchestrator, "refresh_scenario_pair_status", AsyncMock())
+
+        from src.app.services.society import validation_pipeline
+
+        async def fake_register_result(session, simulation_id, theme, theme_category, distribution, **kwargs):
+            return {"id": "validation-1"}
+
+        async def fake_auto_compare(session, validation_record, survey_data_dir):
+            return None
+
+        monkeypatch.setattr(validation_pipeline, "register_result", fake_register_result)
+        monkeypatch.setattr(validation_pipeline, "auto_compare", fake_auto_compare)
+
+        await orchestrator.run_society("sim-1")
+
+        # 1) edges_list は SocialEdge.agent_id / target_id (UUID 文字列) から作られる
+        assert captured["base_edges"] == [("a1", "a2"), ("a2", "a3")]
+
+        # 2) responses も同じ UUID で agent_id がタグ付けされ cascade_propagator に渡る
+        assert [r["agent_id"] for r in captured["base_responses"]] == ["a1", "a2", "a3"]
+
+        # 3) 成功時は metadata_json["time_axis_result"] が永続化される
+        assert "time_axis_result" in fake_session.simulation.metadata_json
+        assert "time_axis_error" not in fake_session.simulation.metadata_json
+        assert fake_session.simulation.status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_time_axis_failure_is_recorded_in_metadata(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """pipeline が失敗しても simulation 自体は completed になり、エラーが metadata に残る."""
+        from src.app.services.society import society_orchestrator as orchestrator
+
+        class FakeSession:
+            def __init__(self):
+                self.simulation = SimpleNamespace(
+                    id="sim-2",
+                    prompt_text="テーマ",
+                    population_id=None,
+                    status="running",
+                    completed_at=None,
+                    metadata_json={},
+                    error_message=None,
+                    seed=1,
+                    scenario_pair_id=None,
+                )
+
+            async def get(self, model, obj_id):
+                return self.simulation
+
+            def add(self, obj):
+                pass
+
+            async def commit(self):
+                pass
+
+            async def rollback(self):
+                pass
+
+            async def execute(self, stmt):
+                return SimpleNamespace(
+                    scalar=lambda: 0,
+                    scalars=lambda: SimpleNamespace(all=lambda: []),
+                )
+
+        class FakeSessionContext:
+            def __init__(self, session):
+                self.session = session
+
+            async def __aenter__(self):
+                return self.session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        fake_session = FakeSession()
+
+        async def fake_get_or_create_population(session, population_id, count=None, seed=None, *, strict=False):
+            return "pop-1", [{"id": "a1", "demographics": {"age": 35, "region": "関東（都市部）", "occupation": "会社員"}}]
+
+        async def fake_publish(simulation_id, event, data):
+            return None
+
+        async def fake_select_agents(agents, theme, target_count=100, edges=None):
+            return agents
+
+        async def fake_run_activation(selected_agents, theme, on_progress=None):
+            return {
+                "aggregation": {"stance_distribution": {"賛成": 1.0}, "total_respondents": 1},
+                "representatives": [{"id": "a1"}],
+                "responses": [{"stance": "賛成", "confidence": 0.8, "reason": "r"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+
+        async def fake_evaluate_society_simulation(selected_agents, responses):
+            return [{"metric_name": "diversity", "score": 0.5, "details": {}}]
+
+        async def fake_run_meeting(participants, theme, simulation_id=None, num_rounds=3):
+            return {
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                "rounds": [],
+                "participants": [],
+                "synthesis": {"consensus_points": [], "key_insights": []},
+            }
+
+        async def boom(*args, **kwargs):
+            raise RuntimeError("simulated time-axis failure")
+
+        import src.app.services.society.time_axis_runner as time_axis_runner
+        monkeypatch.setattr(time_axis_runner, "run_time_axis_pipeline", boom)
+
+        monkeypatch.setattr(orchestrator, "async_session", lambda: FakeSessionContext(fake_session))
+        monkeypatch.setattr(orchestrator, "_get_or_create_population", fake_get_or_create_population)
+        monkeypatch.setattr(orchestrator.sse_manager, "publish", fake_publish)
+        monkeypatch.setattr(orchestrator, "_save_network", AsyncMock())
+        monkeypatch.setattr(orchestrator, "_load_population_edges", AsyncMock(return_value=[]))
+        monkeypatch.setattr(orchestrator, "select_agents", fake_select_agents)
+        monkeypatch.setattr(orchestrator, "run_activation", fake_run_activation)
+        monkeypatch.setattr(orchestrator, "run_network_propagation", AsyncMock(side_effect=RuntimeError("skip")))
+        monkeypatch.setattr(orchestrator, "_apply_independence_re_aggregation", lambda *a, **kw: {})
+        monkeypatch.setattr(orchestrator, "evaluate_society_simulation", fake_evaluate_society_simulation)
+        monkeypatch.setattr(orchestrator, "select_representatives", lambda *args, **kwargs: [])
+        monkeypatch.setattr(orchestrator, "run_meeting", fake_run_meeting)
+        monkeypatch.setattr(orchestrator, "generate_meeting_report", lambda meeting_result: {"summary": "ok"})
+        monkeypatch.setattr(orchestrator, "update_agent_memories", AsyncMock())
+        monkeypatch.setattr(orchestrator, "evolve_social_graph", AsyncMock())
+        monkeypatch.setattr(orchestrator, "load_grounding_facts", lambda theme: [])
+        monkeypatch.setattr(orchestrator, "distribute_facts_to_agents", lambda agents, facts: {})
+        monkeypatch.setattr(orchestrator, "refresh_scenario_pair_status", AsyncMock())
+
+        from src.app.services.society import validation_pipeline
+        async def fake_register_result(*args, **kwargs):
+            return {"id": "validation-2"}
+
+        async def fake_auto_compare(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr(validation_pipeline, "register_result", fake_register_result)
+        monkeypatch.setattr(validation_pipeline, "auto_compare", fake_auto_compare)
+
+        await orchestrator.run_society("sim-2")
+
+        # 失敗しても全体は completed
+        assert fake_session.simulation.status == "completed"
+        # エラーは metadata_json に記録される
+        assert "time_axis_error" in fake_session.simulation.metadata_json
+        assert "RuntimeError" in fake_session.simulation.metadata_json["time_axis_error"]
+        assert "time_axis_result" not in fake_session.simulation.metadata_json
