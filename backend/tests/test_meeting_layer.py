@@ -250,6 +250,120 @@ class TestMeetingStreamPayloads:
         assert payload["arguments"][0]["participant_index"] == 42
         assert payload["arguments"][0]["argument"] == round_args[0]["argument"]
 
+    @pytest.mark.asyncio
+    async def test_run_meeting_can_suppress_lifecycle_events(self):
+        participants = [{
+            "role": "citizen_representative",
+            "display_name": "田中太郎",
+            "agent_profile": {"agent_index": 42, "demographics": {}, "speech_style": "自然"},
+            "response": {"stance": "賛成", "confidence": 0.8, "reason": "利便性"},
+        }]
+        round_args = [{
+            "participant_index": 42,
+            "participant_name": "田中太郎",
+            "role": "citizen_representative",
+            "expertise": "",
+            "round": 1,
+            "position": "賛成",
+            "argument": "段階的導入が妥当です。",
+            "evidence": "",
+            "addressed_to": "",
+            "addressed_to_participant_index": None,
+            "belief_update": "",
+            "concerns": [],
+            "questions_to_others": [],
+            "is_devil_advocate": False,
+            "usage": {},
+        }]
+
+        with patch("src.app.services.society.meeting_layer._run_meeting_round", new=AsyncMock(return_value=round_args)), \
+             patch("src.app.services.society.meeting_layer._run_synthesis", new=AsyncMock(return_value=({}, {}))), \
+             patch.object(sse_manager, "publish", new=AsyncMock()) as publish_mock:
+            await run_meeting(
+                participants,
+                "テスト政策",
+                simulation_id="sim-1",
+                num_rounds=1,
+                emit_lifecycle_events=False,
+            )
+
+        events = [call.args[1] for call in publish_mock.await_args_list]
+        assert "meeting_started" not in events
+        assert "meeting_completed" not in events
+        assert events.count("meeting_round_completed") == 1
+
+    @pytest.mark.asyncio
+    async def test_direct_exchanges_match_partial_participant_names(self):
+        participants = [
+            {
+                "role": "citizen_representative",
+                "display_name": "田中太郎（会社員・40歳・東京）",
+                "agent_profile": {
+                    "agent_index": 1,
+                    "llm_backend": "openai",
+                    "demographics": {},
+                    "speech_style": "自然",
+                },
+                "response": {"stance": "賛成"},
+            },
+            {
+                "role": "citizen_representative",
+                "display_name": "佐藤花子（自営業・68歳・大阪）",
+                "agent_profile": {
+                    "agent_index": 2,
+                    "llm_backend": "openai",
+                    "demographics": {},
+                    "speech_style": "自然",
+                },
+                "response": {"stance": "反対"},
+            },
+        ]
+        arguments = [
+            {
+                "participant_index": 1,
+                "participant_name": "田中太郎（会社員・40歳・東京）",
+                "role": "citizen_representative",
+                "position": "賛成",
+                "argument": "制度維持には負担増が必要です。",
+            },
+            {
+                "participant_index": 2,
+                "participant_name": "佐藤花子（自営業・68歳・大阪）",
+                "role": "citizen_representative",
+                "position": "反対",
+                "argument": "急な負担増は生活に響きます。",
+            },
+        ]
+        moderator_result = {
+            "pairs": [{
+                "participant_a": "田中太郎",
+                "participant_b": "佐藤花子さん",
+                "tension_topic": "負担増の公平性",
+            }]
+        }
+        exchange_results = [
+            ({"position": "条件付き賛成", "argument": "段階導入なら理解を得やすいです。"}, {}),
+            ({"position": "反対", "argument": "低所得者への配慮が不可欠です。"}, {}),
+        ]
+
+        with patch.object(meeting_layer.multi_llm_client, "initialize"), \
+             patch.object(meeting_layer.multi_llm_client, "call", new=AsyncMock(return_value=(moderator_result, {}))), \
+             patch.object(meeting_layer.multi_llm_client, "call_batch_by_provider", new=AsyncMock(return_value=exchange_results)), \
+             patch.object(sse_manager, "publish", new=AsyncMock()):
+            exchanges = await meeting_layer._run_direct_exchanges(
+                arguments,
+                participants,
+                "高齢者の保険負担",
+                round_number=1,
+                simulation_id="sim-1",
+            )
+
+        assert len(exchanges) == 2
+        assert exchanges[0]["participant_index"] == 1
+        assert exchanges[0]["addressed_to_participant_index"] == 2
+        assert exchanges[1]["participant_index"] == 2
+        assert exchanges[1]["addressed_to_participant_index"] == 1
+
 
 class TestBalancedBriefing:
     def test_balanced_briefing_contains_pro_and_con(self):

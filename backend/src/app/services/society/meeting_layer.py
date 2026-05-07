@@ -28,18 +28,49 @@ def _normalize_participant_name(name: str) -> str:
     return " ".join(str(name).split()).strip()
 
 
+def _canonical_participant_name(name: str) -> str:
+    normalized = _normalize_participant_name(name)
+    for suffix in ("さん", "氏", "様"):
+        if normalized.endswith(suffix):
+            normalized = normalized[: -len(suffix)]
+            break
+    return normalized
+
+
 def _match_participant_index_by_name(name: str, participants: list[dict]) -> int | None:
     """参加者名から agent_index を逆引きする。"""
-    normalized = _normalize_participant_name(name)
+    normalized = _canonical_participant_name(name)
     if not normalized:
         return None
 
     for participant in participants:
-        display_name = _normalize_participant_name(participant.get("display_name", ""))
+        display_name = _canonical_participant_name(participant.get("display_name", ""))
         if not display_name:
             continue
         if normalized == display_name or normalized in display_name or display_name in normalized:
             return _resolve_participant_index(participant, -1)
+    return None
+
+
+def _find_by_participant_name(name: str, candidates: dict[str, dict]) -> dict | None:
+    """LLM が返した参加者名を、完全一致または表示名の部分一致で解決する。"""
+    if name in candidates:
+        return candidates[name]
+
+    normalized = _canonical_participant_name(name)
+    if not normalized:
+        return None
+
+    for candidate_name, candidate in candidates.items():
+        candidate_normalized = _canonical_participant_name(candidate_name)
+        if not candidate_normalized:
+            continue
+        if (
+            normalized == candidate_normalized
+            or normalized in candidate_normalized
+            or candidate_normalized in normalized
+        ):
+            return candidate
     return None
 
 
@@ -608,20 +639,33 @@ async def _run_direct_exchanges(
         name_b = pair.get("participant_b", "")
         tension = pair.get("tension_topic", "")
 
-        arg_a = name_to_arg.get(name_a)
-        arg_b = name_to_arg.get(name_b)
+        arg_a = _find_by_participant_name(name_a, name_to_arg)
+        arg_b = _find_by_participant_name(name_b, name_to_arg)
         if not arg_a or not arg_b:
+            logger.info(
+                "Skipping direct exchange pair: argument participant not found (%s, %s)",
+                name_a,
+                name_b,
+            )
             continue
 
-        part_a = name_to_participant.get(name_a)
-        part_b = name_to_participant.get(name_b)
+        part_a = _find_by_participant_name(name_a, name_to_participant)
+        part_b = _find_by_participant_name(name_b, name_to_participant)
         if not part_a or not part_b:
+            logger.info(
+                "Skipping direct exchange pair: participant profile not found (%s, %s)",
+                name_a,
+                name_b,
+            )
             continue
+
+        resolved_name_a = arg_a.get("participant_name") or part_a.get("display_name") or name_a
+        resolved_name_b = arg_b.get("participant_name") or part_b.get("display_name") or name_b
 
         # A が B に応答
         exchange_system_a = _build_meeting_system_prompt(part_a, theme, f"直接対話（{tension}）")
         exchange_user_a = (
-            f"{name_b}さんの主張:\n「{arg_b.get('argument', '')}」\n\n"
+            f"{resolved_name_b}さんの主張:\n「{arg_b.get('argument', '')}」\n\n"
             f"論点: {tension}\n\n"
             f"この主張に対して直接応答してください。同意できる部分と反論すべき部分を明確にしてください。\n"
             f"300文字以上で、具体的に応答してください。"
@@ -630,7 +674,7 @@ async def _run_direct_exchanges(
         # B が A に応答
         exchange_system_b = _build_meeting_system_prompt(part_b, theme, f"直接対話（{tension}）")
         exchange_user_b = (
-            f"{name_a}さんの主張:\n「{arg_a.get('argument', '')}」\n\n"
+            f"{resolved_name_a}さんの主張:\n「{arg_a.get('argument', '')}」\n\n"
             f"論点: {tension}\n\n"
             f"この主張に対して直接応答してください。同意できる部分と反論すべき部分を明確にしてください。\n"
             f"300文字以上で、具体的に応答してください。"
@@ -664,8 +708,8 @@ async def _run_direct_exchanges(
         results = await multi_llm_client.call_batch_by_provider(calls, max_concurrency=2)
 
         for idx, (result, usage) in enumerate(results):
-            responder = name_a if idx == 0 else name_b
-            addressed = name_b if idx == 0 else name_a
+            responder = resolved_name_a if idx == 0 else resolved_name_b
+            addressed = resolved_name_b if idx == 0 else resolved_name_a
             resp_participant = part_a if idx == 0 else part_b
             participant_index = _resolve_participant_index(resp_participant, -1)
             addressed_to_participant_index = _resolve_participant_index(part_b if idx == 0 else part_a, -1)
@@ -825,6 +869,7 @@ async def run_meeting(
     simulation_id: str | None = None,
     num_rounds: int = 3,
     session: Any = None,
+    emit_lifecycle_events: bool = True,
 ) -> dict[str, Any]:
     """Meeting Layer を実行する。
 
@@ -857,7 +902,7 @@ async def run_meeting(
             grounding_facts.extend(facts)
     balanced_briefing = _build_balanced_briefing(theme, grounding_facts if grounding_facts else None)
 
-    if simulation_id:
+    if simulation_id and emit_lifecycle_events:
         await sse_manager.publish(simulation_id, "meeting_started", {
             "participant_count": len(participants),
             "num_rounds": min(num_rounds, len(round_names)),
@@ -927,7 +972,7 @@ async def run_meeting(
     total_usage["completion_tokens"] += synth_usage.get("completion_tokens", 0)
     total_usage["total_tokens"] += synth_usage.get("total_tokens", 0)
 
-    if simulation_id:
+    if simulation_id and emit_lifecycle_events:
         await sse_manager.publish(simulation_id, "meeting_completed", {
             "rounds": len(all_arguments),
             "synthesis_available": bool(synthesis),

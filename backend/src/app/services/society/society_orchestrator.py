@@ -445,6 +445,7 @@ async def run_society(simulation_id: str) -> None:
             return
 
         theme = sim.prompt_text
+        scenario_pair_id = getattr(sim, "scenario_pair_id", None)
         total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
         try:
@@ -462,7 +463,7 @@ async def run_society(simulation_id: str) -> None:
 
             pop_id, agents = await _get_or_create_population(
                 session, sim.population_id, pop_count, seed=sim.seed,
-                strict=bool(getattr(sim, "scenario_pair_id", None)),
+                strict=bool(scenario_pair_id),
             )
             sim.population_id = pop_id
             await session.commit()
@@ -1380,10 +1381,12 @@ async def run_society(simulation_id: str) -> None:
         except Exception as e:
             logger.error("Society simulation %s failed: %s", simulation_id, e, exc_info=True)
             await session.rollback()
-            sim.status = "failed"
-            sim.error_message = f"{type(e).__name__}: {e}"[:500]
-            await refresh_scenario_pair_status(session, getattr(sim, "scenario_pair_id", None))
-            await session.commit()
+            failed_sim = await session.get(Simulation, simulation_id)
+            if failed_sim:
+                failed_sim.status = "failed"
+                failed_sim.error_message = f"{type(e).__name__}: {e}"[:500]
+                await refresh_scenario_pair_status(session, scenario_pair_id)
+                await session.commit()
 
             await sse_manager.publish(simulation_id, "simulation_failed", {
                 "simulation_id": simulation_id,

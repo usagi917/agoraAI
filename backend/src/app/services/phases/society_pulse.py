@@ -20,7 +20,6 @@ from src.app.services.society.agent_selector import select_agents
 from src.app.services.society.activation_layer import run_activation
 from src.app.services.society.evaluation import evaluate_society_simulation
 from src.app.services.society.persona_generator import (
-    generate_persona_narratives,
     generate_persona_narratives_post_activation,
 )
 from src.app.services.society.representative_selector import select_representatives
@@ -275,10 +274,10 @@ async def run_society_pulse(
     })
 
     # === Validation Summary ===
-    theme_category = _estimate_theme_category(theme, [])
+    theme_estimate = _estimate_theme_category(theme, [])
     validation_summary = build_validation_summary(
         theme=theme,
-        theme_category=theme_category.category,
+        theme_category=theme_estimate.category,
         distribution=activation_result["aggregation"].get("stance_distribution", {}),
     )
     if validation_summary.get("corrected_distribution"):
@@ -306,9 +305,10 @@ async def run_society_pulse(
             session,
             simulation_id=simulation_id,
             theme=theme,
-            theme_category=theme_category,
+            theme_category=theme_estimate.category,
             distribution=activation_result["aggregation"].get("stance_distribution", {}),
             calibrated_distribution=validation_summary.get("corrected_distribution"),
+            theme_category_estimate=theme_estimate,
         )
         comparison = await auto_compare(
             session,
@@ -331,12 +331,13 @@ async def run_society_pulse(
             session,
             simulation_id=simulation_id,
             prediction_type="distribution",
-            theme_category=theme_category,
+            theme_category=theme_estimate.category,
             source="society_pulse",
             predicted_payload=build_distribution_prediction_payload(activation_result["aggregation"]),
             actual_payload=actual_payload,
         )
     except Exception as exc:
+        await session.rollback()
         logger.warning("Validation record persistence failed, continuing: %s", exc)
 
     # === Demographic Analysis ===

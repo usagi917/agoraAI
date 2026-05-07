@@ -44,6 +44,7 @@ class TestRunSocietyPulse:
         )
 
         mock_session = AsyncMock()
+        mock_session.add = MagicMock()
         mock_sim = MagicMock()
         mock_sim.id = "sim-1"
         mock_sim.population_id = None
@@ -75,6 +76,19 @@ class TestRunSocietyPulse:
             {"metric_name": "consistency", "score": 0.7, "details": {}},
             {"metric_name": "calibration", "score": 0.65, "details": {}},
         ]
+        observed_register_kwargs = {}
+        observed_prediction_kwargs = {}
+
+        async def fake_register_result(*args, **kwargs):
+            observed_register_kwargs.update(kwargs)
+            return {"id": "validation-1"}
+
+        async def fake_auto_compare(*args, **kwargs):
+            return None
+
+        async def fake_register_prediction_evaluation(*args, **kwargs):
+            observed_prediction_kwargs.update(kwargs)
+            return {"id": "prediction-1"}
 
         with (
             patch(
@@ -115,6 +129,18 @@ class TestRunSocietyPulse:
                 "src.app.services.phases.society_pulse.select_representatives",
                 return_value=[{"role": "citizen_representative", "agent_profile": fake_agents[0]}],
             ),
+            patch(
+                "src.app.services.phases.society_pulse.register_result",
+                new=fake_register_result,
+            ),
+            patch(
+                "src.app.services.phases.society_pulse.auto_compare",
+                new=fake_auto_compare,
+            ),
+            patch(
+                "src.app.services.phases.society_pulse.register_prediction_evaluation",
+                new=fake_register_prediction_evaluation,
+            ),
             patch("src.app.services.phases.society_pulse.sse_manager") as mock_sse,
         ):
             mock_sse.publish = AsyncMock()
@@ -127,6 +153,10 @@ class TestRunSocietyPulse:
         assert result.aggregation["average_confidence"] == 0.75
         assert result.evaluation["consistency"] == 0.7
         assert result.usage["total_tokens"] == 700
+        assert observed_register_kwargs["theme_category"] == "politics"
+        assert isinstance(observed_register_kwargs["theme_category"], str)
+        assert observed_register_kwargs["theme_category_estimate"].category == "politics"
+        assert observed_prediction_kwargs["theme_category"] == "politics"
 
 
 # ---------------------------------------------------------------------------
@@ -429,10 +459,13 @@ class TestUnifiedOrchestrator:
         mock_sim.prompt_text = "test theme"
         mock_sim.metadata_json = {}
         mock_sim.status = "running"
+        mock_sim.run_id = None
+        mock_sim.scenario_pair_id = None
 
         mock_session = AsyncMock()
         mock_session.get = AsyncMock(return_value=mock_sim)
         mock_session.commit = AsyncMock()
+        mock_session.add = MagicMock()
 
         with (
             patch("src.app.services.unified_orchestrator.async_session") as mock_async_session,
@@ -451,6 +484,10 @@ class TestUnifiedOrchestrator:
                 new_callable=AsyncMock,
                 return_value=mock_synthesis,
             ) as mock_phase3,
+            patch(
+                "src.app.services.unified_orchestrator._acc_flags.is_enabled",
+                return_value=False,
+            ),
             patch("src.app.services.unified_orchestrator.sse_manager") as mock_sse,
         ):
             mock_sse.publish = AsyncMock()
@@ -465,6 +502,300 @@ class TestUnifiedOrchestrator:
         mock_phase2.assert_called_once()
         mock_phase3.assert_called_once()
         assert mock_sim.status == "completed"
+        assert mock_sim.metadata_json["pulse_result"]["representatives"] == mock_pulse.representatives
+        assert mock_sim.metadata_json["council_result"]["rounds"] == mock_council.rounds
+        assert mock_sim.metadata_json["council_result"]["synthesis"] == mock_council.synthesis
+
+    @pytest.mark.asyncio
+    async def test_pulse_checkpoint_does_not_read_expired_metadata_after_nonfatal_rollback(self):
+        """validation persistence rollback 後も pulse checkpoint 保存を継続する。"""
+        from src.app.services.phases.society_pulse import SocietyPulseResult
+        from src.app.services.phases.council_deliberation import CouncilResult
+        from src.app.services.phases.synthesis import SynthesisResult
+
+        class ExpiringSimulation:
+            id = "sim-1"
+            prompt_text = "test theme"
+            status = "running"
+            run_id = None
+            scenario_pair_id = None
+
+            def __init__(self):
+                self._metadata_json = {}
+                self.metadata_expired = False
+
+            @property
+            def metadata_json(self):
+                if self.metadata_expired:
+                    raise AssertionError("metadata_json was read after rollback expiration")
+                return self._metadata_json
+
+            @metadata_json.setter
+            def metadata_json(self, value):
+                self.metadata_expired = False
+                self._metadata_json = value
+
+        mock_sim = ExpiringSimulation()
+        mock_pulse = SocietyPulseResult(
+            agents=[], responses=[], aggregation={},
+            evaluation={}, representatives=[], usage={},
+            validation_summary={"status": "validation persisted before rollback"},
+        )
+        mock_council = CouncilResult(
+            participants=[], rounds=[], synthesis={},
+            devil_advocate_summary="", usage={},
+        )
+        mock_synthesis = SynthesisResult(
+            decision_brief={"recommendation": "Go", "agreement_score": 0.8},
+            agreement_score=0.8,
+            content="# Report",
+            sections={},
+        )
+
+        async def pulse_with_nonfatal_rollback(*args, **kwargs):
+            mock_sim.metadata_expired = True
+            return mock_pulse
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=mock_sim)
+        mock_session.commit = AsyncMock()
+        mock_session.add = MagicMock()
+
+        with (
+            patch("src.app.services.unified_orchestrator.async_session") as mock_async_session,
+            patch(
+                "src.app.services.unified_orchestrator.run_society_pulse",
+                new_callable=AsyncMock,
+                side_effect=pulse_with_nonfatal_rollback,
+            ),
+            patch(
+                "src.app.services.unified_orchestrator.run_council",
+                new_callable=AsyncMock,
+                return_value=mock_council,
+            ),
+            patch(
+                "src.app.services.unified_orchestrator.run_synthesis",
+                new_callable=AsyncMock,
+                return_value=mock_synthesis,
+            ),
+            patch(
+                "src.app.services.unified_orchestrator._acc_flags.is_enabled",
+                return_value=False,
+            ),
+            patch("src.app.services.unified_orchestrator.sse_manager") as mock_sse,
+        ):
+            mock_sse.publish = AsyncMock()
+            mock_async_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_async_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            from src.app.services.unified_orchestrator import run_unified
+
+            await run_unified("sim-1")
+
+        assert mock_sim.status == "completed"
+        assert mock_sim.metadata_json["validation_summary"] == mock_pulse.validation_summary
+        assert mock_sim.metadata_json["pulse_result"]["validation_summary"] == mock_pulse.validation_summary
+
+    @pytest.mark.asyncio
+    async def test_fresh_pulse_drops_stale_council_checkpoint(self):
+        """rerun 由来の古い council_result が fresh pulse 後に再利用されない。"""
+        from src.app.services.phases.society_pulse import SocietyPulseResult
+        from src.app.services.phases.council_deliberation import CouncilResult
+        from src.app.services.phases.synthesis import SynthesisResult
+
+        mock_pulse = SocietyPulseResult(
+            agents=[], responses=[], aggregation={},
+            evaluation={}, representatives=[], usage={},
+        )
+        mock_council = CouncilResult(
+            participants=[{"id": "new"}],
+            rounds=[{"round": 1, "summary": "new"}],
+            synthesis={"summary": "new council"},
+            devil_advocate_summary="",
+            usage={},
+        )
+        mock_synthesis = SynthesisResult(
+            decision_brief={"recommendation": "Go", "agreement_score": 0.8},
+            agreement_score=0.8,
+            content="# Report",
+            sections={},
+        )
+
+        mock_sim = MagicMock()
+        mock_sim.id = "sim-rerun"
+        mock_sim.prompt_text = "test theme"
+        mock_sim.metadata_json = {
+            "council_result": {
+                "participants": [{"id": "old"}],
+                "rounds": [{"round": 1, "summary": "old"}],
+                "synthesis": {"summary": "old council"},
+            },
+            "unified_result": {"content": "old report"},
+            "time_axis_result": {"timeline": []},
+            "intervention_params": {"tax_rate": 0.1},
+        }
+        mock_sim.status = "running"
+        mock_sim.run_id = None
+        mock_sim.scenario_pair_id = None
+        mock_sim.population_id = None
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=mock_sim)
+        mock_session.commit = AsyncMock()
+        mock_session.add = MagicMock()
+
+        with (
+            patch("src.app.services.unified_orchestrator.async_session") as mock_async_session,
+            patch(
+                "src.app.services.unified_orchestrator.run_society_pulse",
+                new_callable=AsyncMock,
+                return_value=mock_pulse,
+            ),
+            patch(
+                "src.app.services.unified_orchestrator.run_council",
+                new_callable=AsyncMock,
+                return_value=mock_council,
+            ) as mock_phase2,
+            patch(
+                "src.app.services.unified_orchestrator.run_synthesis",
+                new_callable=AsyncMock,
+                return_value=mock_synthesis,
+            ),
+            patch(
+                "src.app.services.unified_orchestrator._acc_flags.is_enabled",
+                return_value=False,
+            ),
+            patch("src.app.services.unified_orchestrator.sse_manager") as mock_sse,
+        ):
+            mock_sse.publish = AsyncMock()
+            mock_async_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_async_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            from src.app.services.unified_orchestrator import run_unified
+
+            await run_unified("sim-rerun")
+
+        mock_phase2.assert_called_once()
+        assert mock_sim.metadata_json["council_result"]["synthesis"] == {"summary": "new council"}
+        assert mock_sim.metadata_json["intervention_params"] == {"tax_rate": 0.1}
+
+    @pytest.mark.asyncio
+    async def test_run_unified_generates_time_axis_when_enabled(self):
+        """active な unified 経路で time_axis_result を保存する。"""
+        from types import SimpleNamespace
+        from src.app.services.phases.society_pulse import SocietyPulseResult
+        from src.app.services.phases.council_deliberation import CouncilResult
+        from src.app.services.phases.synthesis import SynthesisResult
+
+        mock_pulse = SocietyPulseResult(
+            agents=[{"id": "a1"}, {"id": "a2"}, {"id": "a3"}],
+            responses=[
+                {"stance": "賛成", "confidence": 0.8},
+                {"stance": "反対", "confidence": 0.7},
+                {"stance": "中立", "confidence": 0.5},
+            ],
+            aggregation={},
+            evaluation={},
+            representatives=[],
+            usage={},
+        )
+        mock_council = CouncilResult(
+            participants=[], rounds=[], synthesis={},
+            devil_advocate_summary="", usage={},
+        )
+        mock_synthesis = SynthesisResult(
+            decision_brief={"recommendation": "Go", "agreement_score": 0.8},
+            agreement_score=0.8,
+            content="# Report",
+            sections={},
+        )
+
+        mock_sim = MagicMock()
+        mock_sim.id = "sim-time-axis"
+        mock_sim.prompt_text = "test theme"
+        mock_sim.metadata_json = {}
+        mock_sim.status = "running"
+        mock_sim.completed_at = None
+        mock_sim.run_id = None
+        mock_sim.scenario_pair_id = None
+        mock_sim.population_id = "pop-1"
+
+        edge_rows = [
+            SimpleNamespace(agent_id="a1", target_id="a2"),
+            SimpleNamespace(agent_id="a2", target_id="a3"),
+            SimpleNamespace(agent_id="a3", target_id="outside"),
+        ]
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=mock_sim)
+        mock_session.commit = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_session.execute = AsyncMock(
+            return_value=SimpleNamespace(
+                scalars=lambda: SimpleNamespace(all=lambda: edge_rows)
+            )
+        )
+
+        captured: dict = {}
+
+        async def fake_run_time_axis_pipeline(
+            simulation_id, base_responses, base_edges, theme, sse_manager=None,
+            num_cascade_rounds=5, n_particles=32,
+        ):
+            captured["simulation_id"] = simulation_id
+            captured["base_responses"] = base_responses
+            captured["base_edges"] = base_edges
+            captured["theme"] = theme
+            captured["status_during_time_axis"] = mock_sim.status
+            captured["completed_at_during_time_axis"] = mock_sim.completed_at
+            return {"timeline": [{"key": "t0"}], "horizons": 1}
+
+        with (
+            patch("src.app.services.unified_orchestrator.async_session") as mock_async_session,
+            patch(
+                "src.app.services.unified_orchestrator.run_society_pulse",
+                new_callable=AsyncMock,
+                return_value=mock_pulse,
+            ),
+            patch(
+                "src.app.services.unified_orchestrator.run_council",
+                new_callable=AsyncMock,
+                return_value=mock_council,
+            ),
+            patch(
+                "src.app.services.unified_orchestrator.run_synthesis",
+                new_callable=AsyncMock,
+                return_value=mock_synthesis,
+            ),
+            patch(
+                "src.app.services.unified_orchestrator._acc_flags.is_enabled",
+                return_value=True,
+            ),
+            patch(
+                "src.app.services.society.time_axis_runner.run_time_axis_pipeline",
+                new=fake_run_time_axis_pipeline,
+            ),
+            patch("src.app.services.unified_orchestrator.sse_manager") as mock_sse,
+        ):
+            mock_sse.publish = AsyncMock()
+            mock_async_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_async_session.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            from src.app.services.unified_orchestrator import run_unified
+
+            await run_unified("sim-time-axis")
+
+        assert captured["simulation_id"] == "sim-time-axis"
+        assert captured["theme"] == "test theme"
+        assert captured["status_during_time_axis"] == "running"
+        assert captured["completed_at_during_time_axis"] is None
+        assert captured["base_edges"] == [("a1", "a2"), ("a2", "a3")]
+        assert [r["agent_id"] for r in captured["base_responses"]] == ["a1", "a2", "a3"]
+        assert mock_sim.metadata_json["time_axis_result"] == {
+            "timeline": [{"key": "t0"}],
+            "horizons": 1,
+        }
+        assert mock_sim.status == "completed"
+        assert mock_sim.completed_at is not None
 
 
 class TestDispatcherUnifiedRouting:
