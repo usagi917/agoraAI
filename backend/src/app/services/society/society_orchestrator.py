@@ -1314,6 +1314,35 @@ async def run_society(simulation_id: str) -> None:
             }
             await session.commit()
 
+            # === Wondrous Crayon: 時間軸予測 (フラグ ON 時のみ) ===
+            time_axis_available = False
+            if _acc_flags.is_enabled("time_axis_orchestrator"):
+                try:
+                    from src.app.services.society.time_axis_runner import (
+                        run_time_axis_pipeline,
+                    )
+                    edges_list = [
+                        (int(e.from_agent_id), int(e.to_agent_id))
+                        for e in (await session.execute(
+                            select(SocialEdge).where(SocialEdge.population_id == pop_id)
+                        )).scalars().all()
+                    ]
+                    time_axis_report = await run_time_axis_pipeline(
+                        simulation_id=simulation_id,
+                        base_responses=activation_result.get("responses", []),
+                        base_edges=edges_list,
+                        theme=theme,
+                        sse_manager=sse_manager,
+                    )
+                    sim.metadata_json = {
+                        **dict(sim.metadata_json or {}),
+                        "time_axis_result": time_axis_report,
+                    }
+                    await session.commit()
+                    time_axis_available = True
+                except Exception:
+                    logger.exception("time-axis pipeline failed for sim %s", simulation_id)
+
             await sse_manager.publish(simulation_id, "society_completed", {
                 "simulation_id": simulation_id,
                 "aggregation_pre_independence": activation_result.get(
@@ -1325,6 +1354,7 @@ async def run_society(simulation_id: str) -> None:
                 ),
                 "evaluation": eval_data,
                 "meeting_available": True,
+                "time_axis_available": time_axis_available,
                 "usage": total_usage,
             })
 

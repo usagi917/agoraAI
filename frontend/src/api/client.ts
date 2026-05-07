@@ -992,3 +992,51 @@ export async function getTranscript(
   const { data } = await api.get(`/society/simulations/${simId}/transcript`, { params })
   return data
 }
+
+// === Time-axis (t0..t5) Prediction API ===
+
+export interface TimelineEntry {
+  key: string
+  label: string
+  delta_days: number
+  t_index: number
+  distribution: Record<string, number>
+  driving_factors: { stance: string; delta: number }[]
+  credible_intervals?: Record<string, Record<string, { lower: number; median: number; upper: number }>>
+  market_prices?: number[]
+  metadata?: Record<string, unknown>
+}
+
+export interface WhatIfEntry {
+  key: string
+  delta: Record<string, number>
+  baseline: Record<string, number>
+  alternative: Record<string, number>
+}
+
+export interface TimeAxisReport {
+  theme: string
+  timeline: TimelineEntry[]
+  summary: { long_term_shift: Record<string, number>; horizons: number; from?: string; to?: string }
+  what_if?: WhatIfEntry[]
+}
+
+export interface EnsembleResponse {
+  bands: { key: string; label: string; distribution: Record<string, number>; credible_intervals?: TimelineEntry['credible_intervals'] }[]
+  horizons: number
+}
+
+export async function getTimeAxis(simId: string): Promise<TimeAxisReport> {
+  const { data } = await api.get(`/society/simulations/${simId}/time-axis`)
+  return data
+}
+
+export async function getEnsemble(simId: string): Promise<EnsembleResponse> {
+  const { data } = await api.get(`/society/simulations/${simId}/ensemble`)
+  return data
+}
+
+export async function getTemporalReport(simId: string): Promise<TimeAxisReport> {
+  const { data } = await api.get(`/society/simulations/${simId}/report`)
+  return data
+}

@@ -787,3 +787,62 @@ async def get_conversations(
         "synthesis": synthesis,
         "total_rounds": len(all_rounds),
     }
+
+
+# === Wondrous Crayon: 時間軸予測 API ===
+
+@router.get("/simulations/{sim_id}/time-axis")
+async def get_time_axis(sim_id: str, session: AsyncSession = Depends(get_session)):
+    """t0..t5 時系列予測の統合レポート全体を返す."""
+    result = await session.execute(select(Simulation).where(Simulation.id == sim_id))
+    sim = result.scalar_one_or_none()
+    if sim is None:
+        raise HTTPException(status_code=404, detail="simulation not found")
+
+    metadata = dict(sim.metadata_json or {})
+    report = metadata.get("time_axis_result")
+    if report is None:
+        raise HTTPException(status_code=404, detail="time-axis result not available")
+    return report
+
+
+@router.get("/simulations/{sim_id}/ensemble")
+async def get_ensemble(sim_id: str, session: AsyncSession = Depends(get_session)):
+    """Ensemble の確率帯 (CI) のみを返す軽量エンドポイント."""
+    result = await session.execute(select(Simulation).where(Simulation.id == sim_id))
+    sim = result.scalar_one_or_none()
+    if sim is None:
+        raise HTTPException(status_code=404, detail="simulation not found")
+
+    metadata = dict(sim.metadata_json or {})
+    report = metadata.get("time_axis_result") or {}
+    timeline = report.get("timeline", [])
+    bands = []
+    for entry in timeline:
+        bands.append({
+            "key": entry.get("key"),
+            "label": entry.get("label"),
+            "distribution": entry.get("distribution", {}),
+            "credible_intervals": entry.get("credible_intervals"),
+        })
+    return {"bands": bands, "horizons": len(bands)}
+
+
+@router.get("/simulations/{sim_id}/report")
+async def get_temporal_report(sim_id: str, session: AsyncSession = Depends(get_session)):
+    """時系列統合レポート (driving_factors / what_if / summary を含む)."""
+    result = await session.execute(select(Simulation).where(Simulation.id == sim_id))
+    sim = result.scalar_one_or_none()
+    if sim is None:
+        raise HTTPException(status_code=404, detail="simulation not found")
+
+    metadata = dict(sim.metadata_json or {})
+    report = metadata.get("time_axis_result")
+    if report is None:
+        raise HTTPException(status_code=404, detail="time-axis result not available")
+    return {
+        "theme": report.get("theme", ""),
+        "summary": report.get("summary", {}),
+        "timeline": report.get("timeline", []),
+        "what_if": report.get("what_if"),
+    }

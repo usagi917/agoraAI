@@ -1,0 +1,541 @@
+surveys:
+- theme: 外交問題
+  question: 日本の外交は正しい方向に進んでいると思いますか
+  source: 内閣府「外交に関する世論調査」2024年
+  survey_date: 2024-01
+  sample_size: 3000
+  method: 個別面接聴取
+  theme_category: politics
+  relevance_keywords:
+  - 外交
+  - 国際関係
+  - 日米関係
+  - 外交政策
+  stance_distribution:
+    賛成: 0.25
+    条件付き賛成: 0.2
+    中立: 0.3
+    条件付き反対: 0.15
+    反対: 0.1
+- theme: 防衛政策
+  question: 日本の防衛力を強化すべきだと思いますか
+  source: 内閣府「自衛隊・防衛問題に関する世論調査」2024年
+  survey_date: 2024-01
+  sample_size: 3000
+  method: 個別面接聴取
+  theme_category: security
+  relevance_keywords:
+  - 防衛
+  - 自衛隊
+  - 安全保障
+  - 軍事
+  stance_distribution:
+    賛成: 0.3
+    条件付き賛成: 0.25
+    中立: 0.2
+    条件付き反対: 0.15
+    反対: 0.1
+- theme: 消費税増税
+  question: 消費税をさらに引き上げるべきだと思いますか
+  source: 全国紙合同世論調査 2024年3月
+  survey_date: 2024-03
+  sample_size: 2000
+  method: 電話調査 (RDD)
+  theme_category: economy
+  relevance_keywords:
+  - 消費税
+  - 増税
+  - 財政
+  - 税制
+  stance_distribution:
+    賛成: 0.1
+    条件付き賛成: 0.15
+    中立: 0.2
+    条件付き反対: 0.25
+    反対: 0.3
+- theme: 原発再稼働
+  question: 停止中の原子力発電所を再稼働させるべきだと思いますか
+  source: メディア合同世論調査 2024年5月
+  survey_date: 2024-05
+  sample_size: 1800
+  method: 電話調査 (RDD)
+  theme_category: energy
+  relevance_keywords:
+  - 原発
+  - 原子力
+  - 再稼働
+  - エネルギー政策
+  stance_distribution:
+    賛成: 0.2
+    条件付き賛成: 0.3
+    中立: 0.2
+    条件付き反対: 0.15
+    反対: 0.15
+- theme: 選択的夫婦別姓
+  question: 選択的夫婦別姓制度を導入すべきだと思いますか
+  source: 全国紙世論調査 2024年7月
+  survey_date: 2024-07
+  sample_size: 1500
+  method: 郵送調査
+  theme_category: society
+  relevance_keywords:
+  - 夫婦別姓
+  - 民法改正
+  - ジェンダー
+  - 家族制度
+  stance_distribution:
+    賛成: 0.45
+    条件付き賛成: 0.2
+    中立: 0.15
+    条件付き反対: 0.1
+    反対: 0.1
+- theme: AI 規制
+  question: 生成AIに対する政府の規制を強化すべきだと思いますか
+  source: 民間シンクタンク調査 2024年6月
+  survey_date: 2024-06
+  sample_size: 1200
+  method: オンライン調査
+  theme_category: technology
+  relevance_keywords:
+  - AI
+  - 生成AI
+  - 規制
+  - テクノロジー政策
+  stance_distribution:
+    賛成: 0.3
+    条件付き賛成: 0.35
+    中立: 0.2
+    条件付き反対: 0.1
+    反対: 0.05
+- theme: リモートワーク継続
+  question: 勤務先でリモートワーク制度を継続すべきだと思いますか
+  source: 労働政策研究所調査 2024年4月
+  survey_date: 2024-04
+  sample_size: 2500
+  method: オンライン調査
+  theme_category: work
+  relevance_keywords:
+  - リモートワーク
+  - テレワーク
+  - 働き方改革
+  - 労働環境
+  stance_distribution:
+    賛成: 0.4
+    条件付き賛成: 0.3
+    中立: 0.15
+    条件付き反対: 0.1
+    反対: 0.05
+- theme: ライドシェア解禁
+  question: 日本でライドシェアを全面解禁すべきだと思いますか
+  source: 全国世論調査 2024年8月
+  survey_date: 2024-08
+  sample_size: 1600
+  method: 電話調査 (RDD)
+  theme_category: transportation
+  relevance_keywords:
+  - ライドシェア
+  - Uber
+  - タクシー
+  - 規制改革
+  stance_distribution:
+    賛成: 0.25
+    条件付き賛成: 0.3
+    中立: 0.2
+    条件付き反対: 0.15
+    反対: 0.1
+- theme: 教育デジタル化
+  question: 小中学校でのデジタル端末活用をさらに進めるべきだと思いますか
+  source: 教育機関調査 2024年9月
+  survey_date: 2024-09
+  sample_size: 1400
+  method: オンライン調査
+  theme_category: education
+  relevance_keywords:
+  - GIGAスクール
+  - デジタル教育
+  - ICT教育
+  - 教育改革
+  stance_distribution:
+    賛成: 0.35
+    条件付き賛成: 0.3
+    中立: 0.2
+    条件付き反対: 0.1
+    反対: 0.05
+- theme: 気候変動対策強化
+  question: 気候変動対策のための炭素税導入に賛成ですか
+  source: 環境省調査 2024年10月
+  survey_date: 2024-10
+  sample_size: 2200
+  method: 個別面接聴取
+  theme_category: environment
+  relevance_keywords:
+  - 気候変動
+  - 炭素税
+  - 脱炭素
+  - 環境政策
+  stance_distribution:
+    賛成: 0.2
+    条件付き賛成: 0.3
+    中立: 0.25
+    条件付き反対: 0.15
+    反対: 0.1
+- theme: 賃上げ持続
+  question: 今後数年間、企業は実質賃金を引き上げ続けるべきだと思いますか
+  source: 経済紙調査 2024年11月
+  survey_date: 2024-11
+  sample_size: 1800
+  method: 電話調査
+  theme_category: economy
+  relevance_keywords:
+  - 賃上げ
+  - 実質賃金
+  - 労働市場
+  - 春闘
+  stance_distribution:
+    賛成: 0.45
+    条件付き賛成: 0.3
+    中立: 0.15
+    条件付き反対: 0.05
+    反対: 0.05
+- theme: 新製品ローンチ受容性
+  question: 新登場のAIアシスタント製品に対し購入意向はありますか
+  source: 民間消費者調査 2024年12月
+  survey_date: 2024-12
+  sample_size: 1000
+  method: オンライン調査
+  theme_category: consumer
+  relevance_keywords:
+  - 新製品
+  - AIアシスタント
+  - 購買意向
+  - ローンチ
+  stance_distribution:
+    賛成: 0.15
+    条件付き賛成: 0.25
+    中立: 0.3
+    条件付き反対: 0.2
+    反対: 0.1
+- theme: 国民皆保険改革
+  question: 国民皆保険制度の自己負担割合を見直すべきだと思いますか
+  source: 全国紙合同世論調査 2024年2月
+  survey_date: 2024-02
+  sample_size: 2000
+  method: 電話調査 (RDD)
+  theme_category: healthcare
+  relevance_keywords:
+  - 国民皆保険
+  - 医療費
+  - 自己負担
+  - 社会保障
+  stance_distribution:
+    賛成: 0.08
+    条件付き賛成: 0.15
+    中立: 0.2
+    条件付き反対: 0.27
+    反対: 0.3
+- theme: ワクチン接種義務化
+  question: 感染症対策として一部ワクチン接種を義務化すべきだと思いますか
+  source: メディア合同世論調査 2024年3月
+  survey_date: 2024-03
+  sample_size: 1800
+  method: 電話調査 (RDD)
+  theme_category: healthcare
+  relevance_keywords:
+  - ワクチン
+  - 義務化
+  - 公衆衛生
+  - 感染症対策
+  stance_distribution:
+    賛成: 0.1
+    条件付き賛成: 0.15
+    中立: 0.2
+    条件付き反対: 0.25
+    反対: 0.3
+- theme: 終末期医療政策
+  question: 本人の意思を尊重した尊厳死の制度化を進めるべきだと思いますか
+  source: 民間シンクタンク調査 2024年5月
+  survey_date: 2024-05
+  sample_size: 1500
+  method: 郵送調査
+  theme_category: healthcare
+  relevance_keywords:
+  - 終末期医療
+  - 尊厳死
+  - 緩和ケア
+  - 医療倫理
+  stance_distribution:
+    賛成: 0.4
+    条件付き賛成: 0.25
+    中立: 0.2
+    条件付き反対: 0.1
+    反対: 0.05
+- theme: 対中関係
+  question: 中国との経済交流を今後も維持・拡大すべきだと思いますか
+  source: 全国紙合同世論調査 2024年4月
+  survey_date: 2024-04
+  sample_size: 2000
+  method: 電話調査 (RDD)
+  theme_category: diplomacy
+  relevance_keywords:
+  - 対中政策
+  - 日中関係
+  - 経済安全保障
+  - 貿易
+  stance_distribution:
+    賛成: 0.15
+    条件付き賛成: 0.25
+    中立: 0.25
+    条件付き反対: 0.2
+    反対: 0.15
+- theme: 国連安保理改革
+  question: 日本は国連安保理常任理事国入りを目指すべきだと思いますか
+  source: メディア合同世論調査 2024年6月
+  survey_date: 2024-06
+  sample_size: 1800
+  method: 電話調査 (RDD)
+  theme_category: diplomacy
+  relevance_keywords:
+  - 国連
+  - 安保理
+  - 常任理事国
+  - 国際協調
+  stance_distribution:
+    賛成: 0.25
+    条件付き賛成: 0.25
+    中立: 0.3
+    条件付き反対: 0.1
+    反対: 0.1
+- theme: 大学授業料無償化
+  question: 国公立大学の授業料を全面的に無償化すべきだと思いますか
+  source: 教育機関調査 2024年7月
+  survey_date: 2024-07
+  sample_size: 1500
+  method: オンライン調査
+  theme_category: education
+  relevance_keywords:
+  - 大学授業料
+  - 無償化
+  - 教育費
+  - 高等教育
+  stance_distribution:
+    賛成: 0.25
+    条件付き賛成: 0.25
+    中立: 0.2
+    条件付き反対: 0.15
+    反対: 0.15
+- theme: 小学校英語教育
+  question: 小学校低学年からの英語教育をさらに拡充すべきだと思いますか
+  source: 全国紙合同世論調査 2024年8月
+  survey_date: 2024-08
+  sample_size: 1400
+  method: オンライン調査
+  theme_category: education
+  relevance_keywords:
+  - 英語教育
+  - 小学校
+  - 外国語学習
+  - 学習指導要領
+  stance_distribution:
+    賛成: 0.22
+    条件付き賛成: 0.28
+    中立: 0.2
+    条件付き反対: 0.18
+    反対: 0.12
+- theme: 最低賃金引き上げ
+  question: 全国一律で最低賃金を時給1500円まで引き上げるべきだと思いますか
+  source: 労働政策研究所調査 2024年5月
+  survey_date: 2024-05
+  sample_size: 2500
+  method: オンライン調査
+  theme_category: work
+  relevance_keywords:
+  - 最低賃金
+  - 賃上げ
+  - 労働者
+  - 中小企業
+  stance_distribution:
+    賛成: 0.4
+    条件付き賛成: 0.25
+    中立: 0.15
+    条件付き反対: 0.1
+    反対: 0.1
+- theme: 週休3日制
+  question: 希望者が選択できる週休3日制を企業に導入推奨すべきだと思いますか
+  source: 労働政策研究所調査 2024年9月
+  survey_date: 2024-09
+  sample_size: 2000
+  method: オンライン調査
+  theme_category: work
+  relevance_keywords:
+  - 週休3日
+  - 働き方改革
+  - 労働時間
+  - ワークライフバランス
+  stance_distribution:
+    賛成: 0.25
+    条件付き賛成: 0.25
+    中立: 0.25
+    条件付き反対: 0.15
+    反対: 0.1
+- theme: 同性婚法制化
+  question: 同性カップルの婚姻を法律上認めるべきだと思いますか
+  source: 全国紙合同世論調査 2024年6月
+  survey_date: 2024-06
+  sample_size: 1800
+  method: 郵送調査
+  theme_category: family
+  relevance_keywords:
+  - 同性婚
+  - LGBTQ
+  - 婚姻制度
+  - 人権
+  stance_distribution:
+    賛成: 0.45
+    条件付き賛成: 0.2
+    中立: 0.15
+    条件付き反対: 0.1
+    反対: 0.1
+- theme: 外国人受け入れ拡大
+  question: 労働力不足対策として外国人労働者の受け入れをさらに拡大すべきだと思いますか
+  source: 民間シンクタンク調査 2024年10月
+  survey_date: 2024-10
+  sample_size: 2000
+  method: 電話調査 (RDD)
+  theme_category: family
+  relevance_keywords:
+  - 外国人労働者
+  - 移民政策
+  - 多文化共生
+  - 労働力不足
+  stance_distribution:
+    賛成: 0.2
+    条件付き賛成: 0.3
+    中立: 0.2
+    条件付き反対: 0.15
+    反対: 0.15
+- theme: SNS実名制義務化
+  question: 誹謗中傷対策としてSNS利用時の本人確認(実名制)を義務化すべきだと思いますか
+  source: 民間シンクタンク調査 2024年7月
+  survey_date: 2024-07
+  sample_size: 1500
+  method: オンライン調査
+  theme_category: technology
+  relevance_keywords:
+  - SNS
+  - 実名制
+  - 誹謗中傷
+  - ネット規制
+  stance_distribution:
+    賛成: 0.22
+    条件付き賛成: 0.26
+    中立: 0.2
+    条件付き反対: 0.18
+    反対: 0.14
+- theme: 自動運転実用化
+  question: 公道での完全自動運転車の運行を早期に解禁すべきだと思いますか
+  source: 民間消費者調査 2024年11月
+  survey_date: 2024-11
+  sample_size: 1200
+  method: オンライン調査
+  theme_category: technology
+  relevance_keywords:
+  - 自動運転
+  - モビリティ
+  - 交通安全
+  - 規制改革
+  stance_distribution:
+    賛成: 0.08
+    条件付き賛成: 0.17
+    中立: 0.2
+    条件付き反対: 0.3
+    反対: 0.25
+- theme: 選挙制度改革
+  question: 衆議院の選挙制度を中選挙区制に戻すべきだと思いますか
+  source: 全国紙合同世論調査 2024年9月
+  survey_date: 2024-09
+  sample_size: 1800
+  method: 電話調査 (RDD)
+  theme_category: governance
+  relevance_keywords:
+  - 選挙制度
+  - 中選挙区
+  - 小選挙区
+  - 政治改革
+  stance_distribution:
+    賛成: 0.15
+    条件付き賛成: 0.2
+    中立: 0.3
+    条件付き反対: 0.2
+    反対: 0.15
+- theme: 選挙権年齢引き下げ
+  question: 選挙権年齢を現行の18歳から16歳に引き下げるべきだと思いますか
+  source: メディア合同世論調査 2024年10月
+  survey_date: 2024-10
+  sample_size: 1500
+  method: 電話調査 (RDD)
+  theme_category: governance
+  relevance_keywords:
+  - 選挙権年齢
+  - 若者参画
+  - 民主主義
+  - 公職選挙法
+  stance_distribution:
+    賛成: 0.07
+    条件付き賛成: 0.13
+    中立: 0.22
+    条件付き反対: 0.28
+    反対: 0.3
+- theme: 地方創生予算
+  question: 地方創生のための国の交付金を今後も拡充すべきだと思いますか
+  source: 全国世論調査 2024年4月
+  survey_date: 2024-04
+  sample_size: 2000
+  method: 電話調査 (RDD)
+  theme_category: regional
+  relevance_keywords:
+  - 地方創生
+  - 交付金
+  - 人口減少
+  - 地域経済
+  stance_distribution:
+    賛成: 0.4
+    条件付き賛成: 0.3
+    中立: 0.15
+    条件付き反対: 0.1
+    反対: 0.05
+- theme: 道州制導入
+  question: 都道府県を再編して道州制を導入すべきだと思いますか
+  source: 民間シンクタンク調査 2024年8月
+  survey_date: 2024-08
+  sample_size: 1500
+  method: 郵送調査
+  theme_category: regional
+  relevance_keywords:
+  - 道州制
+  - 地方分権
+  - 行政改革
+  - 都道府県
+  stance_distribution:
+    賛成: 0.1
+    条件付き賛成: 0.15
+    中立: 0.2
+    条件付き反対: 0.3
+    反対: 0.25
+- theme: へき地医療体制
+  question: 過疎地の医療を維持するため医師の地方勤務を制度的に促すべきだと思いますか
+  source: 全国紙合同世論調査 2024年12月
+  survey_date: 2024-12
+  sample_size: 1800
+  method: 電話調査 (RDD)
+  theme_category: regional
+  relevance_keywords:
+  - へき地医療
+  - 医師偏在
+  - 地域医療
+  - 過疎地
+  stance_distribution:
+    賛成: 0.45
+    条件付き賛成: 0.3
+    中立: 0.15
+    条件付き反対: 0.05
+    反対: 0.05

@@ -29,6 +29,16 @@ KNOWN_FEATURES: set[str] = {
     "meeting_feedback_propagation",
     "episodic_memory",
     "rolling_summary",
+    # Wondrous Prancing Crayon: 高精度群知能市場シミュレーション
+    "time_axis_orchestrator",
+    "population_drift",
+    "bayesian_belief_update",
+    "monte_carlo_ensemble",
+    "cascade_propagation",
+    "multi_outcome_market",
+    "calibration_learner",
+    "diversity_enforcement",
+    "temporal_report",
 }
 
 

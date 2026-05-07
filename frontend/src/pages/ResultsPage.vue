@@ -34,6 +34,8 @@ import ProbabilityChart from '../components/ProbabilityChart.vue'
 import ScenarioCompare from '../components/ScenarioCompare.vue'
 import AgreementHeatmap from '../components/AgreementHeatmap.vue'
 import PropagationDashboard from '../components/PropagationDashboard.vue'
+import IntegratedReport from '../components/IntegratedReport.vue'
+import { useTimeAxis } from '../composables/useTimeAxis'
 import {
   getDefaultResultsSecondaryTab,
   getResultsPrimaryView,
@@ -57,6 +59,11 @@ const transcriptLoading = ref(false)
 const transcriptPhaseFilter = ref<string>('')
 const activeSecondaryTab = ref<ResultsSecondaryTab>('society')
 let playbackFrame: number | null = null
+
+// Time-axis (t0..t5) prediction view — lazily attached if backend produced it.
+const { report: timeAxisReport, loading: timeAxisLoading, error: timeAxisError, fetch: fetchTimeAxis } = useTimeAxis()
+const timeAxisAvailable = ref(false)
+const timeAxisExpanded = ref(false)
 
 // Follow-up
 const followupQuestion = ref('')
@@ -405,6 +412,12 @@ onMounted(async () => {
         propagationData.value = res.phase_data as PropagationData
       }
     }).catch(() => { /* no propagation data */ })
+
+    // Time-axis (t0..t5) report — only present when backend simulation
+    // wrote `time_axis_result` into sim.metadata_json. 404 is a soft absence.
+    fetchTimeAxis(simId).then(() => {
+      timeAxisAvailable.value = !!timeAxisReport.value
+    }).catch(() => { /* gracefully hidden */ })
   } catch (e) {
     error.value = 'データの読み込みに失敗しました。'
   } finally {
@@ -1155,6 +1168,38 @@ function renderMarkdown(content: string): string {
           </div>
         </div>
       </div>
+
+      <!-- Time-axis (t0..t5) prediction — only renders when backend produced a result. -->
+      <section
+        v-if="timeAxisAvailable && timeAxisReport"
+        data-testid="time-axis-section"
+        class="time-axis-section"
+      >
+        <div class="time-axis-header">
+          <div class="time-axis-copy">
+            <span class="workspace-eyebrow">Time-axis Forecast</span>
+            <h3 class="workspace-title">t0..t5 の予測分布と駆動要因</h3>
+            <p class="workspace-description">
+              6 時点ホライズンの分布、駆動要因、What-if 比較を確認できます。
+            </p>
+          </div>
+          <button
+            type="button"
+            class="btn btn-ghost"
+            @click="timeAxisExpanded = !timeAxisExpanded"
+          >
+            {{ timeAxisExpanded ? '閉じる' : '時系列レポートを開く' }}
+          </button>
+        </div>
+        <div v-if="timeAxisExpanded" class="time-axis-body">
+          <div v-if="timeAxisLoading" class="loading-state">
+            <div class="loading-dots"><span></span><span></span><span></span></div>
+            <p>時系列レポートを読み込み中...</p>
+          </div>
+          <div v-else-if="timeAxisError" class="error-banner">{{ timeAxisError }}</div>
+          <IntegratedReport v-else :report="timeAxisReport" />
+        </div>
+      </section>
     </template>
   </div>
 </template>
@@ -1724,5 +1769,33 @@ function renderMarkdown(content: string): string {
   .stakeholder-bar-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .confidence-gauge-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .recommendation-badge { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+}
+
+.time-axis-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: clamp(1rem, 1vw + 0.8rem, 1.5rem) clamp(1rem, 2vw, 2rem);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.time-axis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.time-axis-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.time-axis-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 </style>
