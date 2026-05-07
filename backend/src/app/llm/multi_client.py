@@ -1,16 +1,14 @@
 """MultiLLMClient: エージェントの llm_backend に基づいてアダプタにルーティング"""
 
 import asyncio
-import json
 import logging
 import os
-import re
-from typing import Optional
 
 from src.app.config import settings
 from src.app.llm.adapters.base import LLMAdapter
 from src.app.llm.adapters.openai_adapter import OpenAIAdapter
 from src.app.llm.adapters.anthropic_adapter import AnthropicAdapter
+from src.app.llm.json_extraction import extract_json as _extract_json
 from src.app.llm.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
@@ -19,34 +17,6 @@ ADAPTER_CLASSES = {
     "openai": OpenAIAdapter,
     "anthropic": AnthropicAdapter,
 }
-
-
-def _extract_json(text: str) -> Optional[dict]:
-    """テキストから JSON を抽出する。"""
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    text = text.strip()
-
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    match = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-
-    first_brace = text.find("{")
-    last_brace = text.rfind("}")
-    if first_brace >= 0 and last_brace > first_brace:
-        try:
-            return json.loads(text[first_brace : last_brace + 1])
-        except json.JSONDecodeError:
-            pass
-
-    return None
 
 
 class MultiLLMClient:

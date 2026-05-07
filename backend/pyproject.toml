@@ -13,13 +13,13 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "python-multipart>=0.0.12",
-    "litellm>=1.50.0",
     "pymupdf>=1.24.0",
     "pyyaml>=6.0.0",
     "numpy>=1.26.0",
     "scikit-learn>=1.4.0",
     "networkx>=3.2.0",
     "httpx>=0.27.0",
+    "scipy>=1.17.1",
     "optuna>=4.8.0",
 ]
 
@@ -39,10 +39,31 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "deptry>=0.25.1",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.0.0",
-    "ruff>=0.15.10",
+    "ruff>=0.15.12",
     "scipy>=1.17.1",
     "vulture>=2.16",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["tests"]
+
+[tool.ruff.lint]
+select = ["F401"]
+
+[tool.deptry]
+extend_exclude = ["tests"]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = [
+    "uvicorn", # Docker/runtime command
+    "aiosqlite", # SQLAlchemy SQLite driver
+    "asyncpg", # SQLAlchemy PostgreSQL driver
+    "redis", # optional deployment service
+    "python-multipart", # FastAPI UploadFile/form parser
 ]

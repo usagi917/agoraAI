@@ -46,7 +46,7 @@ class Settings(BaseSettings):
         config_path = self.config_dir / "models.yaml"
         if config_path.exists():
             with open(config_path) as f:
-                return yaml.safe_load(f)
+                return yaml.safe_load(f) or {}
         return {"default_model": self.llm_model, "tasks": {}}
 
     def llm_provider(self) -> str:
@@ -72,7 +72,7 @@ class Settings(BaseSettings):
         config_path = self.config_dir / "graphrag.yaml"
         if config_path.exists():
             with open(config_path) as f:
-                data = yaml.safe_load(f)
+                data = yaml.safe_load(f) or {}
             return data.get("graphrag", {})
         return {}
 
@@ -80,14 +80,14 @@ class Settings(BaseSettings):
         config_path = self.config_dir / "cognitive.yaml"
         if config_path.exists():
             with open(config_path) as f:
-                return yaml.safe_load(f)
+                return yaml.safe_load(f) or {}
         return {}
 
     def load_communication_config(self) -> dict:
         config_path = self.config_dir / "cognitive.yaml"
         if config_path.exists():
             with open(config_path) as f:
-                data = yaml.safe_load(f)
+                data = yaml.safe_load(f) or {}
             return data.get("communication", {})
         return {}
 
@@ -95,7 +95,7 @@ class Settings(BaseSettings):
         config_path = self.config_dir / "cognitive.yaml"
         if config_path.exists():
             with open(config_path) as f:
-                data = yaml.safe_load(f)
+                data = yaml.safe_load(f) or {}
             return data.get("scheduling", {})
         return {}
 
@@ -103,7 +103,7 @@ class Settings(BaseSettings):
         config_path = self.config_dir / "cognitive.yaml"
         if config_path.exists():
             with open(config_path) as f:
-                data = yaml.safe_load(f)
+                data = yaml.safe_load(f) or {}
             return data.get("rate_limiting", {})
         return {}
 

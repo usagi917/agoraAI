@@ -165,14 +165,17 @@ class TestEvaluationRunner:
     @pytest.mark.asyncio
     async def test_run_and_save(self, db_session):
         from src.app.evaluation.runner import create_default_runner
-        from src.app.repositories.simulation_repo import SimulationRepository
-        from src.app.repositories.evaluation_repo import EvaluationRepository
+        from sqlalchemy import select
+        from src.app.models.evaluation_result import EvaluationResult
+        from src.app.models.simulation import Simulation
 
-        sim_repo = SimulationRepository(db_session)
-        sim = await sim_repo.create(
+        sim = Simulation(
             mode="standard", prompt_text="test", template_name="g",
             execution_profile="preview",
         )
+        db_session.add(sim)
+        await db_session.commit()
+        await db_session.refresh(sim)
 
         runner = create_default_runner()
         results = runner.run_all(
@@ -186,10 +189,21 @@ class TestEvaluationRunner:
             ],
         )
 
-        eval_repo = EvaluationRepository(db_session)
-        await eval_repo.save_metrics(sim.id, results)
+        for result in results:
+            db_session.add(
+                EvaluationResult(
+                    simulation_id=sim.id,
+                    metric_name=result["metric_name"],
+                    score=result["score"],
+                    details=result.get("details", {}),
+                )
+            )
+        await db_session.commit()
 
-        saved = await eval_repo.get_by_simulation(sim.id)
+        saved_result = await db_session.execute(
+            select(EvaluationResult).where(EvaluationResult.simulation_id == sim.id)
+        )
+        saved = saved_result.scalars().all()
         assert len(saved) == len(results)
 
 

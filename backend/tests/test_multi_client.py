@@ -3,30 +3,31 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from src.app.llm.multi_client import MultiLLMClient, _extract_json
+from src.app.llm.json_extraction import extract_json
+from src.app.llm.multi_client import MultiLLMClient
 
 
 class TestExtractJson:
     def test_plain_json(self):
-        assert _extract_json('{"key": "value"}') == {"key": "value"}
+        assert extract_json('{"key": "value"}') == {"key": "value"}
 
     def test_json_in_markdown(self):
         text = '```json\n{"key": "value"}\n```'
-        assert _extract_json(text) == {"key": "value"}
+        assert extract_json(text) == {"key": "value"}
 
     def test_json_with_thinking_tags(self):
         text = '<think>some thought</think>{"key": "value"}'
-        assert _extract_json(text) == {"key": "value"}
+        assert extract_json(text) == {"key": "value"}
 
     def test_json_embedded_in_text(self):
         text = 'Here is the result: {"key": "value"} end'
-        assert _extract_json(text) == {"key": "value"}
+        assert extract_json(text) == {"key": "value"}
 
     def test_non_json(self):
-        assert _extract_json("just plain text") is None
+        assert extract_json("just plain text") is None
 
     def test_empty_string(self):
-        assert _extract_json("") is None
+        assert extract_json("") is None
 
 
 class TestMultiLLMClientRouting:

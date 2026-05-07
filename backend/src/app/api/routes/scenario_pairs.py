@@ -4,9 +4,11 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.api.deps import get_session
+from src.app.models.agent_profile import AgentProfile
 from src.app.models.population import Population
 from src.app.models.scenario_pair import ScenarioPair
 from src.app.services.audit_trail_service import get_audit_trail as get_audit_trail_events
@@ -65,6 +67,25 @@ class PopulationSnapshotResponse(BaseModel):
     agent_count: int
     seed: int
     created_at: str
+
+
+def _serialize_agent_profile(agent: AgentProfile) -> dict:
+    return {
+        "id": agent.id,
+        "agent_index": agent.agent_index,
+        "demographics": agent.demographics or {},
+        "big_five": agent.big_five or {},
+        "values": agent.values or {},
+        "life_event": agent.life_event,
+        "contradiction": agent.contradiction,
+        "information_source": agent.information_source,
+        "local_context": agent.local_context,
+        "hidden_motivation": agent.hidden_motivation,
+        "speech_style": agent.speech_style,
+        "shock_sensitivity": agent.shock_sensitivity or {},
+        "llm_backend": agent.llm_backend,
+        "memory_summary": agent.memory_summary,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -197,18 +218,24 @@ async def create_population_snapshot(
     if not population:
         raise HTTPException(status_code=404, detail="Population が見つかりません")
 
+    result = await session.execute(
+        select(AgentProfile)
+        .where(AgentProfile.population_id == population_id)
+        .order_by(AgentProfile.agent_index)
+    )
+    agents = [_serialize_agent_profile(agent) for agent in result.scalars().all()]
+    seed = int((population.generation_params or {}).get("seed", 0) or 0)
+
     snapshot = await create_snapshot(
         session=session,
         population_id=population_id,
-        agents=[],
-        seed=0,
+        agents=agents,
+        seed=seed,
     )
-    agents = snapshot.agent_profiles_json
-    agent_count = len(agents) if isinstance(agents, list) else 0
     return PopulationSnapshotResponse(
         id=snapshot.id,
         population_id=snapshot.population_id,
-        agent_count=agent_count,
+        agent_count=len(agents),
         seed=snapshot.seed,
         created_at=snapshot.created_at.isoformat(),
     )

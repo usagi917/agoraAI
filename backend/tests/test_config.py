@@ -61,6 +61,28 @@ def test_load_cognitive_config_missing_file():
     assert config == {}
 
 
+def test_load_empty_yaml_configs_return_empty_dict(tmp_path):
+    for name in (
+        "models.yaml",
+        "graphrag.yaml",
+        "cognitive.yaml",
+        "llm_providers.yaml",
+        "population_mix.yaml",
+    ):
+        (tmp_path / name).write_text("", encoding="utf-8")
+
+    s = Settings(config_dir=tmp_path, _env_file=None)
+
+    assert s.load_model_config() == {}
+    assert s.load_graphrag_config() == {}
+    assert s.load_cognitive_config() == {}
+    assert s.load_communication_config() == {}
+    assert s.load_scheduling_config() == {}
+    assert s.load_rate_limit_config() == {}
+    assert s.load_llm_providers_config() == {}
+    assert s.load_population_mix_config() == {}
+
+
 def test_resolve_project_root_finds_repo_root(tmp_path):
     repo_root = tmp_path / "repo"
     target = repo_root / "backend" / "src" / "app" / "config.py"

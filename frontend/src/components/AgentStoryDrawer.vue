@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, toRef } from 'vue'
 import { useAgentStory } from '../composables/useAgentStory'
-import { useSocietyGraphStore, STANCE_COLORS } from '../stores/societyGraphStore'
+import { STANCE_COLORS } from '../constants/stances'
+import { useSocietyGraphStore } from '../stores/societyGraphStore'
 
 const props = defineProps<{
   simulationId: string

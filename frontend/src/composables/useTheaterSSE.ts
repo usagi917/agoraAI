@@ -1,25 +1,6 @@
 import { useTheaterStore } from '../stores/theaterStore'
 import { useActivityStore } from '../stores/activityStore'
-
-const NUMERIC_TO_STANCE: [number, string][] = [
-  [1.0, '賛成'],
-  [0.7, '条件付き賛成'],
-  [0.5, '中立'],
-  [0.3, '条件付き反対'],
-  [0.0, '反対'],
-]
-
-function numericToStanceLabel(value: unknown): string {
-  if (typeof value === 'string') return value
-  if (typeof value !== 'number') return '中立'
-  let closest = NUMERIC_TO_STANCE[0]
-  for (const entry of NUMERIC_TO_STANCE) {
-    if (Math.abs(value - entry[0]) < Math.abs(value - closest[0])) {
-      closest = entry
-    }
-  }
-  return closest[1]
-}
+import { numericToStanceLabel } from '../constants/stances'
 
 function toAgentLabel(agentId: unknown): string {
   if (agentId == null) return ''

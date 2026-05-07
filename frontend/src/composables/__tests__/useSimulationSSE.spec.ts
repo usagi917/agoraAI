@@ -138,4 +138,26 @@ describe('useSimulationSSE', () => {
       expect(MockEventSource.instances).toHaveLength(1)
     })
   })
+
+  describe('report_completed handling', () => {
+    it('registers and handles report completion once', async () => {
+      const { useSimulationStore } = await import('../../stores/simulationStore')
+      const { useActivityStore } = await import('../../stores/activityStore')
+      const store = useSimulationStore()
+      const activity = useActivityStore()
+
+      const { start } = await createSSE()
+      start()
+
+      const source = MockEventSource.instances[MockEventSource.instances.length - 1]
+      expect(source.listeners.report_completed).toHaveLength(1)
+
+      store.setStatus('generating_report')
+      source.emit('report_completed', { agreement_score: 0.82 })
+
+      expect(store.status).toBe('running')
+      expect(activity.entries.filter((entry) => entry.message === 'レポート生成完了')).toHaveLength(1)
+      expect(activity.entries[0].detail).toBe('合意度: 82%')
+    })
+  })
 })

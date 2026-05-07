@@ -10,10 +10,93 @@
 
 ## これは何か
 
-- `frontend`: Vue 3 + Vite の SPA
-- `backend`: FastAPI + async SQLAlchemy + LiteLLM
-- 主な用途: 市場参入、政策影響、シナリオ比較、論点探索
-- 実行モード: `quick` / `standard` / `deep` / `research` / `baseline`
+- LaunchPad から4種類の質問テンプレート、または自由入力のプロンプトで分析を開始できます。
+- `quick` / `standard` / `deep` / `research` / `baseline` の5つのプリセットで、速度と深さを切り替えられます。
+- `.txt` / `.md` / `.pdf` をプロジェクトに添付し、エビデンス付きの分析フローに載せられます。
+- ライブ画面では SSE で進捗を配信し、Activity Feed、社会反応、会話、グラフの変化を追跡できます。
+- 結果画面では Decision Brief、シナリオ比較、伝播分析、Transcript、再実行、フォローアップ質問を扱えます。
+- `/populations` では人口生成、一覧確認、世代 fork ができます。
+- Decision Lab では2つのシナリオを同一人口で並行実行し、意見シフト・連合変動・監査証跡を比較できます。
+- Theater UI ではディベートカード、ライブ対話ストリーム、スタンス変化をリアルタイムに可視化します。
+
+## 30秒でわかるポンチ図
+
+Agent AI は「問い」と「任意の根拠文書」を受け取り、合成人口の反応、代表者・専門家の議論、品質チェックを通して、意思決定に使える Decision Brief へ変換します。
+
+```mermaid
+flowchart LR
+    Q["問い / テンプレート / 添付文書"] --> L["LaunchPad<br/>Vue UI"]
+    L --> A["FastAPI<br/>Simulation API"]
+    A --> P["Project / Document<br/>保存・GraphRAG"]
+    A --> D["Dispatcher<br/>preset 正規化"]
+    D --> S["Society Pulse<br/>合成人口の反応"]
+    S --> C["Council<br/>代表者 + 専門家の議論"]
+    C --> Y["Synthesis<br/>Decision Brief 生成"]
+    Y --> R["Results<br/>判断材料・根拠・次アクション"]
+    Y --> X["Decision Lab<br/>シナリオ比較"]
+    S -. SSE .-> V["Live Simulation<br/>進捗・会話・社会グラフ"]
+    C -. SSE .-> V
+    Y -. SSE .-> V
+```
+
+読み方:
+
+- ユーザーは LaunchPad で質問、テンプレート、ファイル、実行プリセットを選びます。
+- バックエンドは `quick` / `standard` / `deep` / `research` / `baseline` に正規化し、必要なフェーズだけを実行します。
+- 実行中の状態は SSE で配信され、フロントエンドの Pinia store が Activity Feed、社会グラフ、会話、Theater UI に反映します。
+- 結果は Decision Brief、シナリオ比較、伝播分析、Transcript、follow-up 質問として再利用できます。
+
+## 画面と実行フロー
+
+| Route | 役割 | 主な内容 |
+| --- | --- | --- |
+| `/` | LaunchPad | 質問テンプレート、自由入力、ファイル添付、プリセット選択、実行履歴 |
+| `/sim/:id` | Live Simulation | SSE 進捗、Activity Feed、社会反応、会話、ライブグラフ、Theater UI（ディベートカード・対話ストリーム） |
+| `/sim/:id/results` | Results | Decision Brief、シナリオ比較、Propagation、Transcript、Follow-up |
+| `/populations` | Populations | 人口生成、人口一覧、詳細表示、fork |
+| `/scenario/:id` | Decision Lab | シナリオペア比較、意見シフト表、連合マップ、監査タイムライン |
+
+実行時の大まかな流れは次の3段です。
+
+1. `Society Pulse`
+人口設定に基づいて大規模な合成人口を生成し、選抜されたエージェント群の反応を集約します。
+2. `Council`
+市民代表と専門家を選び、複数ラウンドの構造化議論を行います。
+3. `Synthesis`
+社会反応、議論、品質情報をまとめて Decision Brief と比較可能なシナリオを生成します。
+
+### プリセット
+
+| Preset | 主なフェーズ | 用途 |
+| --- | --- | --- |
+| `quick` | `society_pulse -> synthesis` | 一次判断を高速に得たいとき |
+| `standard` | `society_pulse -> council -> synthesis` | 既定の分析フロー |
+| `deep` | `society_pulse -> multi_perspective -> council -> pm_analysis -> synthesis` | 多視点と PM 分析まで含めて深掘りしたいとき |
+| `research` | `society_pulse -> issue_mining -> multi_perspective -> intervention -> synthesis` | 論点抽出と介入比較を重視したいとき |
+| `baseline` | 単一 LLM のベースライン実行 | 比較・検証用 |
+
+旧モード名は内部で正規化されます。たとえば `unified -> standard`、`society_first -> research`、`single -> quick` です。
+
+## コードを読む入口
+
+| 知りたいこと | 主なファイル |
+| --- | --- |
+| アプリ起動、CORS、テンプレート seed、health check | `backend/src/app/main.py` |
+| 環境変数、config YAML の読み込み | `backend/src/app/config.py` |
+| DB 接続、テーブル作成、SQLite/PostgreSQL 切り替え | `backend/src/app/database.py` |
+| API ルート全体の登録 | `backend/src/app/api/routes/__init__.py` |
+| シミュレーション作成、SSE、レポート、再実行 | `backend/src/app/api/routes/simulations.py` |
+| 実行プリセットの定義と旧モード名の変換 | `backend/src/app/models/simulation.py` |
+| `baseline` と unified 実行の振り分け | `backend/src/app/services/simulation_dispatcher.py` |
+| `Society Pulse -> Council -> Synthesis` の本体 | `backend/src/app/services/unified_orchestrator.py` |
+| 合成人口、社会ネットワーク、反応、伝播、評価 | `backend/src/app/services/society/` |
+| LLM の task routing、provider adapter、fallback | `backend/src/app/llm/` |
+| フロントエンドの route 定義 | `frontend/src/router.ts` |
+| REST API client と型定義 | `frontend/src/api/client.ts` |
+| SSE 購読とライブ状態更新 | `frontend/src/composables/useSimulationSSE.ts` |
+| 実行状態、グラフ、社会、Decision Lab の状態管理 | `frontend/src/stores/` |
+| 主要画面 | `frontend/src/pages/` |
+| 可視化・結果表示コンポーネント | `frontend/src/components/` |
 
 ## アーキテクチャ
 
@@ -185,17 +268,55 @@ REDIS_URL=redis://localhost:6379/0
 
 | Method | Endpoint | 役割 |
 | --- | --- | --- |
-| `GET` | `/health` | 稼働状態の確認 |
-| `GET` | `/templates` | テンプレート一覧 |
-| `POST` | `/projects` | 添付用プロジェクト作成 |
-| `POST` | `/projects/{project_id}/documents` | ドキュメント追加 |
-| `POST` | `/simulations` | シミュレーション作成 |
-| `GET` | `/simulations/{sim_id}` | 状態取得 |
-| `GET` | `/simulations/{sim_id}/stream` | SSE 進捗 |
-| `GET` | `/simulations/{sim_id}/report` | 最終レポート |
-| `POST` | `/simulations/{sim_id}/followups` | follow-up 質問 |
-| `POST` | `/simulations/{sim_id}/rerun` | 再実行 |
+| `GET` | `/health` | 稼働状態と live execution 可否の確認 |
+| `GET` | `/templates` | 利用可能なテンプレート一覧 |
+| `POST` | `/projects` | ドキュメント添付用のプロジェクト作成 |
+| `POST` | `/projects/{project_id}/documents` | `.txt` / `.md` / `.pdf` のアップロード |
+| `POST` | `/simulations` | 新規シミュレーション作成 |
+| `GET` | `/simulations/{sim_id}` | 状態・メタデータ取得 |
+| `GET` | `/simulations/{sim_id}/stream` | SSE 進捗ストリーム |
+| `GET` | `/simulations/{sim_id}/timeline` | タイムライン取得 |
+| `GET` | `/simulations/{sim_id}/graph` | 最新グラフ取得 |
+| `GET` | `/simulations/{sim_id}/graph/history` | ラウンドごとのグラフ履歴 |
+| `GET` | `/simulations/{sim_id}/report` | 最終レポート取得 |
+| `POST` | `/simulations/{sim_id}/followups` | 結果に対する follow-up 質問 |
+| `POST` | `/simulations/{sim_id}/rerun` | 同条件で再実行 |
 | `POST` | `/scenario-pairs` | シナリオ比較開始 |
+
+### Society / 運用系
+
+| Method | Endpoint | 役割 |
+| --- | --- | --- |
+| `GET` | `/society/populations` | 人口一覧 |
+| `POST` | `/society/populations/generate` | 人口生成 |
+| `GET` | `/society/populations/{pop_id}` | 人口詳細 |
+| `POST` | `/society/populations/{pop_id}/fork` | 人口 fork |
+| `GET` | `/society/simulations/{sim_id}/activation` | activation 結果 |
+| `GET` | `/society/simulations/{sim_id}/meeting` | meeting 結果 |
+| `GET` | `/society/simulations/{sim_id}/evaluation` | 評価メトリクス |
+| `GET` | `/society/simulations/{sim_id}/propagation` | 伝播データ |
+| `GET` | `/society/simulations/{sim_id}/transcript` | 発話 Transcript |
+| `GET` | `/admin/costs` | トークン・コスト集計 |
+| `GET` | `/admin/quality-metrics` | 品質・fallback 集計 |
+
+## テスト
+
+CI では以下を実行しています。
+
+```bash
+cd backend
+uv sync --extra dev
+uv run pytest -q
+```
+
+```bash
+cd frontend
+pnpm install --frozen-lockfile
+pnpm build
+pnpm test:unit
+pnpm exec playwright install --with-deps chromium
+pnpm test:e2e
+```
 
 ## リポジトリ構成
 

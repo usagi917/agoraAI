@@ -12,8 +12,8 @@ from src.app.api.routes import scenario_pairs as scenario_pairs_route
 from src.app.database import Base
 from src.app.main import app
 from src.app.models import _import_all_models
-from src.app.models.audit_event import AuditEvent
 from src.app.models.agent_profile import AgentProfile
+from src.app.models.audit_event import AuditEvent
 from src.app.models.population import Population
 from src.app.models.population_snapshot import PopulationSnapshot
 from src.app.models.scenario_pair import ScenarioPair
@@ -68,17 +68,19 @@ def mock_spawn_simulation(monkeypatch):
 async def _seed_population(session_factory) -> str:
     """Create a Population with agents and return its id."""
     async with session_factory() as session:
-        pop = Population(agent_count=3, status="ready")
+        pop = Population(agent_count=2, generation_params={"seed": 123}, status="ready")
         session.add(pop)
         await session.flush()
-        for i in range(3):
-            session.add(AgentProfile(
-                population_id=pop.id,
-                agent_index=i,
-                demographics={"age": 30 + i},
-                big_five={"O": 0.5},
-                values={},
-            ))
+        for i in range(2):
+            session.add(
+                AgentProfile(
+                    population_id=pop.id,
+                    agent_index=i,
+                    demographics={"age": 30 + i},
+                    big_five={"O": 0.5},
+                    values={"stability": 0.7},
+                )
+            )
         await session.commit()
         return pop.id
 
@@ -288,6 +290,8 @@ async def test_create_population_snapshot_endpoint(client, session_factory):
     assert payload["population_id"] == population_id
     assert payload["id"]
     assert payload["created_at"]
+    assert payload["agent_count"] == 2
+    assert payload["seed"] == 123
 
 
 @pytest.mark.asyncio
