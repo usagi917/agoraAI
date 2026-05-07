@@ -1,17 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   getSimulation,
   getSimulationReport,
-  getSimulationGraph,
-  getSimulationGraphHistory,
   getSimulationColonies,
   submitSimulationFollowup,
   rerunSimulation,
   type SimulationResponse,
   type ColonyResponse,
-  type GraphSnapshot,
   type EvidenceRef,
   type QualitySummary,
   type ValidationSummary,
@@ -32,7 +29,6 @@ import {
   getPropagation,
   type PropagationData,
 } from '../api/client'
-import { useForceGraph } from '../composables/useForceGraph'
 import DecisionBriefComponent from '../components/DecisionBrief.vue'
 import ProbabilityChart from '../components/ProbabilityChart.vue'
 import ScenarioCompare from '../components/ScenarioCompare.vue'
@@ -49,19 +45,11 @@ import {
 const route = useRoute()
 const router = useRouter()
 const simId = route.params.id as string
-const ROUND_DURATION_MS = 1200
 
 const sim = ref<SimulationResponse | null>(null)
 const report = ref<SimulationReportResponse | null>(null)
 const error = ref('')
 const loading = ref(true)
-const graphContainer = ref<HTMLElement | null>(null)
-const graphSnapshots = ref<GraphSnapshot[]>([])
-const fallbackGraph = ref<{ nodes: any[]; edges: any[] } | null>(null)
-const currentRound = ref(0)
-const transitionTargetRound = ref<number | null>(null)
-const transitionProgress = ref(0)
-const isPlaying = ref(false)
 const colonies = ref<ColonyResponse[]>([])
 const propagationData = ref<PropagationData | null>(null)
 const transcriptEntries = ref<TranscriptEntry[]>([])
@@ -69,14 +57,6 @@ const transcriptLoading = ref(false)
 const transcriptPhaseFilter = ref<string>('')
 const activeSecondaryTab = ref<ResultsSecondaryTab>('society')
 let playbackFrame: number | null = null
-let playbackStartedAt: number | null = null
-
-const {
-  setFullGraph,
-  startGraphTransition,
-  updateGraphTransition,
-  finishGraphTransition,
-} = useForceGraph(graphContainer)
 
 // Follow-up
 const followupQuestion = ref('')
@@ -332,7 +312,6 @@ const agreementMatrix = computed(() => {
   return report.value.agreement_matrix as { colony_ids: string[]; matrix: number[][] }
 })
 const canCopyReport = computed(() => reportText.value.trim().length > 0)
-const snapshotByRound = computed(() => new Map(graphSnapshots.value.map((snapshot) => [snapshot.round, snapshot])))
 function backtestVerdictLabel(verdict?: string | null) {
   if (verdict === 'hit') return 'Hit'
   if (verdict === 'partial_hit') return 'Partial'
@@ -346,12 +325,6 @@ function backtestVerdictClass(verdict?: string | null) {
   return 'verdict-miss'
 }
 
-const totalRounds = computed(() => {
-  if (isMetaMode.value) return 0
-  if (graphSnapshots.value.length === 0) return 0
-  return graphSnapshots.value[graphSnapshots.value.length - 1].round
-})
-const showGraphViews = computed(() => !isMetaMode.value)
 const layoutContext = computed(() => ({
   mode: sim.value?.mode,
   hasScenarios: hasScenarios.value,
@@ -395,98 +368,15 @@ function stopPlaybackLoop() {
     cancelAnimationFrame(playbackFrame)
     playbackFrame = null
   }
-  playbackStartedAt = null
-}
-
-function resetTransitionState() {
-  transitionTargetRound.value = null
-  transitionProgress.value = 0
-  playbackStartedAt = null
-}
-
-function showRound(round: number) {
-  const snapshot = snapshotByRound.value.get(round)
-  if (!snapshot) return false
-
-  currentRound.value = round
-  resetTransitionState()
-  setFullGraph(snapshot.nodes, snapshot.edges)
-  return true
-}
-
-function stopPlayback(round = currentRound.value) {
-  stopPlaybackLoop()
-  isPlaying.value = false
-  showRound(round)
-}
-
-function queueNextTransition(fromRound: number) {
-  stopPlaybackLoop()
-  playbackFrame = requestAnimationFrame(() => {
-    if (!isPlaying.value) return
-    beginRoundTransition(fromRound)
-  })
-}
-
-function stepPlayback(timestamp: number) {
-  if (!isPlaying.value || transitionTargetRound.value === null) return
-
-  if (playbackStartedAt === null) {
-    playbackStartedAt = timestamp
-  }
-
-  const rawProgress = Math.min((timestamp - playbackStartedAt) / ROUND_DURATION_MS, 1)
-  transitionProgress.value = rawProgress
-  updateGraphTransition(rawProgress)
-
-  if (rawProgress < 1) {
-    playbackFrame = requestAnimationFrame(stepPlayback)
-    return
-  }
-
-  finishGraphTransition()
-  currentRound.value = transitionTargetRound.value
-  resetTransitionState()
-
-  if (currentRound.value < totalRounds.value) {
-    queueNextTransition(currentRound.value)
-    return
-  }
-
-  isPlaying.value = false
-}
-
-function beginRoundTransition(fromRound: number) {
-  const fromSnapshot = snapshotByRound.value.get(fromRound)
-  const toSnapshot = snapshotByRound.value.get(fromRound + 1)
-  if (!toSnapshot) {
-    stopPlayback(fromRound)
-    return
-  }
-
-  stopPlaybackLoop()
-  currentRound.value = fromRound
-  transitionTargetRound.value = toSnapshot.round
-  transitionProgress.value = 0
-  if (fromSnapshot) {
-    startGraphTransition(fromSnapshot.nodes, fromSnapshot.edges, toSnapshot.nodes, toSnapshot.edges)
-  } else {
-    setFullGraph(toSnapshot.nodes, toSnapshot.edges)
-  }
-  playbackFrame = requestAnimationFrame(stepPlayback)
 }
 
 onMounted(async () => {
   try {
     sim.value = await getSimulation(simId)
 
-    const [reportData, graphHistory] = await Promise.all([
-      getSimulationReport(simId).catch(() => null),
-      getSimulationGraphHistory(simId).catch(() => []),
-    ])
+    const reportData = await getSimulationReport(simId).catch(() => null)
 
     report.value = reportData
-    graphSnapshots.value = graphHistory
 
     // レポートが未取得かつシミュレーション完了済みなら数秒後にリトライ
     if (!reportData && sim.value?.status === 'completed') {
@@ -515,22 +405,6 @@ onMounted(async () => {
         propagationData.value = res.phase_data as PropagationData
       }
     }).catch(() => { /* no propagation data */ })
-
-    // 最新グラフ表示
-    if (showGraphViews.value && graphHistory.length > 0) {
-      const latest = graphHistory[graphHistory.length - 1]
-      currentRound.value = latest.round
-      fallbackGraph.value = { nodes: latest.nodes, edges: latest.edges }
-      await nextTick()
-      setFullGraph(latest.nodes, latest.edges)
-    } else if (showGraphViews.value) {
-      const graphData = await getSimulationGraph(simId).catch(() => null)
-      if (graphData?.nodes?.length) {
-        fallbackGraph.value = { nodes: graphData.nodes, edges: graphData.edges }
-        await nextTick()
-        setFullGraph(graphData.nodes, graphData.edges)
-      }
-    }
   } catch (e) {
     error.value = 'データの読み込みに失敗しました。'
   } finally {

@@ -23,12 +23,6 @@ vi.mock('vue-router', () => ({
 
 vi.mock('../../api/client', () => apiMocks)
 
-vi.mock('../../composables/useForceGraph', () => ({
-  useForceGraph: () => ({
-    setFullGraph: vi.fn(),
-  }),
-}))
-
 describe('ResultsPage', () => {
   beforeEach(() => {
     push.mockReset()

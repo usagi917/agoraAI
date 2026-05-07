@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   getSimulation,
@@ -18,8 +18,6 @@ import {
 import { useSimulationSSE } from '../composables/useSimulationSSE'
 import { useGraphStore, type GraphStoreSnapshot } from '../stores/graphStore'
 import { useActivityStore, type ActivityEntry } from '../stores/activityStore'
-import { useForceGraph } from '../composables/useForceGraph'
-import type { ThinkingVisualMode } from '../composables/useThinkingParticles'
 import SimulationProgress from '../components/SimulationProgress.vue'
 import ColonyGrid from '../components/ColonyGrid.vue'
 import ActivityFeed from '../components/ActivityFeed.vue'
@@ -29,8 +27,6 @@ import LiveSocietyGraph from '../components/LiveSocietyGraph.vue'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useCognitiveStore } from '../stores/cognitiveStore'
 import { useAgentVisualizationStore } from '../stores/agentVisualizationStore'
-import { useAgentStatusRing } from '../composables/useAgentStatusRing'
-import { useCommunicationPulse, type PulseType } from '../composables/useCommunicationPulse'
 import ThinkingPanel from '../components/ThinkingPanel.vue'
 import AgentActivityTicker from '../components/AgentActivityTicker.vue'
 import DigitalWorkspaceBackground from '../components/DigitalWorkspaceBackground.vue'
@@ -39,7 +35,6 @@ import ForceGraph2D from '../components/ForceGraph2D.vue'
 import AgentStoryDrawer from '../components/AgentStoryDrawer.vue'
 import ConversationsTab from '../components/ConversationsTab.vue'
 import { useTheaterStore } from '../stores/theaterStore'
-import { isWebGLSupported } from '../composables/useWebGLDetect'
 import {
   getDefaultLiveSecondaryTab,
   getLivePrimaryView,
@@ -49,6 +44,7 @@ import {
 } from './layoutRules'
 
 const LIVE_SESSION_VERSION = 1
+type ThinkingVisualMode = 'idle' | 'graphrag' | 'simulation' | 'swarm' | 'report' | 'society'
 
 interface PersistedSimulationLiveState {
   version: number
@@ -63,15 +59,12 @@ const router = useRouter()
 const simId = route.params.id as string
 
 const sim = ref<SimulationResponse | null>(null)
-const graphCanvas = ref<HTMLElement | null>(null)
 const selectedEntity = ref<any>(null)
 const elapsedTime = ref(0)
 const activeSecondaryTab = ref<LiveSecondaryTab>('progress')
 const selectedAgentForStory = ref<string | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
 let persistTimer: ReturnType<typeof setTimeout> | null = null
-
-const webglAvailable = isWebGLSupported()
 
 const store = useSimulationStore()
 const graphStore = useGraphStore()
@@ -108,76 +101,7 @@ const thinkingMode = computed<ThinkingVisualMode>(() => {
   return 'idle'
 })
 
-const agentStatusRing = useAgentStatusRing()
-
-const {
-  graph,
-  graphError,
-  setFullGraph,
-  applyDiff: applyGraphDiff,
-  resetCamera,
-  getInternalNodes,
-  pulseNode,
-  focusOnNode,
-} = useForceGraph(graphCanvas, thinkingMode, { nodeExtension: agentStatusRing.nodeExtension })
-
 const theaterStore = useTheaterStore()
-
-// Pulse + camera focus on theater events
-watch(() => theaterStore.latestClaim, (claim) => {
-  if (claim) {
-    pulseNode(claim.agentId)
-    focusOnNode(claim.agentId, 'claim_made')
-  }
-})
-watch(() => theaterStore.latestShift, (shift) => {
-  if (shift) focusOnNode(shift.agentId, 'stance_shifted')
-})
-watch(() => theaterStore.latestAlliance, (alliance) => {
-  if (alliance?.agentIds?.[0]) focusOnNode(alliance.agentIds[0], 'alliance_formed')
-})
-watch(() => theaterStore.decision, (decision) => {
-  if (decision) focusOnNode('', 'decision_locked')
-})
-
-const commPulse = useCommunicationPulse(graph, getInternalNodes)
-let lastProcessedFlowIndex = 0
-let commPulseFrameId: number | null = null
-
-watch(
-  () => vizStore.communicationFlows.length,
-  (newLen) => {
-    if (newLen < lastProcessedFlowIndex) {
-      lastProcessedFlowIndex = newLen
-    }
-    if (newLen <= lastProcessedFlowIndex) return
-    const newFlows = vizStore.communicationFlows.slice(lastProcessedFlowIndex)
-    lastProcessedFlowIndex = newLen
-    for (const flow of newFlows) {
-      const pulseType: PulseType = flow.messageType === 'debate' ? 'debate'
-        : flow.messageType === 'conversation' ? 'communication'
-        : 'thinking'
-      commPulse.addPulseLine(flow.sourceId, flow.targetId, pulseType)
-    }
-  },
-)
-
-function startCommunicationPulseLoop() {
-  if (commPulseFrameId !== null) return
-
-  const tick = (time: number) => {
-    commPulse.update(time / 1000)
-    commPulseFrameId = requestAnimationFrame(tick)
-  }
-
-  commPulseFrameId = requestAnimationFrame(tick)
-}
-
-function stopCommunicationPulseLoop() {
-  if (commPulseFrameId === null) return
-  cancelAnimationFrame(commPulseFrameId)
-  commPulseFrameId = null
-}
 
 const stageLabel = computed(() => {
   if (store.isSocietyMode) {
@@ -638,11 +562,6 @@ async function hydrateLiveData(simulation: SimulationResponse) {
   if (graphData?.nodes?.length) {
     graphStore.setFullState(graphData.nodes, graphData.edges)
   }
-
-  if (graphStore.nodes.length > 0) {
-    await nextTick()
-    setFullGraph(graphStore.nodes, graphStore.edges)
-  }
 }
 
 async function bootstrapSimulation() {
@@ -679,8 +598,6 @@ async function bootstrapSimulation() {
 onMounted(async () => {
   try {
     await bootstrapSimulation()
-    agentStatusRing.startAnimationLoop(getInternalNodes)
-    startCommunicationPulseLoop()
   } catch (error) {
     console.error('Simulation bootstrap failed:', error)
     store.init(simId, store.mode, store.promptText)
@@ -695,9 +612,6 @@ onUnmounted(() => {
   societyGraphStore.reset()
   vizStore.reset()
   theaterStore.reset()
-  agentStatusRing.stopAnimationLoop()
-  stopCommunicationPulseLoop()
-  commPulse.dispose()
   selectedEntity.value = null
 })
 
@@ -713,35 +627,6 @@ watch(
     }
   },
 )
-
-watch(
-  () => graphStore.pendingDiffs.length,
-  () => {
-    if (!graph.value || graphStore.pendingDiffs.length === 0) return
-    const diffs = graphStore.consumePendingDiffs()
-    for (const diff of diffs) {
-      applyGraphDiff(diff)
-    }
-  },
-)
-
-watch(graph, (fg) => {
-  if (!fg) return
-  fg.onNodeClick((node: any) => {
-    const storeNode = graphStore.nodes.find((n: any) => n.id === node.id)
-    selectedEntity.value = storeNode || node
-    const focusX = Number.isFinite(node.displayX) ? node.displayX : node.x || 0
-    const focusY = Number.isFinite(node.displayY) ? node.displayY : node.y || 0
-    const focusZ = Number.isFinite(node.displayZ) ? node.displayZ : node.z || 0
-    const distance = 100
-    const distRatio = 1 + distance / Math.hypot(focusX, focusY, focusZ)
-    fg.cameraPosition(
-      { x: focusX * distRatio, y: focusY * distRatio, z: focusZ * distRatio },
-      { x: focusX, y: focusY, z: focusZ },
-      1000,
-    )
-  })
-})
 
 watch(() => store.toSnapshot(), schedulePersist, { deep: true })
 watch(() => graphStore.toSnapshot(), schedulePersist, { deep: true })
@@ -872,7 +757,7 @@ function goToResults() {
 
         <div class="graph-panel">
           <div class="panel-header">
-            <h3>{{ store.isSocietyMode ? '3D Social Graph' : '3D Knowledge Graph' }}</h3>
+            <h3>{{ store.isSocietyMode ? 'Social Graph' : 'Knowledge Graph' }}</h3>
             <div class="panel-metrics">
               <template v-if="store.isSocietyMode">
                 <span class="metric"><span class="metric-val">{{ societyGraphStore.nodeCount }}</span> agents</span>
@@ -892,17 +777,15 @@ function goToResults() {
               :spotlight-agent-id="selectedAgentForStory"
               @select-agent="selectedAgentForStory = $event"
             />
-            <!-- Other modes: Knowledge Graph (3D or 2D fallback) -->
-            <template v-else-if="webglAvailable">
-              <div ref="graphCanvas" class="graph-canvas-host"></div>
-              <div v-if="graphError" class="graph-error-state">
-                <div class="graph-empty-shell">
-                  <div class="graph-empty-eyebrow">Graph Unavailable</div>
-                  <div class="graph-empty-title">3D グラフを表示できません</div>
-                  <p class="graph-empty-detail">{{ graphError }}</p>
-                </div>
-              </div>
-              <div v-else-if="graphStore.nodes.length === 0" class="graph-empty" :class="graphContainerClass">
+            <!-- Other modes: 2D Knowledge Graph -->
+            <template v-else>
+              <ForceGraph2D
+                :nodes="graphStore.nodes"
+                :edges="graphStore.edges"
+                :selected-node-id="selectedEntity?.id ?? null"
+                @select-node="selectedEntity = $event"
+              />
+              <div v-if="graphStore.nodes.length === 0" class="graph-empty" :class="graphContainerClass">
                 <DigitalWorkspaceBackground :mode="thinkingMode" />
                 <div class="graph-empty-rings">
                   <div class="ring ring-1" />
@@ -921,19 +804,14 @@ function goToResults() {
                   </div>
                 </div>
               </div>
-              <div v-if="phaseOverlay && !graphError" class="phase-overlay">
+              <div v-if="phaseOverlay" class="phase-overlay">
                 <span class="phase-icon">{{ phaseOverlay.icon }}</span>
                 <span class="phase-label">{{ phaseOverlay.label }}</span>
               </div>
             </template>
-            <!-- 2D SVG Fallback when WebGL unavailable -->
-            <template v-else>
-              <ForceGraph2D :nodes="graphStore.nodes" :edges="graphStore.edges" />
-            </template>
             <AgentActivityTicker />
           </div>
-          <button v-if="!store.isSocietyMode && graphStore.nodes.length > 0 && !graphError" class="reset-camera-btn" @click="resetCamera" title="中心に戻す">&#8962;</button>
-          <div v-if="!store.isSocietyMode && graphStore.nodes.length > 0 && !graphError" class="graph-legend">
+          <div v-if="!store.isSocietyMode && graphStore.nodes.length > 0" class="graph-legend">
             <span class="legend-item" v-for="(color, type) in entityTypeColors" :key="type">
               <span class="legend-dot" :style="{ background: color, boxShadow: `0 0 6px ${color}` }"></span>
               <span class="legend-label">{{ type }}</span>
@@ -1229,11 +1107,6 @@ function goToResults() {
   overflow: hidden;
 }
 
-.graph-canvas-host {
-  position: absolute;
-  inset: 0;
-}
-
 .graph-container.tone-graphrag { background: radial-gradient(ellipse at 30% 30%, rgba(15, 60, 54, 0.88) 0%, #041118 48%, #02070b 100%); }
 .graph-container.tone-report { background: radial-gradient(ellipse at 30% 35%, rgba(72, 36, 20, 0.9) 0%, #170a08 45%, #040405 100%); }
 .graph-container.tone-swarm { background: radial-gradient(ellipse at 30% 35%, rgba(38, 25, 72, 0.92) 0%, #0b0618 48%, #020208 100%); }
@@ -1249,16 +1122,6 @@ function goToResults() {
   font-size: 0.82rem;
   z-index: 1;
 }
-.graph-error-state {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1.25rem;
-  z-index: 2;
-}
-
 .graph-empty-backdrop {
   position: absolute;
   inset: 0;
@@ -1352,9 +1215,6 @@ function goToResults() {
   background: rgba(255,255,255,0.07);
   border: 1px solid rgba(255,255,255,0.08);
 }
-
-.reset-camera-btn { position: absolute; top: 12px; right: 12px; z-index: 10; width: 32px; height: 32px; border-radius: 6px; border: 1px solid rgba(100,100,255,0.2); background: rgba(10,10,30,0.75); backdrop-filter: blur(8px); color: rgba(200,200,255,0.7); font-size: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
-.reset-camera-btn:hover { background: rgba(30,30,80,0.85); color: #fff; border-color: rgba(100,100,255,0.4); }
 
 .graph-legend {
   position: absolute;
@@ -1557,11 +1417,6 @@ function goToResults() {
 
   .graph-container {
     min-height: 18rem;
-  }
-
-  .reset-camera-btn {
-    top: 10px;
-    right: 10px;
   }
 
   .graph-legend {

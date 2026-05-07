@@ -25,16 +25,6 @@ vi.mock('vue-router', () => ({
 
 vi.mock('../../api/client', () => apiMocks)
 
-vi.mock('../../composables/useForceGraph', () => ({
-  useForceGraph: () => ({
-    setFullGraph: vi.fn(),
-    startGraphTransition: vi.fn(),
-    updateGraphTransition: vi.fn(),
-    finishGraphTransition: vi.fn(),
-    graphError: null,
-  }),
-}))
-
 const unifiedReport = {
   type: 'unified',
   content: '# 統合レポート\n\n市場参入は推奨されます。',

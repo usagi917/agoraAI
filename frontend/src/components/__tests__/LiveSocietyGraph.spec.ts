@@ -8,29 +8,6 @@ import { useKGEvolutionStore } from '../../stores/kgEvolutionStore'
 import { useSimulationStore } from '../../stores/simulationStore'
 import { useSocietyGraphStore } from '../../stores/societyGraphStore'
 
-const graphMocks = vi.hoisted(() => ({
-  resetCamera: vi.fn(),
-  toggleBloom: vi.fn(),
-  highlightAgentsForEntity: vi.fn(),
-  clearHighlight: vi.fn(),
-}))
-
-vi.mock('../../composables/useLiveSocietyGraph', async () => {
-  const { ref } = await import('vue')
-
-  return {
-    useLiveSocietyGraph: () => ({
-      selectedAgentId: ref<string | null>(null),
-      resetCamera: graphMocks.resetCamera,
-      graphError: null,
-      toggleBloom: graphMocks.toggleBloom,
-      bloomEnabled: ref(false),
-      highlightAgentsForEntity: graphMocks.highlightAgentsForEntity,
-      clearHighlight: graphMocks.clearHighlight,
-    }),
-  }
-})
-
 describe('LiveSocietyGraph', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -80,6 +57,7 @@ describe('LiveSocietyGraph', () => {
       },
       global: {
         stubs: {
+          ForceGraph2D: { template: '<div data-testid="graph-2d" />' },
           ConversationToast: true,
           NodeDetailPanel: true,
         },
