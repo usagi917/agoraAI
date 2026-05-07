@@ -57,4 +57,23 @@ describe('ForceGraph2D', () => {
     const texts = wrapper.findAll('text')
     expect(texts.some(t => t.text() === 'テスト')).toBe(true)
   })
+
+  it('preserves zero-valued edge weights in visual scaling', async () => {
+    const wrapper = mount(ForceGraph2D, {
+      props: {
+        nodes: [
+          { id: 'n1', label: 'Node 1', type: 'organization', importance_score: 0.8, activity_score: 0 },
+          { id: 'n2', label: 'Node 2', type: 'person', importance_score: 0.5, activity_score: 0 },
+        ],
+        edges: [
+          { source: 'n1', target: 'n2', relation_type: 'trust', weight: 0, label: '' },
+        ],
+      },
+    })
+    await flushPromises()
+
+    const line = wrapper.get('line')
+    expect(line.attributes('stroke-width')).toBe('0.7')
+    expect(line.attributes('stroke-opacity')).toBe('0.24')
+  })
 })

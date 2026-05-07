@@ -38,8 +38,10 @@ const props = withDefaults(defineProps<{
   nodes: NodeProp[]
   edges: EdgeProp[]
   selectedNodeId?: string | null
+  highlightedNodeIds?: string[]
 }>(), {
   selectedNodeId: null,
+  highlightedNodeIds: () => [],
 })
 
 const emit = defineEmits<{
@@ -81,7 +83,15 @@ const hoveredNodeId = ref<string | null>(null)
 let animFrame: number | null = null
 let resizeObserver: ResizeObserver | null = null
 
+const highlightedNodeIdSet = computed(() => {
+  if (props.highlightedNodeIds.length === 0) return null
+  const ids = new Set(props.highlightedNodeIds)
+  if (props.selectedNodeId) ids.add(props.selectedNodeId)
+  return ids
+})
+
 const connectedNodeIds = computed(() => {
+  if (highlightedNodeIdSet.value) return highlightedNodeIdSet.value
   const activeId = props.selectedNodeId || hoveredNodeId.value
   if (!activeId) return null
   const ids = new Set<string>([activeId])
@@ -105,6 +115,10 @@ function nodeRadius(node: Pick<Node2D, 'importance_score' | 'activity_score' | '
   return 5 + Math.max(0, Math.min(1, node.importance_score || 0.4)) * 8 + activityBoost
 }
 
+function normalizedWeight(weight: number | null | undefined) {
+  return Math.max(0, Math.min(1, weight ?? 0.4))
+}
+
 function edgeKey(edge: EdgeProp) {
   return edge.id || `${edge.source}-${edge.target}-${edge.relation_type}`
 }
@@ -114,17 +128,20 @@ function isNodeDimmed(nodeId: string) {
 }
 
 function isEdgeDimmed(edge: EdgeProp) {
+  if (highlightedNodeIdSet.value) {
+    return !highlightedNodeIdSet.value.has(edge.source) && !highlightedNodeIdSet.value.has(edge.target)
+  }
   const activeId = props.selectedNodeId || hoveredNodeId.value
   return activeId ? edge.source !== activeId && edge.target !== activeId : false
 }
 
 function edgeOpacity(edge: EdgeProp) {
   if (isEdgeDimmed(edge)) return 0.14
-  return Math.min(0.72, 0.24 + Math.max(0, Math.min(1, edge.weight || 0.4)) * 0.38)
+  return Math.min(0.72, 0.24 + normalizedWeight(edge.weight) * 0.38)
 }
 
 function edgeWidth(edge: EdgeProp) {
-  return 0.7 + Math.max(0, Math.min(1, edge.weight || 0.4)) * 2.4
+  return 0.7 + normalizedWeight(edge.weight) * 2.4
 }
 
 function updateSize() {
@@ -182,7 +199,7 @@ function tick() {
     const dx = target.x - source.x
     const dy = target.y - source.y
     const dist = Math.sqrt(dx * dx + dy * dy) || 1
-    const preferred = 70 + (1 - Math.max(0, Math.min(1, edge.weight || 0.4))) * 80
+    const preferred = 70 + (1 - normalizedWeight(edge.weight)) * 80
     const force = (dist - preferred) * 0.012 * alpha
     source.vx += (force * dx) / dist
     source.vy += (force * dy) / dist

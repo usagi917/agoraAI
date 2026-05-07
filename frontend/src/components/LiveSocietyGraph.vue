@@ -40,6 +40,7 @@ const store = useSimulationStore()
 const societyGraphStore = useSocietyGraphStore()
 const kgStore = useKGEvolutionStore()
 const selectedAgentId = ref<string | null>(null)
+const highlightedAgentIds = ref<string[]>([])
 
 const selectedGraphNodeId = computed(() => selectedAgentId.value ?? props.spotlightAgentId ?? null)
 
@@ -117,18 +118,19 @@ const edgeInteractionCount = computed(() => {
 
 function clearSelection() {
   selectedAgentId.value = null
+  highlightedAgentIds.value = []
 }
 
 function clearEdgeSelection() {
   societyGraphStore.setSelectedEdge(null)
 }
 
-function handleHighlightAgents(_agentIds: string[]) {
-  // The 2D graph keeps KG detail selection local; agent highlighting is handled
-  // by selecting the corresponding node in the graph.
+function handleHighlightAgents(agentIds: string[]) {
+  highlightedAgentIds.value = agentIds
 }
 
 function handleNodeSelect(node: { id: string }) {
+  highlightedAgentIds.value = []
   if (node.id.startsWith('kg-')) {
     selectedAgentId.value = node.id
     return
@@ -239,6 +241,7 @@ onUnmounted(() => {
       :nodes="societyGraphStore.graphNodes"
       :edges="societyGraphStore.graphEdges"
       :selected-node-id="selectedGraphNodeId"
+      :highlighted-node-ids="highlightedAgentIds"
       @select-node="handleNodeSelect"
       @hover-edge="handleEdgeHover"
       @select-edge="handleEdgeSelect"
