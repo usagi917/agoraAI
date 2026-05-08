@@ -1,6 +1,8 @@
 from pathlib import Path
+import shlex
 
 import yaml
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -28,6 +30,38 @@ class Settings(BaseSettings):
     config_dir: Path = _project_root / "config"
     templates_dir: Path = _project_root / "templates"
     data_dir: Path = _project_root / "data"
+    codex_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("CODEX_REVIEW_ENABLED", "AGORAAI_CODEX_ENABLED"),
+    )
+    codex_command: str = Field(
+        default="codex",
+        validation_alias=AliasChoices("CODEX_BIN", "AGORAAI_CODEX_COMMAND"),
+    )
+    codex_args: str = Field(
+        default="app-server --listen stdio://",
+        validation_alias=AliasChoices("CODEX_REVIEW_ARGS", "AGORAAI_CODEX_ARGS"),
+    )
+    codex_review_transport: str = Field(default="stdio", validation_alias="CODEX_REVIEW_TRANSPORT")
+    codex_timeout_seconds: float = Field(
+        default=60.0,
+        validation_alias=AliasChoices("CODEX_REVIEW_TIMEOUT_SECONDS", "AGORAAI_CODEX_TIMEOUT_SECONDS"),
+    )
+    codex_startup_timeout_seconds: float = Field(
+        default=10.0,
+        validation_alias=AliasChoices("CODEX_REVIEW_STARTUP_TIMEOUT_SECONDS", "AGORAAI_CODEX_STARTUP_TIMEOUT_SECONDS"),
+    )
+    codex_review_model: str = Field(default="", validation_alias="CODEX_REVIEW_MODEL")
+    codex_review_mock: bool = Field(default=False, validation_alias="CODEX_REVIEW_MOCK")
+    codex_review_max_context_chars: int = Field(default=24000, validation_alias="CODEX_REVIEW_MAX_CONTEXT_CHARS")
+    codex_review_workdir: Path = Field(
+        default=Path("/tmp/agora_codex_review_empty"),
+        validation_alias="CODEX_REVIEW_WORKDIR",
+    )
+    codex_review_only: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("CODEX_REVIEW_ONLY", "AGORAAI_CODEX_REVIEW_ONLY"),
+    )
     # Swarm settings
     max_concurrent_colonies: int = 5
     llm_cache_ttl: int = 3600  # seconds
@@ -64,6 +98,12 @@ class Settings(BaseSettings):
         if not raw:
             return ["*"]
         return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+    def codex_argv(self) -> list[str]:
+        return [self.codex_command, *shlex.split(self.codex_args)]
+
+    def codex_transport_supported(self) -> bool:
+        return self.codex_review_transport.strip().lower() == "stdio"
 
     def load_graphrag_config(self) -> dict:
         config_path = self.config_dir / "graphrag.yaml"

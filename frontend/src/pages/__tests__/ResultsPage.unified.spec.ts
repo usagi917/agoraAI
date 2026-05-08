@@ -12,7 +12,10 @@ const apiMocks = vi.hoisted(() => ({
   getSimulationGraph: vi.fn(),
   getSimulationGraphHistory: vi.fn(),
   getSimulationColonies: vi.fn(),
-  submitSimulationFollowup: vi.fn(),
+  submitCodexReview: vi.fn(),
+  getCodexHealth: vi.fn(),
+  getTranscript: vi.fn(),
+  getPropagation: vi.fn(),
   rerunSimulation: vi.fn(),
 }))
 
@@ -128,6 +131,15 @@ describe('ResultsPage — unified report', () => {
     apiMocks.getSimulationGraphHistory.mockResolvedValue([])
     apiMocks.getSimulationGraph.mockResolvedValue({ nodes: [], edges: [] })
     apiMocks.getSimulationColonies.mockResolvedValue([])
+    apiMocks.getCodexHealth.mockResolvedValue({
+      enabled: false,
+      available: false,
+      initialized: false,
+      transport: 'stdio',
+      error: '',
+    })
+    apiMocks.getTranscript.mockResolvedValue([])
+    apiMocks.getPropagation.mockResolvedValue(null)
   })
 
   function mountPage() {

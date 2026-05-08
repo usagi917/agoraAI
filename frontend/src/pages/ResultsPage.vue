@@ -7,7 +7,8 @@ import {
   getSimulationGraph,
   getSimulationGraphHistory,
   getSimulationColonies,
-  submitSimulationFollowup,
+  submitCodexReview,
+  getCodexHealth,
   rerunSimulation,
   type SimulationResponse,
   type ColonyResponse,
@@ -29,6 +30,7 @@ import {
   type TranscriptEntry,
   getPropagation,
   type PropagationData,
+  type CodexHealthResponse,
 } from '../api/client'
 import { useForceGraph } from '../composables/useForceGraph'
 import DecisionBriefComponent from '../components/DecisionBrief.vue'
@@ -76,12 +78,23 @@ const {
   finishGraphTransition,
 } = useForceGraph(graphContainer)
 
-// Follow-up
-const followupQuestion = ref('')
-const followupAnswers = ref<Array<{ question: string; answer: string; loading?: boolean; evidenceRefs?: EvidenceRef[] }>>([])
-const isFollowupLoading = ref(false)
+const codexReviewQuestion = ref('')
+const codexReviewAnswers = ref<Array<{ question: string; answer: string; loading?: boolean; evidenceRefs?: EvidenceRef[] }>>([])
+const isCodexReviewLoading = ref(false)
+const codexHealth = ref<CodexHealthResponse | null>(null)
+const codexHealthLoading = ref(true)
+const isCodexUnavailable = computed(() => (
+  codexHealthLoading.value || !codexHealth.value?.enabled || !codexHealth.value?.available
+))
+const aiCheckUnavailableMessage = computed(() => (
+  codexHealthLoading.value
+    ? 'レビュー機能を準備しています。'
+    : 'レビュー機能の準備ができていません。管理者に確認してください。'
+))
+const hasAiCheckResult = computed(() => codexReviewAnswers.value.some((answer) => !answer.loading))
 const copyState = ref<'idle' | 'success' | 'error'>('idle')
 let copyStateTimer: number | null = null
+const INITIAL_AI_CHECK_QUESTION = 'この結果について、よかった点、気になる点、見落としていそうな点、次に確認するとよいことを整理してください。'
 
 const PRESET_MODES = new Set(['quick', 'standard', 'deep', 'research', 'baseline'])
 const isPresetMode = computed(() => PRESET_MODES.has(sim.value?.mode ?? ''))
@@ -420,6 +433,22 @@ function beginRoundTransition(fromRound: number) {
 onMounted(async () => {
   try {
     sim.value = await getSimulation(simId)
+    getCodexHealth()
+      .then((health) => {
+        codexHealth.value = health
+      })
+      .catch(() => {
+        codexHealth.value = {
+          enabled: false,
+          available: false,
+          initialized: false,
+          transport: 'stdio',
+          error: 'レビュー機能の準備ができていません。',
+        }
+      })
+      .finally(() => {
+        codexHealthLoading.value = false
+      })
 
     const [reportData, graphHistory] = await Promise.all([
       getSimulationReport(simId).catch(() => null),
@@ -486,25 +515,27 @@ onUnmounted(() => {
   }
 })
 
-async function handleFollowup() {
-  if (!followupQuestion.value.trim() || isFollowupLoading.value) return
-  isFollowupLoading.value = true
-  const question = followupQuestion.value
-  followupQuestion.value = ''
-  followupAnswers.value.push({ question, answer: '', loading: true })
-  const idx = followupAnswers.value.length - 1
+async function handleCodexReview(questionOverride?: string) {
+  const question = (questionOverride ?? codexReviewQuestion.value).trim()
+  if (!question || isCodexReviewLoading.value || isCodexUnavailable.value) return
+  isCodexReviewLoading.value = true
+  if (!questionOverride) {
+    codexReviewQuestion.value = ''
+  }
+  codexReviewAnswers.value.push({ question, answer: '', loading: true })
+  const idx = codexReviewAnswers.value.length - 1
 
   try {
-    const result = await submitSimulationFollowup(simId, question)
-    followupAnswers.value[idx] = {
+    const result = await submitCodexReview(simId, question)
+    codexReviewAnswers.value[idx] = {
       question,
       answer: result.answer || '回答を生成中...',
       evidenceRefs: result.evidence_refs || [],
     }
   } catch {
-    followupAnswers.value[idx] = { question, answer: 'エラーが発生しました。' }
+    codexReviewAnswers.value[idx] = { question, answer: 'レビューに失敗しました。時間をおいてもう一度お試しください。' }
   } finally {
-    isFollowupLoading.value = false
+    isCodexReviewLoading.value = false
   }
 }
 
@@ -1134,49 +1165,72 @@ function renderMarkdown(content: string): string {
             <div v-else class="empty-state">根拠ソースはありません。</div>
           </div>
 
-          <div class="side-card chat-panel">
-            <div class="side-header">
-              <h3>Report Agent</h3>
+          <div class="side-card ai-check-panel">
+            <div class="side-header ai-check-header">
+              <h3>深くレビューしてもらう</h3>
+              <span v-if="isCodexUnavailable" class="ai-check-status">準備中</span>
             </div>
-            <div class="chat-messages">
-              <div v-if="followupAnswers.length === 0" class="chat-welcome">
-                <div class="welcome-avatar">AI</div>
-                <p>レポートについて質問できます。</p>
+
+            <div v-if="codexReviewAnswers.length === 0" class="ai-check-start">
+              <p>
+                この結果をもとに、「よかった点」「気になる点」「見落としていそうな点」を深く整理します。
+              </p>
+              <div v-if="isCodexUnavailable" class="ai-check-notice">
+                {{ aiCheckUnavailableMessage }}
               </div>
-              <template v-for="(qa, i) in followupAnswers" :key="i">
-                <div class="chat-bubble user">
-                  <div class="bubble-content">{{ qa.question }}</div>
-                </div>
-                <div class="chat-bubble agent">
-                  <div class="bubble-avatar">AI</div>
-                  <div v-if="qa.loading" class="bubble-content">
-                    <div class="typing-indicator"><span></span><span></span><span></span></div>
+              <button
+                class="btn btn-primary ai-check-primary"
+                @click="handleCodexReview(INITIAL_AI_CHECK_QUESTION)"
+                :disabled="isCodexReviewLoading || isCodexUnavailable"
+              >
+                深くレビューしてもらう
+              </button>
+            </div>
+
+            <div v-else class="ai-check-results">
+              <h4>レビュー結果</h4>
+              <template v-for="(qa, i) in codexReviewAnswers" :key="i">
+                <div v-if="qa.loading" class="ai-check-loading">
+                  <div class="typing-indicator"><span></span><span></span><span></span></div>
+                  <div>
+                    <strong>結果を詳しく見ています...</strong>
+                    <p>少し時間がかかる場合があります。</p>
                   </div>
-                  <div v-else class="bubble-content">
-                    {{ qa.answer }}
-                    <div v-if="qa.evidenceRefs?.length" class="chat-evidence">
-                      根拠: {{ qa.evidenceRefs.map((ref) => ref.label).join(', ') }}
-                    </div>
+                </div>
+                <div v-else class="ai-check-answer">
+                  <p v-if="i > 0" class="ai-check-question">{{ qa.question }}</p>
+                  <div class="ai-check-answer-text">{{ qa.answer }}</div>
+                  <div v-if="qa.evidenceRefs?.length" class="chat-evidence">
+                    根拠: {{ qa.evidenceRefs.map((ref) => ref.label).join(', ') }}
                   </div>
                 </div>
               </template>
             </div>
-            <div class="chat-input-area">
-              <input
-                v-model="followupQuestion"
-                type="text"
-                placeholder="質問を入力..."
-                @keyup.enter="handleFollowup"
-                :disabled="isFollowupLoading"
-                class="chat-input"
-              />
-              <button
-                class="btn btn-primary chat-send"
-                @click="handleFollowup"
-                :disabled="!followupQuestion.trim() || isFollowupLoading"
-              >
-                &#8593;
-              </button>
+
+            <div v-if="hasAiCheckResult" class="ai-check-followup">
+              <h4>もっと詳しく聞く</h4>
+              <div class="ai-check-examples">
+                <button type="button" @click="codexReviewQuestion = 'この結果で一番注意する点は？'">一番注意する点</button>
+                <button type="button" @click="codexReviewQuestion = '反対意見はありますか？'">反対意見</button>
+                <button type="button" @click="codexReviewQuestion = '次に何を見ればいいですか？'">次に見ること</button>
+              </div>
+              <div class="ai-check-input-area">
+                <input
+                  v-model="codexReviewQuestion"
+                  type="text"
+                  placeholder="気になることを入力してください"
+                  @keyup.enter="handleCodexReview()"
+                  :disabled="isCodexReviewLoading || isCodexUnavailable"
+                  class="ai-check-input"
+                />
+                <button
+                  class="btn btn-primary ai-check-send"
+                  @click="handleCodexReview()"
+                  :disabled="!codexReviewQuestion.trim() || isCodexReviewLoading || isCodexUnavailable"
+                >
+                  聞いてみる
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1443,27 +1497,106 @@ function renderMarkdown(content: string): string {
   line-height: 1.6;
 }
 
-.chat-panel { display: flex; flex-direction: column; max-height: min(32rem, 70vh); }
-.chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.6rem; padding: 0.5rem 0; min-height: 80px; max-height: min(15rem, 35vh); }
-.chat-welcome { display: flex; gap: 0.6rem; align-items: flex-start; padding: 0.75rem; background: rgba(255,255,255,0.02); border-radius: var(--radius-sm); }
-.chat-welcome p { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.5; }
-.welcome-avatar, .bubble-avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--highlight)); display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 0.6rem; font-weight: 700; color: white; flex-shrink: 0; }
-.chat-bubble { display: flex; gap: 0.5rem; animation: fade-in 0.3s ease; }
-.chat-bubble.user { justify-content: flex-end; }
-.chat-bubble.user .bubble-content { background: var(--accent); color: white; border-radius: var(--radius-sm) var(--radius-sm) 2px var(--radius-sm); padding: 0.6rem 0.85rem; font-size: 0.82rem; max-width: 85%; }
-.chat-bubble.agent { align-items: flex-start; }
-.chat-bubble.agent .bubble-content { background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 2px var(--radius-sm) var(--radius-sm) var(--radius-sm); padding: 0.6rem 0.85rem; font-size: 0.82rem; line-height: 1.6; max-width: 85%; }
+.ai-check-panel { display: flex; flex-direction: column; gap: 1rem; }
+.ai-check-header { margin-bottom: 0; }
+.ai-check-status {
+  border: 1px solid rgba(245,158,11,0.28);
+  border-radius: 999px;
+  color: #f59e0b;
+  background: rgba(245,158,11,0.08);
+  font-size: 0.68rem;
+  padding: 0.15rem 0.45rem;
+}
+.ai-check-start,
+.ai-check-results,
+.ai-check-followup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+.ai-check-start p {
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.7;
+}
+.ai-check-notice {
+  border: 1px solid rgba(245,158,11,0.22);
+  border-radius: 8px;
+  background: rgba(245,158,11,0.08);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.6;
+  padding: 0.7rem 0.8rem;
+}
+.ai-check-primary {
+  width: 100%;
+  justify-content: center;
+  min-height: 42px;
+  border-radius: 8px;
+}
+.ai-check-results h4,
+.ai-check-followup h4 {
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+.ai-check-loading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  padding: 0.85rem;
+}
+.ai-check-loading strong {
+  display: block;
+  font-size: 0.82rem;
+}
+.ai-check-loading p {
+  margin-top: 0.2rem;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+.ai-check-answer {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.025);
+  padding: 0.85rem;
+}
+.ai-check-question {
+  margin-bottom: 0.55rem;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+.ai-check-answer-text {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.7;
+  white-space: pre-line;
+}
 .chat-evidence { margin-top: 0.45rem; font-size: 0.72rem; color: var(--text-muted); }
 .typing-indicator { display: flex; gap: 3px; padding: 0.2rem 0; }
 .typing-indicator span { width: 5px; height: 5px; border-radius: 50%; background: var(--text-muted); animation: typing-dot 1.4s ease-in-out infinite; }
 .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
 .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
-.chat-input-area { display: flex; gap: 0.5rem; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
-.chat-input { flex: 1; padding: 0.55rem 0.85rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); font-family: var(--font-sans); font-size: 0.82rem; outline: none; }
-.chat-input:focus { border-color: var(--accent); }
+.ai-check-examples { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.ai-check-examples button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.03);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  padding: 0.32rem 0.55rem;
+}
+.ai-check-examples button:hover { border-color: var(--accent); color: var(--text-primary); }
+.ai-check-input-area { display: flex; gap: 0.5rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+.ai-check-input { flex: 1; min-width: 0; padding: 0.55rem 0.75rem; background: rgba(0,0,0,0.28); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-family: var(--font-sans); font-size: 0.82rem; outline: none; }
+.ai-check-input:focus { border-color: var(--accent); }
 .evidence-meta { display: block; margin-top: 0.2rem; font-size: 0.68rem; color: var(--text-muted); font-family: var(--font-mono); }
-.chat-input::placeholder { color: var(--text-muted); }
-.chat-send { width: 36px; height: 36px; padding: 0; border-radius: 50%; font-size: 1rem; }
+.ai-check-input::placeholder { color: var(--text-muted); }
+.ai-check-send { flex: 0 0 auto; min-height: 36px; border-radius: 8px; }
 .evidence-list { display: flex; flex-direction: column; gap: 0.6rem; }
 .evidence-item { padding: 0.7rem 0.8rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(255,255,255,0.02); }
 .evidence-item strong { display: block; margin-bottom: 0.25rem; font-size: 0.78rem; }
@@ -1551,26 +1684,13 @@ function renderMarkdown(content: string): string {
     height: 14rem;
   }
 
-  .chat-panel {
-    max-height: none;
-  }
-
-  .chat-messages {
-    max-height: 16rem;
-  }
-
-  .chat-input-area {
+  .ai-check-input-area {
     flex-wrap: wrap;
   }
 
-  .chat-input,
-  .chat-send {
+  .ai-check-input,
+  .ai-check-send {
     width: 100%;
-  }
-
-  .chat-send {
-    border-radius: var(--radius-sm);
-    height: 40px;
   }
 }
 
@@ -1725,7 +1845,7 @@ function renderMarkdown(content: string): string {
   .result-header { break-after: avoid; }
   .header-actions,
   .tab-bar,
-  .followup-section,
+  .ai-check-panel,
   .quality-meta { display: none !important; }
 
   .results-page { padding: 0; max-width: 100%; }

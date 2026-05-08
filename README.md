@@ -14,7 +14,7 @@
 - `quick` / `standard` / `deep` / `research` / `baseline` の5つのプリセットで、速度と深さを切り替えられます。
 - `.txt` / `.md` / `.pdf` をプロジェクトに添付し、エビデンス付きの分析フローに載せられます。
 - ライブ画面では SSE で進捗を配信し、Activity Feed、社会反応、会話、グラフの変化を追跡できます。
-- 結果画面では Decision Brief、シナリオ比較、伝播分析、Transcript、再実行、フォローアップ質問を扱えます。
+- 結果画面では Decision Brief、シナリオ比較、伝播分析、Transcript、再実行、Codex Review Agent への質問を扱えます。
 - `/populations` では人口生成、一覧確認、世代 fork ができます。
 - Decision Lab では2つのシナリオを同一人口で並行実行し、意見シフト・連合変動・監査証跡を比較できます。
 - Theater UI ではディベートカード、ライブ対話ストリーム、スタンス変化をリアルタイムに可視化します。
@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | `/` | LaunchPad | 質問テンプレート、自由入力、ファイル添付、プリセット選択、実行履歴 |
 | `/sim/:id` | Live Simulation | SSE 進捗、Activity Feed、社会反応、会話、ライブグラフ、Theater UI（ディベートカード・対話ストリーム） |
-| `/sim/:id/results` | Results | Decision Brief、シナリオ比較、Propagation、Transcript、Follow-up |
+| `/sim/:id/results` | Results | Decision Brief、シナリオ比較、Propagation、Transcript、Codex Review |
 | `/populations` | Populations | 人口生成、人口一覧、詳細表示、fork |
 | `/scenario/:id` | Decision Lab | シナリオペア比較、意見シフト表、連合マップ、監査タイムライン |
 
@@ -195,6 +195,15 @@ REDIS_URL=redis://localhost:6379/0
 | `MAX_ACTIVE_AGENTS` | 同時に管理する認知エージェント上限 |
 | `MAX_CONCURRENT_AGENTS` | 認知サイクルの同時実行上限 |
 | `MAX_CONCURRENT_COLONIES` | Colony の同時実行上限 |
+| `CODEX_REVIEW_ENABLED` | `true` で AI確認機能を有効化 |
+| `CODEX_BIN` | Codex CLI コマンド。既定は `codex` |
+| `CODEX_REVIEW_TRANSPORT` | Codex App Server transport。v1 は `stdio` のみ |
+| `CODEX_REVIEW_TIMEOUT_SECONDS` | AI確認の待機秒数 |
+| `CODEX_REVIEW_MOCK` | `true` で Codex CLI なしの固定応答を使う |
+| `CODEX_REVIEW_MAX_CONTEXT_CHARS` | Codex に渡すレポート文脈の最大文字数 |
+| `CODEX_REVIEW_WORKDIR` | Codex App Server 用の隔離作業ディレクトリ親パス |
+
+AI確認機能を使う場合は、Codex CLI をインストールしてログインした状態で backend を起動し、`CODEX_REVIEW_ENABLED=true` を設定してください。v1 は `codex app-server --listen stdio://` の stdio transport のみを使い、完了済みレポートへの読み取り専用確認に限定します。旧 `AGORAAI_CODEX_*` 変数も互換 alias として読み取ります。
 
 ### 実装上よく触る設定ファイル
 
@@ -223,7 +232,8 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/simulations/{sim_id}/graph` | 最新グラフ取得 |
 | `GET` | `/simulations/{sim_id}/graph/history` | ラウンドごとのグラフ履歴 |
 | `GET` | `/simulations/{sim_id}/report` | 最終レポート取得 |
-| `POST` | `/simulations/{sim_id}/followups` | 結果に対する follow-up 質問 |
+| `GET` | `/codex/health` | Codex App Server 接続状態 |
+| `POST` | `/simulations/{sim_id}/codex-review` | 完了済みレポートへの Codex review 質問 |
 | `POST` | `/simulations/{sim_id}/rerun` | 同条件で再実行 |
 
 ### Society / 運用系

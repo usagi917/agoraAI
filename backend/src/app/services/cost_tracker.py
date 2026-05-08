@@ -35,7 +35,7 @@ def classify_task_phase(task_name: str) -> str:
         "tom_infer",
     }:
         return "cognition"
-    if task_name in {"followup", "evaluation"}:
+    if task_name in {"codex_review", "evaluation"}:
         return task_name
     return "other"
 

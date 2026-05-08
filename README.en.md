@@ -14,7 +14,7 @@
 - Switch between five presets: `quick`, `standard`, `deep`, `research`, and `baseline`.
 - Attach `.txt`, `.md`, and `.pdf` files to a project and run evidence-aware analysis on top of them.
 - Follow progress live over SSE with activity feed, social response views, conversations, and graph updates.
-- Review Decision Briefs, scenario comparison, propagation analysis, transcripts, reruns, and follow-up questions on the results page.
+- Review Decision Briefs, scenario comparison, propagation analysis, transcripts, reruns, and Codex Review Agent questions on the results page.
 - Generate, inspect, and fork synthetic populations from `/populations`.
 - Decision Lab runs two scenarios against the same population side-by-side, comparing opinion shifts, coalition changes, and audit trails.
 - Theater UI shows debate cards, live dialogue streams, and real-time stance shifts during simulation.
@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | `/` | LaunchPad | question templates, free-form prompt, file upload, preset selection, run history |
 | `/sim/:id` | Live Simulation | SSE progress, activity feed, social response views, conversations, live graph, Theater UI (debate cards, dialogue stream) |
-| `/sim/:id/results` | Results | Decision Brief, scenario comparison, propagation, transcript, follow-up |
+| `/sim/:id/results` | Results | Decision Brief, scenario comparison, propagation, transcript, Codex Review |
 | `/populations` | Populations | generation, listing, detail view, forking |
 | `/scenario/:id` | Decision Lab | scenario pair comparison, opinion shift table, coalition map, audit timeline |
 
@@ -195,6 +195,15 @@ REDIS_URL=redis://localhost:6379/0
 | `MAX_ACTIVE_AGENTS` | Upper bound for managed cognitive agents |
 | `MAX_CONCURRENT_AGENTS` | Upper bound for concurrent cognitive cycles |
 | `MAX_CONCURRENT_COLONIES` | Upper bound for concurrently running colonies |
+| `CODEX_REVIEW_ENABLED` | Set `true` to enable the AI check feature |
+| `CODEX_BIN` | Codex CLI command. Defaults to `codex` |
+| `CODEX_REVIEW_TRANSPORT` | Codex App Server transport. v1 supports only `stdio` |
+| `CODEX_REVIEW_TIMEOUT_SECONDS` | Timeout for AI check turns |
+| `CODEX_REVIEW_MOCK` | Use fixed responses without Codex CLI when `true` |
+| `CODEX_REVIEW_MAX_CONTEXT_CHARS` | Maximum report context characters sent to Codex |
+| `CODEX_REVIEW_WORKDIR` | Parent path for isolated Codex App Server workdirs |
+
+To use the AI check feature, install the Codex CLI, log in, start the backend with `CODEX_REVIEW_ENABLED=true`, and let the backend launch `codex app-server --listen stdio://` over stdio. v1 uses stdio only and limits Codex to read-only checks against completed reports. The legacy `AGORAAI_CODEX_*` variables are still read as compatibility aliases.
 
 ### Config files you will likely touch
 
@@ -223,7 +232,8 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/simulations/{sim_id}/graph` | latest graph snapshot |
 | `GET` | `/simulations/{sim_id}/graph/history` | graph history by round |
 | `GET` | `/simulations/{sim_id}/report` | final report |
-| `POST` | `/simulations/{sim_id}/followups` | ask follow-up questions against the result |
+| `GET` | `/codex/health` | Codex App Server connection status |
+| `POST` | `/simulations/{sim_id}/codex-review` | ask Codex review questions against a completed report |
 | `POST` | `/simulations/{sim_id}/rerun` | rerun with the same conditions |
 
 ### Society and operational endpoints

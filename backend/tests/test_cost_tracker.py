@@ -32,7 +32,7 @@ def test_classify_task_phase_groups_world_build_and_rounds():
     assert classify_task_phase("world_build") == "world_build"
     assert classify_task_phase("round_3") == "simulation_round"
     assert classify_task_phase("pm_board_chief_pm") == "pm_board"
-    assert classify_task_phase("followup") == "followup"
+    assert classify_task_phase("codex_review") == "codex_review"
 
 
 import pytest

@@ -8,13 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.api.deps import get_session
-from src.app.models.followup import Followup
 from src.app.models.graph_state import GraphState
 from src.app.models.report import Report
 from src.app.models.run import Run
 from src.app.models.timeline_event import TimelineEvent
-from src.app.models.world_state import WorldState
-from src.app.services.followup_handler import handle_followup
 from src.app.services.simulator import PROFILE_ROUNDS, run_simulation
 
 logger = logging.getLogger(__name__)
@@ -167,47 +164,6 @@ async def get_graph(run_id: str, session: AsyncSession = Depends(get_session)):
         "focus_entities": graph.focus_entities,
         "highlights": graph.highlights,
     }
-
-
-@router.post("/{run_id}/followups")
-async def create_followup(
-    run_id: str,
-    question: str = "",
-    session: AsyncSession = Depends(get_session),
-):
-    followup = Followup(
-        id=str(uuid.uuid4()),
-        run_id=run_id,
-        question=question,
-    )
-    session.add(followup)
-    await session.commit()
-
-    # フォローアップ回答生成
-    try:
-        report_result = await session.execute(select(Report).where(Report.run_id == run_id))
-        report = report_result.scalar_one_or_none()
-
-        ws_result = await session.execute(
-            select(WorldState)
-            .where(WorldState.run_id == run_id)
-            .order_by(WorldState.round_number.desc())
-        )
-        ws = ws_result.scalar_one_or_none()
-
-        if report and ws:
-            answer = await handle_followup(
-                session, run_id, question,
-                report.content, ws.state_data,
-            )
-            followup.answer = answer
-            followup.status = "completed"
-            await session.commit()
-            return {"id": followup.id, "status": "completed", "answer": answer}
-    except Exception as e:
-        logger.error(f"Followup generation failed for run {run_id}: {e}")
-
-    return {"id": followup.id, "status": "pending"}
 
 
 @router.post("/{run_id}/rerun")

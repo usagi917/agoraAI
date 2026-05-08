@@ -18,11 +18,11 @@ from src.app.models.report import Report
 from src.app.models.simulation import Simulation, normalize_mode
 from src.app.models.timeline_event import TimelineEvent
 from src.app.models.world_state import WorldState
-from src.app.models.followup import Followup
+from src.app.api.routes.codex import CodexReviewRequest, create_codex_review, get_codex_review_service
 from src.app.services.decision_briefing import (
     build_single_decision_brief,
 )
-from src.app.services.followup_handler import handle_followup
+from src.app.services.codex_review_service import CodexReviewService
 from src.app.services.society.backtest import (
     build_empty_backtest_result,
     overlay_observed_intervention_comparison,
@@ -482,81 +482,15 @@ async def get_simulation_timeline(sim_id: str, session: AsyncSession = Depends(g
     ]
 
 
-@router.post("/{sim_id}/followups")
-async def create_simulation_followup(
+@router.post("/{sim_id}/codex-review")
+async def create_simulation_codex_review(
     sim_id: str,
-    question: str = "",
+    body: CodexReviewRequest,
     session: AsyncSession = Depends(get_session),
+    service: CodexReviewService = Depends(get_codex_review_service),
 ):
-    """フォローアップ質問。"""
-    sim = await session.get(Simulation, sim_id)
-    if not sim:
-        raise HTTPException(status_code=404, detail="Simulation が見つかりません")
-
-    run_id = sim.run_id
-    if not run_id:
-        raise HTTPException(status_code=400, detail="フォローアップは single モードのみ対応")
-
-    followup = Followup(
-        id=str(uuid.uuid4()),
-        run_id=run_id,
-        question=question,
-    )
-    session.add(followup)
-    await session.commit()
-
-    try:
-        report_result = await session.execute(select(Report).where(Report.run_id == run_id))
-        report = report_result.scalar_one_or_none()
-
-        ws_result = await session.execute(
-            select(WorldState)
-            .where(WorldState.run_id == run_id)
-            .order_by(WorldState.round_number.desc())
-        )
-        ws = ws_result.scalar_one_or_none()
-
-        if report and ws:
-            answer = await handle_followup(
-                session, run_id, question,
-                report.content, ws.state_data,
-            )
-            evidence_refs = await collect_simulation_evidence_refs(
-                session,
-                sim.project_id,
-                sim.prompt_text,
-                query_text=question,
-            )
-            followup.answer = answer
-            followup.status = "completed"
-            await session.commit()
-            return {
-                "id": followup.id,
-                "status": "completed",
-                "answer": answer,
-                "evidence_refs": evidence_refs,
-                "run_config": extract_run_config(sim.metadata_json),
-                "quality": build_quality_summary(
-                    fallback_used=False,
-                    evidence_refs=evidence_refs,
-                    evidence_mode=get_evidence_mode(sim.metadata_json),
-                ),
-            }
-    except Exception as e:
-        logger.error(f"Followup generation failed: {e}")
-
-    return {
-        "id": followup.id,
-        "status": "pending",
-        "evidence_refs": [],
-        "run_config": extract_run_config(sim.metadata_json),
-        "quality": build_quality_summary(
-            fallback_used=True,
-            evidence_refs=[],
-            fallback_reason="followup_generation_pending",
-            evidence_mode=get_evidence_mode(sim.metadata_json),
-        ),
-    }
+    """Codex Review Agent によるレポートレビュー。"""
+    return await create_codex_review(sim_id, body, session, service)
 
 
 
