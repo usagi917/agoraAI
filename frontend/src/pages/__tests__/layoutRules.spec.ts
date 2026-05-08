@@ -117,7 +117,7 @@ describe('layoutRules', () => {
     })
 
     it('uses consolidated tabs for all society modes', () => {
-      for (const mode of ['society', 'unified', 'meta_simulation']) {
+      for (const mode of ['quick', 'standard', 'deep', 'research', 'society', 'unified', 'meta_simulation']) {
         expect(getLiveSecondaryTabs({ mode, hasColonies: false, hasActivity: false }))
           .toEqual(['conversations', 'progress', 'analysis', 'debate'])
         expect(getDefaultLiveSecondaryTab({ mode, hasColonies: false, hasActivity: false }))

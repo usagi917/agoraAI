@@ -31,6 +31,10 @@ const SCENARIO_FIRST_MODES = new Set([
 ])
 
 const SOCIETY_MODES = new Set([
+  'quick',
+  'standard',
+  'deep',
+  'research',
   'society',
   'society_first',
   'meta_simulation',

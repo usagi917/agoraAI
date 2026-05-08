@@ -1,6 +1,5 @@
 """統一 Simulation API エンドポイント"""
 
-import asyncio
 import logging
 import uuid
 
@@ -53,6 +52,16 @@ from src.app.sse.manager import sse_manager
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+RERUN_EXECUTION_METADATA_KEYS = {
+    "pulse_result",
+    "council_result",
+    "unified_result",
+    "society_result",
+    "time_axis_result",
+    "time_axis_error",
+    "validation_summary",
+}
 
 
 class SimulationCreate(BaseModel):
@@ -705,6 +714,12 @@ async def rerun_simulation(sim_id: str, session: AsyncSession = Depends(get_sess
     if not original:
         raise HTTPException(status_code=404, detail="Simulation が見つかりません")
 
+    rerun_metadata = {
+        key: value
+        for key, value in dict(original.metadata_json or {}).items()
+        if key not in RERUN_EXECUTION_METADATA_KEYS
+    }
+
     new_sim = Simulation(
         id=str(uuid.uuid4()),
         project_id=original.project_id,
@@ -713,7 +728,7 @@ async def rerun_simulation(sim_id: str, session: AsyncSession = Depends(get_sess
         template_name=original.template_name,
         execution_profile=original.execution_profile,
         status="queued",
-        metadata_json=dict(original.metadata_json or {}),
+        metadata_json=rerun_metadata,
     )
     session.add(new_sim)
     await session.commit()

@@ -10,14 +10,15 @@
 
 ## What It Is
 
-- Start from one of four guided question templates or a free-form prompt on the LaunchPad.
+- Start from one of five guided question templates or a free-form prompt on the LaunchPad.
 - Switch between five presets: `quick`, `standard`, `deep`, `research`, and `baseline`.
 - Attach `.txt`, `.md`, and `.pdf` files to a project and run evidence-aware analysis on top of them.
 - Follow progress live over SSE with activity feed, social response views, conversations, and graph updates.
 - Review Decision Briefs, scenario comparison, propagation analysis, transcripts, reruns, and follow-up questions on the results page.
 - Generate, inspect, and fork synthetic populations from `/populations`.
-- Decision Lab runs two scenarios against the same population side-by-side, comparing opinion shifts, coalition changes, and audit trails.
+- Start Decision Lab from `/compare`, then run two scenarios against the same population side by side to compare opinion shifts, coalition changes, and audit trails.
 - Theater UI shows debate cards, live dialogue streams, and real-time stance shifts during simulation.
+- `config/` and `templates/` centralize providers, cognitive settings, population mix, and LaunchPad templates.
 
 ## 30-Second Big Picture
 
@@ -54,6 +55,7 @@ How to read it:
 | `/sim/:id` | Live Simulation | SSE progress, activity feed, social response views, conversations, live graph, Theater UI (debate cards, dialogue stream) |
 | `/sim/:id/results` | Results | Decision Brief, scenario comparison, propagation, transcript, follow-up |
 | `/populations` | Populations | generation, listing, detail view, forking |
+| `/compare` | Compare Setup | configure two scenarios, execution presets, and population settings for comparison |
 | `/scenario/:id` | Decision Lab | scenario pair comparison, opinion shift table, coalition map, audit timeline |
 
 The main execution flow has three stages:
@@ -173,6 +175,14 @@ flowchart TB
 4. Review the final report, then ask follow-up questions or rerun the simulation.
 5. Use `scenario-pairs` when you want to compare scenarios side by side.
 
+## Prerequisites
+
+- Python 3.11+
+- uv
+- Node.js 20+
+- pnpm
+- Docker / Docker Compose if you want PostgreSQL, Redis, or full container startup
+
 ## Quick Start
 
 ### Docker Compose
@@ -191,6 +201,27 @@ Notes:
 - The default provider is `openai`.
 - Running new simulations usually requires `OPENAI_API_KEY`.
 - The app can still boot without API keys, but live execution will be disabled.
+
+### One-command local startup
+
+After installing dependencies, you can start the backend and frontend together.
+
+```bash
+cp .env.example .env
+
+cd backend
+uv sync --extra dev
+
+cd ../frontend
+pnpm install
+
+cd ..
+./scripts/dev.sh
+```
+
+- Backend: `http://localhost:8000`
+- Frontend: `http://localhost:5173`
+- Custom ports: `./scripts/dev.sh --backend-port 8001 --frontend-port 5174`
 
 ### Minimal API Example
 
@@ -239,6 +270,8 @@ pnpm dev
 - Frontend dev server: `http://localhost:5173`
 - When `VITE_API_BASE_URL` is unset, the app uses `/api`
 - Vite proxies `/api` to `http://localhost:8000`
+- The Docker frontend serves nginx on `:3000` and forwards `/api` to the backend
+- nginx disables buffering for the SSE endpoint `/api/simulations/:id/stream`
 
 ### With PostgreSQL / Redis
 
@@ -262,6 +295,8 @@ REDIS_URL=redis://localhost:6379/0
 | Provider definitions and fallback | `config/llm_providers.yaml` |
 | Cognitive and scheduling settings | `config/cognitive.yaml` |
 | Execution profiles | `config/swarm_profiles.yaml` |
+| Population mix | `config/population_mix.yaml` |
+| GraphRAG / grounding | `config/graphrag.yaml`, `config/grounding/` |
 | LaunchPad templates | `templates/ja/*.yaml` |
 
 ## Main API
@@ -272,13 +307,38 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/templates` | list templates |
 | `POST` | `/projects` | create a project for attachments |
 | `POST` | `/projects/{project_id}/documents` | add documents |
+| `GET` | `/projects/{project_id}/documents` | list attached documents |
 | `POST` | `/simulations` | create a simulation |
+| `GET` | `/simulations` | list simulations |
 | `GET` | `/simulations/{sim_id}` | get status |
 | `GET` | `/simulations/{sim_id}/stream` | SSE progress |
+| `GET` | `/simulations/{sim_id}/timeline` | timeline data |
+| `GET` | `/simulations/{sim_id}/graph` | latest graph |
+| `GET` | `/simulations/{sim_id}/graph/history` | graph history by round |
 | `GET` | `/simulations/{sim_id}/report` | final report |
+| `GET` | `/simulations/{sim_id}/colonies` | colony-level execution state |
+| `GET/POST` | `/simulations/{sim_id}/backtest` | read or run backtests |
+| `GET` | `/simulations/{sim_id}/audit-trail` | audit trail for scenario comparison |
 | `POST` | `/simulations/{sim_id}/followups` | ask follow-up questions against the result |
 | `POST` | `/simulations/{sim_id}/rerun` | rerun with the same conditions |
 | `POST` | `/scenario-pairs` | start a scenario comparison |
+| `GET` | `/scenario-pairs/{scenario_pair_id}` | get scenario comparison status |
+| `GET` | `/scenario-pairs/{scenario_pair_id}/comparison` | get comparison output |
+| `POST` | `/populations/{population_id}/snapshot` | create a population snapshot for scenario comparison |
+
+### Runs / legacy compatibility
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/runs` | list runs |
+| `POST` | `/runs` | create a run |
+| `GET` | `/runs/{run_id}` | get run status |
+| `GET` | `/runs/{run_id}/report` | get run report |
+| `GET` | `/runs/{run_id}/timeline` | get run timeline |
+| `GET` | `/runs/{run_id}/events` | get run events |
+| `GET` | `/runs/{run_id}/graph` | get run graph |
+| `POST` | `/runs/{run_id}/followups` | ask follow-up questions against a run |
+| `POST` | `/runs/{run_id}/rerun` | rerun a run |
 
 ### Society and operational endpoints
 
@@ -291,8 +351,18 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/society/simulations/{sim_id}/activation` | activation output |
 | `GET` | `/society/simulations/{sim_id}/meeting` | meeting output |
 | `GET` | `/society/simulations/{sim_id}/evaluation` | evaluation metrics |
+| `GET` | `/society/simulations/{sim_id}/evaluation/summary` | evaluation summary |
+| `GET` | `/society/simulations/{sim_id}/narrative` | narrative output |
+| `GET` | `/society/simulations/{sim_id}/demographics` | demographic summary |
 | `GET` | `/society/simulations/{sim_id}/propagation` | propagation data |
+| `GET` | `/society/simulations/{sim_id}/social-graph` | society graph |
+| `GET` | `/society/simulations/{sim_id}/agents` | list agents |
+| `GET` | `/society/simulations/{sim_id}/agents/{agent_id}` | agent details |
 | `GET` | `/society/simulations/{sim_id}/transcript` | transcript data |
+| `GET` | `/society/simulations/{sim_id}/conversations` | conversation data |
+| `GET` | `/society/simulations/{sim_id}/time-axis` | time-axis analysis |
+| `GET` | `/society/simulations/{sim_id}/ensemble` | ensemble output |
+| `GET` | `/society/simulations/{sim_id}/report` | society report |
 | `GET` | `/admin/costs` | token and cost aggregation |
 | `GET` | `/admin/quality-metrics` | quality and fallback aggregation |
 
@@ -315,25 +385,59 @@ pnpm exec playwright install --with-deps chromium
 pnpm test:e2e
 ```
 
+### Optional quality checks
+
+```bash
+cd backend
+uv run ruff check src
+uv run deptry .
+```
+
+```bash
+cd frontend
+pnpm check:dead
+```
+
 ## Repository Layout
 
 ```text
 .
-├── backend/       # FastAPI app, services, tests
-├── frontend/      # Vue app
-├── config/        # provider / cognitive / profile settings
-├── templates/     # seeded prompt templates
-├── data/          # local runtime data
-├── DESIGN.md      # extra design notes
+├── backend/        # FastAPI API, SSE, orchestration, society services, tests
+├── frontend/       # Vue 3 + Vite UI, Pinia stores, charts, E2E tests
+├── config/         # provider / model / cognitive / profile / grounding settings
+├── templates/      # seeded LaunchPad templates and expert / PM personas
+├── experiments/    # validation experiments and aggregation scripts
+├── evaluation/     # baseline snapshots
+├── docs/           # focused implementation notes
+├── amplifier/      # separate Amplifier package checkout; not part of Agent AI runtime
+├── data/           # local runtime data
+├── scripts/dev.sh  # local backend + frontend launcher
+├── DESIGN.md       # extra design notes
 └── CONTRIBUTING.md
 ```
+
+### Folder Notes
+
+| Folder | Integrated into this README |
+| --- | --- |
+| `backend/` | FastAPI startup, DB initialization, template seeding, SSE, simulation/runs/projects/society/admin APIs, SQLite/PostgreSQL switching |
+| `frontend/` | LaunchPad, Live Simulation, Results, Populations, Compare Setup, Decision Lab, `/api` proxy, Vitest, Playwright |
+| `config/` | provider/model settings, fallback, GraphRAG, population mix, cognitive/communication/scheduling, grounding data |
+| `templates/` | `business_analysis`, `market_entry`, `policy_impact`, `policy_simulation`, `scenario_exploration`, expert/PM personas |
+| `experiments/` | `swarm_validation` runner, aggregation, and HTML report |
+| `docs/` | focused implementation and bug-fix notes |
+| `amplifier/` | standalone Microsoft Amplifier uv package. It is not required by Agent AI's Docker Compose or FastAPI/Vue runtime |
 
 ## More Docs
 
 - Design notes: [DESIGN.md](DESIGN.md)
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- Frontend README: [frontend/README.md](frontend/README.md)
+- Amplifier README: [amplifier/README.md](amplifier/README.md)
 
 ## License
 
-AGPL-3.0. See [LICENSE](LICENSE) for details.
+Agent AI is AGPL-3.0. See [LICENSE](LICENSE) for details.
+
+`amplifier/` is a bundled separate project and follows its own [amplifier/LICENSE](amplifier/LICENSE).

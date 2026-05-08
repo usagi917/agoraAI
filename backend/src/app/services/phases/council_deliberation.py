@@ -184,6 +184,7 @@ async def run_council(
         simulation_id=simulation_id,
         num_rounds=3,
         session=session,
+        emit_lifecycle_events=False,
     )
 
     # 反証サマリーを抽出（participant_index ベースでマッチング）

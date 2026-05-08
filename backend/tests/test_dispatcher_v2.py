@@ -121,6 +121,46 @@ class TestDispatchSimulation:
         assert "LLM error" in updated.error_message
 
 
+class TestResumeUnfinishedSimulations:
+    @pytest.mark.asyncio
+    async def test_skips_resume_when_not_startup_leader(self):
+        from src.app.services.simulation_dispatcher import resume_unfinished_simulations
+
+        with patch(
+            "src.app.services.simulation_dispatcher._try_acquire_startup_resume_leadership",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
+            with patch("src.app.services.simulation_dispatcher.spawn_simulation") as mock_spawn:
+                resumed_count = await resume_unfinished_simulations()
+
+        assert resumed_count == 0
+        mock_spawn.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_startup_leader_spawns_only_unfinished_simulations(self, db_session):
+        queued = await _create_simulation(db_session, status="queued")
+        running = await _create_simulation(db_session, status="running")
+        await _create_simulation(db_session, status="completed")
+
+        with patch(
+            "src.app.services.simulation_dispatcher._try_acquire_startup_resume_leadership",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            with patch("src.app.services.simulation_dispatcher.async_session") as mock_session_ctx:
+                mock_session_ctx.return_value.__aenter__ = AsyncMock(return_value=db_session)
+                mock_session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
+
+                with patch("src.app.services.simulation_dispatcher.spawn_simulation") as mock_spawn:
+                    from src.app.services.simulation_dispatcher import resume_unfinished_simulations
+
+                    resumed_count = await resume_unfinished_simulations()
+
+        assert resumed_count == 2
+        assert {call.args[0] for call in mock_spawn.call_args_list} == {queued.id, running.id}
+
+
 class TestEnsureProject:
     @pytest.mark.asyncio
     async def test_creates_project_when_none(self, db_session):

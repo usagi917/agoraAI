@@ -145,7 +145,7 @@ class LLMClient:
         }
         if self._uses_reasoning_controls(model):
             if temperature not in (1, 1.0):
-                logger.info(
+                logger.debug(
                     "Skipping unsupported temperature override for reasoning model %s: %s",
                     model,
                     temperature,

@@ -58,7 +58,7 @@ class OpenAIAdapter(LLMAdapter):
         }
         if is_reasoning:
             if temperature not in (1, 1.0):
-                logger.info(
+                logger.debug(
                     "Skipping unsupported temperature override for reasoning model %s: %s",
                     self.model,
                     temperature,

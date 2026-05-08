@@ -778,6 +778,57 @@ async def test_create_simulation_accepts_unified_mode(
         assert simulation.mode == "standard"
 
 
+@pytest.mark.asyncio
+async def test_rerun_simulation_drops_execution_metadata(
+    client,
+    session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr("src.app.api.routes.simulations.spawn_simulation", lambda simulation_id: None)
+
+    original_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add(
+            Simulation(
+                id=original_id,
+                project_id=str(uuid.uuid4()),
+                mode="standard",
+                prompt_text="育児休暇の男性取得義務化",
+                template_name="",
+                execution_profile="standard",
+                status="completed",
+                metadata_json={
+                    "pulse_result": {"aggregation": {"old": True}},
+                    "council_result": {
+                        "rounds": [{"summary": "old"}],
+                        "synthesis": {"summary": "old"},
+                    },
+                    "unified_result": {"content": "old report"},
+                    "time_axis_result": {"timeline": []},
+                    "time_axis_error": "old error",
+                    "validation_summary": {"status": "old"},
+                    "run_config": {"evidence_mode": "prefer"},
+                    "intervention_params": {"tax_rate": 0.1},
+                },
+            )
+        )
+        await session.commit()
+
+    response = await client.post(f"/simulations/{original_id}/rerun")
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    async with session_factory() as session:
+        rerun = await session.get(Simulation, payload["id"])
+        assert rerun is not None
+        assert rerun.status == "queued"
+        assert rerun.metadata_json == {
+            "run_config": {"evidence_mode": "prefer"},
+            "intervention_params": {"tax_rate": 0.1},
+        }
+
+
 async def _seed_unified_simulation(session_factory) -> dict[str, str]:
     project_id = str(uuid.uuid4())
     sim_id = str(uuid.uuid4())

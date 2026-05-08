@@ -46,7 +46,7 @@ class _FakeAsyncClient:
 
 
 @pytest.mark.asyncio
-async def test_openai_adapter_skips_temperature_for_reasoning_models():
+async def test_openai_adapter_skips_temperature_for_reasoning_models(caplog):
     adapter = OpenAIAdapter(
         "openai",
         {
@@ -58,16 +58,18 @@ async def test_openai_adapter_skips_temperature_for_reasoning_models():
     fake_http_client = _FakeAsyncClient()
     adapter._http_client = fake_http_client
 
-    content, usage = await adapter.call(
-        system_prompt="sys",
-        user_prompt="user",
-        temperature=0.7,
-        max_tokens=128,
-    )
+    with caplog.at_level("INFO"):
+        content, usage = await adapter.call(
+            system_prompt="sys",
+            user_prompt="user",
+            temperature=0.7,
+            max_tokens=128,
+        )
 
     assert fake_http_client.last_url.endswith("/chat/completions")
     assert fake_http_client.last_json["max_completion_tokens"] == 8192
     assert "temperature" not in fake_http_client.last_json
+    assert "Skipping unsupported temperature override" not in caplog.text
     assert content == '{"ok": true}'
     assert usage == {
         "model": "gpt-5-nano-2025-08-07",

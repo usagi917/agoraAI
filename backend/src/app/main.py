@@ -12,6 +12,10 @@ from src.app.config import settings
 from src.app.database import init_db, async_session
 from src.app.api.routes import api_router
 from src.app.llm.client import validate_task_registry
+from src.app.services.simulation_dispatcher import (
+    release_startup_resume_leadership,
+    resume_unfinished_simulations,
+)
 
 
 @asynccontextmanager
@@ -19,7 +23,11 @@ async def lifespan(app: FastAPI):
     validate_task_registry()
     await init_db()
     await seed_templates()
-    yield
+    await resume_unfinished_simulations()
+    try:
+        yield
+    finally:
+        await release_startup_resume_leadership()
 
 
 async def seed_templates():

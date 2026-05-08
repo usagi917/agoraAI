@@ -590,8 +590,15 @@ export function useSimulationSSE(simulationId: string) {
 
       // === Unified モード ===
       case 'unified_phase_changed':
+        if (
+          ['society_pulse', 'council', 'synthesis'].includes(String(payload.phase))
+          && !store.isUnifiedMode
+        ) {
+          store.setMode('standard')
+        }
         store.setUnifiedPhase(payload.phase || 'idle')
         store.setUnifiedPhaseIndex(payload.index || 0, payload.total || 3)
+        store.setPhase(`unified_${payload.phase || 'idle'}`)
         store.setStatus('running')
         {
           const phaseLabels: Record<string, string> = {

@@ -25,6 +25,7 @@ import SocietyProgress from '../components/SocietyProgress.vue'
 import OpinionDistribution from '../components/OpinionDistribution.vue'
 import LiveSocietyGraph from '../components/LiveSocietyGraph.vue'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
+import { useSocietyStore } from '../stores/societyStore'
 import { useCognitiveStore } from '../stores/cognitiveStore'
 import { useAgentVisualizationStore } from '../stores/agentVisualizationStore'
 import ThinkingPanel from '../components/ThinkingPanel.vue'
@@ -43,7 +44,7 @@ import {
   type LiveSecondaryTab,
 } from './layoutRules'
 
-const LIVE_SESSION_VERSION = 1
+const LIVE_SESSION_VERSION = 2
 type ThinkingVisualMode = 'idle' | 'graphrag' | 'simulation' | 'swarm' | 'report' | 'society'
 
 interface PersistedSimulationLiveState {
@@ -70,6 +71,7 @@ const store = useSimulationStore()
 const graphStore = useGraphStore()
 const activityStore = useActivityStore()
 const societyGraphStore = useSocietyGraphStore()
+const societyStore = useSocietyStore()
 const cognitiveStore = useCognitiveStore()
 const vizStore = useAgentVisualizationStore()
 const sse = useSimulationSSE(simId)
@@ -453,6 +455,8 @@ function restorePersistedLiveState(snapshot: PersistedSimulationLiveState | null
     preservePhase: !allowPhaseRestore,
     preservePipelineStage: true,
   })
+  store.setMode(simulation.mode)
+  syncPresetProgressFromSimulation(simulation)
 
   if (!graphStore.nodes.length && snapshot.graph?.nodes?.length) {
     graphStore.setFullState(snapshot.graph.nodes, snapshot.graph.edges)
@@ -542,6 +546,43 @@ function applySimulationState(simulation: SimulationResponse) {
     store.setPhase('report')
     store.setReportError(reportProgress.last_error || store.reportError)
   }
+
+  syncPresetProgressFromSimulation(simulation)
+}
+
+function syncPresetProgressFromSimulation(simulation: SimulationResponse) {
+  const pulseResult = simulation.metadata?.pulse_result as {
+    aggregation?: { stance_distribution?: Record<string, number> }
+    evaluation?: Record<string, number>
+  } | undefined
+  const hasCouncilResult = Boolean(simulation.metadata?.council_result)
+  const hasUnifiedResult = Boolean(simulation.metadata?.unified_result)
+
+  if (pulseResult?.aggregation?.stance_distribution) {
+    store.setOpinionDistribution(pulseResult.aggregation.stance_distribution)
+  }
+  if (pulseResult?.evaluation) {
+    store.setEvaluationMetrics(pulseResult.evaluation)
+  }
+
+  if (store.isUnifiedMode) {
+    if (simulation.status === 'completed' || hasUnifiedResult) {
+      store.setUnifiedPhase('completed')
+      store.setUnifiedPhaseIndex(3, 3)
+    } else if (hasCouncilResult) {
+      store.setUnifiedPhase('synthesis')
+      store.setUnifiedPhaseIndex(3, 3)
+      store.setPhase('unified_synthesis')
+    } else if (pulseResult) {
+      store.setUnifiedPhase('council')
+      store.setUnifiedPhaseIndex(2, 3)
+      store.setPhase('unified_council')
+    } else if (simulation.status === 'running') {
+      store.setUnifiedPhase('society_pulse')
+      store.setUnifiedPhaseIndex(1, 3)
+      store.setPhase('unified_society_pulse')
+    }
+  }
 }
 
 async function hydrateLiveData(simulation: SimulationResponse) {
@@ -561,6 +602,17 @@ async function hydrateLiveData(simulation: SimulationResponse) {
 
   if (graphData?.nodes?.length) {
     graphStore.setFullState(graphData.nodes, graphData.edges)
+  }
+
+  if (store.isSocietyMode) {
+    await societyStore.loadSocialGraph(simId)
+    if (societyStore.agents.size > 0) {
+      societyGraphStore.hydrateWithSocialGraph(
+        Array.from(societyStore.agents.values()),
+        societyStore.socialEdges,
+      )
+    }
+    await societyStore.loadConversations(simId)
   }
 }
 
@@ -610,6 +662,7 @@ onUnmounted(() => {
   graphStore.reset()
   activityStore.clear()
   societyGraphStore.reset()
+  societyStore.$reset()
   vizStore.reset()
   theaterStore.reset()
   selectedEntity.value = null

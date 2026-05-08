@@ -10,14 +10,15 @@
 
 ## これは何か
 
-- LaunchPad から4種類の質問テンプレート、または自由入力のプロンプトで分析を開始できます。
+- LaunchPad から5種類の質問テンプレート、または自由入力のプロンプトで分析を開始できます。
 - `quick` / `standard` / `deep` / `research` / `baseline` の5つのプリセットで、速度と深さを切り替えられます。
 - `.txt` / `.md` / `.pdf` をプロジェクトに添付し、エビデンス付きの分析フローに載せられます。
 - ライブ画面では SSE で進捗を配信し、Activity Feed、社会反応、会話、グラフの変化を追跡できます。
 - 結果画面では Decision Brief、シナリオ比較、伝播分析、Transcript、再実行、フォローアップ質問を扱えます。
 - `/populations` では人口生成、一覧確認、世代 fork ができます。
-- Decision Lab では2つのシナリオを同一人口で並行実行し、意見シフト・連合変動・監査証跡を比較できます。
+- `/compare` から Decision Lab を開始し、2つのシナリオを同一人口で並行実行して意見シフト・連合変動・監査証跡を比較できます。
 - Theater UI ではディベートカード、ライブ対話ストリーム、スタンス変化をリアルタイムに可視化します。
+- `config/` と `templates/` に provider、認知設定、人口構成、LaunchPad テンプレートを集約しています。
 
 ## 30秒でわかるポンチ図
 
@@ -54,6 +55,7 @@ flowchart LR
 | `/sim/:id` | Live Simulation | SSE 進捗、Activity Feed、社会反応、会話、ライブグラフ、Theater UI（ディベートカード・対話ストリーム） |
 | `/sim/:id/results` | Results | Decision Brief、シナリオ比較、Propagation、Transcript、Follow-up |
 | `/populations` | Populations | 人口生成、人口一覧、詳細表示、fork |
+| `/compare` | Compare Setup | 2つのシナリオ、実行プリセット、人口設定を指定して比較実行を開始 |
 | `/scenario/:id` | Decision Lab | シナリオペア比較、意見シフト表、連合マップ、監査タイムライン |
 
 実行時の大まかな流れは次の3段です。
@@ -173,6 +175,14 @@ flowchart TB
 4. 完了後はレポートを確認し、follow-up や rerun を実行できます。
 5. 比較が必要な場合は `scenario-pairs` でシナリオ比較を実行できます。
 
+## 前提
+
+- Python 3.11 以上
+- uv
+- Node.js 20 以上
+- pnpm
+- Docker / Docker Compose（PostgreSQL、Redis、またはコンテナ起動を使う場合）
+
 ## Quick Start
 
 ### Docker Compose
@@ -191,6 +201,27 @@ docker compose up --build
 - 既定 provider は `openai` です。
 - 新規シミュレーションを動かすには通常 `OPENAI_API_KEY` が必要です。
 - API キーがなくてもアプリは起動しますが、ライブ実行は無効になります。
+
+### ローカル一括起動
+
+依存関係を入れたあと、バックエンドとフロントエンドを1コマンドで起動できます。
+
+```bash
+cp .env.example .env
+
+cd backend
+uv sync --extra dev
+
+cd ../frontend
+pnpm install
+
+cd ..
+./scripts/dev.sh
+```
+
+- Backend: `http://localhost:8000`
+- Frontend: `http://localhost:5173`
+- ポートを変える場合: `./scripts/dev.sh --backend-port 8001 --frontend-port 5174`
 
 ### 最小 API 例
 
@@ -239,6 +270,8 @@ pnpm dev
 - Frontend dev server: `http://localhost:5173`
 - `VITE_API_BASE_URL` 未指定時は `/api` を使います
 - Vite が `/api` を `http://localhost:8000` にプロキシします
+- Docker 版フロントエンドは nginx で `:3000` を配信し、`/api` を backend に転送します
+- SSE の `/api/simulations/:id/stream` は nginx 側で buffering を無効化しています
 
 ### PostgreSQL / Redis を使う場合
 
@@ -262,6 +295,8 @@ REDIS_URL=redis://localhost:6379/0
 | provider 定義と fallback | `config/llm_providers.yaml` |
 | 認知・スケジューリング設定 | `config/cognitive.yaml` |
 | 実行プロファイル | `config/swarm_profiles.yaml` |
+| 人口構成 | `config/population_mix.yaml` |
+| GraphRAG / grounding | `config/graphrag.yaml`, `config/grounding/` |
 | LaunchPad テンプレート | `templates/ja/*.yaml` |
 
 ## 主要 API
@@ -272,16 +307,38 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/templates` | 利用可能なテンプレート一覧 |
 | `POST` | `/projects` | ドキュメント添付用のプロジェクト作成 |
 | `POST` | `/projects/{project_id}/documents` | `.txt` / `.md` / `.pdf` のアップロード |
+| `GET` | `/projects/{project_id}/documents` | 添付ドキュメント一覧 |
 | `POST` | `/simulations` | 新規シミュレーション作成 |
+| `GET` | `/simulations` | シミュレーション一覧 |
 | `GET` | `/simulations/{sim_id}` | 状態・メタデータ取得 |
 | `GET` | `/simulations/{sim_id}/stream` | SSE 進捗ストリーム |
 | `GET` | `/simulations/{sim_id}/timeline` | タイムライン取得 |
 | `GET` | `/simulations/{sim_id}/graph` | 最新グラフ取得 |
 | `GET` | `/simulations/{sim_id}/graph/history` | ラウンドごとのグラフ履歴 |
 | `GET` | `/simulations/{sim_id}/report` | 最終レポート取得 |
+| `GET` | `/simulations/{sim_id}/colonies` | colony 単位の実行状態 |
+| `GET/POST` | `/simulations/{sim_id}/backtest` | backtest 結果取得・実行 |
+| `GET` | `/simulations/{sim_id}/audit-trail` | シナリオ比較用の監査証跡 |
 | `POST` | `/simulations/{sim_id}/followups` | 結果に対する follow-up 質問 |
 | `POST` | `/simulations/{sim_id}/rerun` | 同条件で再実行 |
 | `POST` | `/scenario-pairs` | シナリオ比較開始 |
+| `GET` | `/scenario-pairs/{scenario_pair_id}` | シナリオ比較の状態取得 |
+| `GET` | `/scenario-pairs/{scenario_pair_id}/comparison` | 比較結果取得 |
+| `POST` | `/populations/{population_id}/snapshot` | シナリオ比較用の人口 snapshot 作成 |
+
+### Runs / レガシー互換
+
+| Method | Endpoint | 役割 |
+| --- | --- | --- |
+| `GET` | `/runs` | run 一覧 |
+| `POST` | `/runs` | run 作成 |
+| `GET` | `/runs/{run_id}` | run 状態取得 |
+| `GET` | `/runs/{run_id}/report` | run レポート取得 |
+| `GET` | `/runs/{run_id}/timeline` | run タイムライン取得 |
+| `GET` | `/runs/{run_id}/events` | run イベント取得 |
+| `GET` | `/runs/{run_id}/graph` | run グラフ取得 |
+| `POST` | `/runs/{run_id}/followups` | run への follow-up 質問 |
+| `POST` | `/runs/{run_id}/rerun` | run 再実行 |
 
 ### Society / 運用系
 
@@ -294,8 +351,18 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/society/simulations/{sim_id}/activation` | activation 結果 |
 | `GET` | `/society/simulations/{sim_id}/meeting` | meeting 結果 |
 | `GET` | `/society/simulations/{sim_id}/evaluation` | 評価メトリクス |
+| `GET` | `/society/simulations/{sim_id}/evaluation/summary` | 評価サマリー |
+| `GET` | `/society/simulations/{sim_id}/narrative` | narrative 出力 |
+| `GET` | `/society/simulations/{sim_id}/demographics` | demographic 集計 |
 | `GET` | `/society/simulations/{sim_id}/propagation` | 伝播データ |
+| `GET` | `/society/simulations/{sim_id}/social-graph` | society graph |
+| `GET` | `/society/simulations/{sim_id}/agents` | エージェント一覧 |
+| `GET` | `/society/simulations/{sim_id}/agents/{agent_id}` | エージェント詳細 |
 | `GET` | `/society/simulations/{sim_id}/transcript` | 発話 Transcript |
+| `GET` | `/society/simulations/{sim_id}/conversations` | 会話データ |
+| `GET` | `/society/simulations/{sim_id}/time-axis` | 時系列分析 |
+| `GET` | `/society/simulations/{sim_id}/ensemble` | ensemble 結果 |
+| `GET` | `/society/simulations/{sim_id}/report` | society report |
 | `GET` | `/admin/costs` | トークン・コスト集計 |
 | `GET` | `/admin/quality-metrics` | 品質・fallback 集計 |
 
@@ -318,25 +385,59 @@ pnpm exec playwright install --with-deps chromium
 pnpm test:e2e
 ```
 
+### 任意の品質チェック
+
+```bash
+cd backend
+uv run ruff check src
+uv run deptry .
+```
+
+```bash
+cd frontend
+pnpm check:dead
+```
+
 ## リポジトリ構成
 
 ```text
 .
-├── backend/       # FastAPI app, services, tests
-├── frontend/      # Vue app
-├── config/        # provider / cognitive / profile settings
-├── templates/     # seeded prompt templates
-├── data/          # local runtime data
-├── DESIGN.md      # 補足設計メモ
+├── backend/        # FastAPI API, SSE, orchestration, society services, tests
+├── frontend/       # Vue 3 + Vite UI, Pinia stores, charts, E2E tests
+├── config/         # provider / model / cognitive / profile / grounding settings
+├── templates/      # seeded LaunchPad templates and expert / PM personas
+├── experiments/    # validation experiments and aggregation scripts
+├── evaluation/     # baseline snapshots
+├── docs/           # focused implementation notes
+├── amplifier/      # separate Amplifier package checkout; not part of Agent AI runtime
+├── data/           # local runtime data
+├── scripts/dev.sh  # local backend + frontend launcher
+├── DESIGN.md       # 補足設計メモ
 └── CONTRIBUTING.md
 ```
+
+### フォルダ別メモ
+
+| フォルダ | README に統合した内容 |
+| --- | --- |
+| `backend/` | FastAPI 起動、DB 初期化、テンプレート seed、SSE、simulation/runs/projects/society/admin API、SQLite/PostgreSQL 切り替え |
+| `frontend/` | LaunchPad、Live Simulation、Results、Populations、Compare Setup、Decision Lab、`/api` proxy、Vitest、Playwright |
+| `config/` | provider/model、fallback、GraphRAG、人口構成、認知・通信・スケジューリング、grounding データ |
+| `templates/` | `business_analysis`、`market_entry`、`policy_impact`、`policy_simulation`、`scenario_exploration`、expert/PM persona |
+| `experiments/` | `swarm_validation` の実験 runner、集計、HTML レポート |
+| `docs/` | 個別の実装・不具合対応メモ |
+| `amplifier/` | Microsoft Amplifier の独立した uv パッケージ。Agent AI の Docker Compose や FastAPI/Vue 実行には不要 |
 
 ## 詳細ドキュメント
 
 - 設計メモ: [DESIGN.md](DESIGN.md)
 - コントリビュート: [CONTRIBUTING.md](CONTRIBUTING.md)
 - 行動規範: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- Frontend README: [frontend/README.md](frontend/README.md)
+- Amplifier README: [amplifier/README.md](amplifier/README.md)
 
 ## License
 
-AGPL-3.0. 詳細は [LICENSE](LICENSE) を参照してください。
+Agent AI は AGPL-3.0 です。詳細は [LICENSE](LICENSE) を参照してください。
+
+`amplifier/` は同梱された別プロジェクトで、独自の [amplifier/LICENSE](amplifier/LICENSE) に従います。
