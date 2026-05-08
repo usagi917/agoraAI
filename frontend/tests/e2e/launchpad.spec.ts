@@ -35,6 +35,12 @@ test('launches a simulation from the launchpad', async ({ page }) => {
     ]
   })
 
+  const healthResponse = page.waitForResponse('**/api/health')
+  const templatesResponse = page.waitForResponse('**/api/templates')
+  const simulationsResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/simulations') && response.request().method() === 'GET',
+  )
+
   await page.route('**/api/health', async (route) => {
     await route.fulfill({
       json: {
@@ -77,9 +83,13 @@ test('launches a simulation from the launchpad', async ({ page }) => {
   })
 
   await page.goto('/')
+  await Promise.all([healthResponse, templatesResponse, simulationsResponse])
   await page.getByLabel('分析プロンプト').fill('EV battery market analysis')
   await expect(page.getByTestId('launch-button')).toBeEnabled()
-  await page.getByTestId('launch-button').click()
+  await Promise.all([
+    page.waitForURL(/\/sim\/sim-e2e-1$/),
+    page.getByTestId('launch-button').click(),
+  ])
 
   await expect(page).toHaveURL(/\/sim\/sim-e2e-1$/)
 })

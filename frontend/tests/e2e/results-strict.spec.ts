@@ -1,6 +1,17 @@
 import { test, expect } from '@playwright/test'
 
 test('shows unsupported strict-evidence state in results', async ({ page }) => {
+  await page.route('**/api/codex/health', async (route) => {
+    await route.fulfill({
+      json: {
+        enabled: false,
+        available: false,
+        initialized: false,
+        transport: 'stdio',
+        error: 'disabled in e2e',
+      },
+    })
+  })
   await page.route('**/api/simulations/sim-strict', async (route) => {
     await route.fulfill({
       json: {
@@ -65,6 +76,9 @@ test('shows unsupported strict-evidence state in results', async ({ page }) => {
   })
   await page.route('**/api/simulations/sim-strict/graph', async (route) => {
     await route.fulfill({ json: { nodes: [], edges: [] } })
+  })
+  await page.route('**/api/society/simulations/sim-strict/propagation', async (route) => {
+    await route.fulfill({ json: null })
   })
 
   await page.goto('/sim/sim-strict/results')
