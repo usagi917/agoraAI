@@ -1,0 +1,28 @@
+{
+  "url": "http://localhost:8000",
+  "timestamp": "2026-04-07T00:00:00+00:00",
+  "branch": "scenario-comparison-validation-20260407",
+  "endpoints": {
+    "/health":                {"avg_ms": 8,  "min_ms": 8, "max_ms": 9,  "size_bytes": 148,   "status": "200"},
+    "/runs":                  {"avg_ms": 1,  "min_ms": 1, "max_ms": 2,  "size_bytes": 15191, "status": "200"},
+    "/simulations":           {"avg_ms": 2,  "min_ms": 1, "max_ms": 2,  "size_bytes": 6545,  "status": "200"},
+    "/templates":             {"avg_ms": 0,  "min_ms": 0, "max_ms": 1,  "size_bytes": 1373,  "status": "200"},
+    "/admin/costs":           {"avg_ms": 3,  "min_ms": 2, "max_ms": 4,  "size_bytes": 855,   "status": "200"},
+    "/admin/quality-metrics": {"avg_ms": 3,  "min_ms": 2, "max_ms": 4,  "size_bytes": 272,   "status": "200"},
+    "/society/populations":   {"avg_ms": 1,  "min_ms": 0, "max_ms": 1,  "size_bytes": 823,   "status": "200"}
+  },
+  "concurrency": {
+    "/health":      {"avg_ms": 46, "min_ms": 11, "max_ms": 79, "rps": 96.4},
+    "/runs":        {"avg_ms": 11, "min_ms": 4,  "max_ms": 17, "rps": 332.6},
+    "/simulations": {"avg_ms": 8,  "min_ms": 4,  "max_ms": 10, "rps": 356.3}
+  },
+  "meta": {
+    "openapi_spec_kb": 31.6,
+    "gzip_enabled": false,
+    "cache_control": false,
+    "runs_pagination": false,
+    "simulations_pagination": false,
+    "runs_count": 50,
+    "simulations_count": 22
+  }
+}

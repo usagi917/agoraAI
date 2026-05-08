@@ -65,16 +65,6 @@ interface StanceShiftEvent {
   reason: string
 }
 
-const STANCE_COLORS: Record<string, string> = {
-  '賛成': '#22c55e',
-  '条件付き賛成': '#86efac',
-  '中立': '#a3a3a3',
-  '条件付き反対': '#fca5a5',
-  '反対': '#ef4444',
-}
-
-export { STANCE_COLORS }
-
 export const useSocietyGraphStore = defineStore('societyGraph', () => {
   const liveAgents = ref<Map<string, LiveAgentNode>>(new Map())
   const liveEdges = ref<LiveEdge[]>([])
@@ -89,7 +79,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
   const socialEdgesVisible = ref(true)
   const agentEntityLinksVisible = ref(true)
 
-  // === Computed: useForceGraph 用の GraphNode/GraphEdge 変換 ===
+  // === Computed: 2D graph 用の GraphNode/GraphEdge 変換 ===
 
   const agentList = computed(() => Array.from(liveAgents.value.values()))
 
@@ -258,6 +248,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
   }
 
   function setSelectedAgents(agents: Array<{
+    id?: string
     agent_index: number
     name: string
     display_name?: string
@@ -267,7 +258,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
   }>) {
     const map = new Map<string, LiveAgentNode>()
     for (const a of agents) {
-      const id = `agent-${a.agent_index}`
+      const id = a.id || `agent-${a.agent_index}`
       const displayName = a.display_name || ''
       const fallbackLabel = `${a.occupation || '不明'}, ${a.age || '?'}歳`
       map.set(id, {

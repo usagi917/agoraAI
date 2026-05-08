@@ -5,7 +5,7 @@ WORKDIR /app
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 COPY pyproject.toml uv.lock* ./
-RUN uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
+RUN uv sync --frozen --no-dev
 
 COPY src/ ./src/
 

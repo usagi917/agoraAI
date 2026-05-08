@@ -2,7 +2,7 @@ import asyncio
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,9 +29,13 @@ def _spawn_simulation(run_id: str) -> None:
 
 
 @router.get("")
-async def list_runs(session: AsyncSession = Depends(get_session)):
+async def list_runs(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1),
+    session: AsyncSession = Depends(get_session),
+):
     result = await session.execute(
-        select(Run).order_by(Run.created_at.desc()).limit(50)
+        select(Run).order_by(Run.created_at.desc()).offset(skip).limit(min(limit, 100))
     )
     runs = result.scalars().all()
     return [

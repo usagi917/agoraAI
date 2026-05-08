@@ -34,6 +34,13 @@ export interface SimulationStoreSnapshot {
   reportReady: boolean
   reportSections: ReportSectionState[]
   reportError: string
+  societyPhase?: string
+  opinionDistribution?: Record<string, number>
+  evaluationMetrics?: Record<string, number>
+  societyActivationProgress?: { completed: number; total: number }
+  unifiedPhase?: 'idle' | 'society_pulse' | 'council' | 'synthesis' | 'completed'
+  unifiedPhaseIndex?: number
+  unifiedPhaseTotal?: number
   metaCycleIndex?: number
   metaMaxCycles?: number
   metaTargetScore?: number
@@ -273,6 +280,13 @@ export const useSimulationStore = defineStore('simulation', () => {
       reportReady: reportReady.value,
       reportSections: reportSections.value.map((section) => ({ ...section })),
       reportError: reportError.value,
+      societyPhase: societyPhase.value,
+      opinionDistribution: { ...opinionDistribution.value },
+      evaluationMetrics: { ...evaluationMetrics.value },
+      societyActivationProgress: { ...societyActivationProgress.value },
+      unifiedPhase: unifiedPhase.value,
+      unifiedPhaseIndex: unifiedPhaseIndex.value,
+      unifiedPhaseTotal: unifiedPhaseTotal.value,
       metaCycleIndex: metaCycleIndex.value,
       metaMaxCycles: metaMaxCycles.value,
       metaTargetScore: metaTargetScore.value,
@@ -303,6 +317,19 @@ export const useSimulationStore = defineStore('simulation', () => {
       ? snapshot.reportSections.map((section) => ({ ...section }))
       : reportSections.value
     reportError.value = snapshot.reportError ?? reportError.value
+    societyPhase.value = snapshot.societyPhase ?? societyPhase.value
+    opinionDistribution.value = snapshot.opinionDistribution
+      ? { ...snapshot.opinionDistribution }
+      : opinionDistribution.value
+    evaluationMetrics.value = snapshot.evaluationMetrics
+      ? { ...snapshot.evaluationMetrics }
+      : evaluationMetrics.value
+    societyActivationProgress.value = snapshot.societyActivationProgress
+      ? { ...snapshot.societyActivationProgress }
+      : societyActivationProgress.value
+    unifiedPhase.value = snapshot.unifiedPhase ?? unifiedPhase.value
+    unifiedPhaseIndex.value = snapshot.unifiedPhaseIndex ?? unifiedPhaseIndex.value
+    unifiedPhaseTotal.value = snapshot.unifiedPhaseTotal ?? unifiedPhaseTotal.value
     metaCycleIndex.value = snapshot.metaCycleIndex ?? metaCycleIndex.value
     metaMaxCycles.value = snapshot.metaMaxCycles ?? metaMaxCycles.value
     metaTargetScore.value = snapshot.metaTargetScore ?? metaTargetScore.value
@@ -322,6 +349,10 @@ export const useSimulationStore = defineStore('simulation', () => {
 
   function setStatus(s: string) {
     status.value = s
+  }
+
+  function setMode(m: string) {
+    mode.value = m
   }
 
   function setPhase(p: string) {
@@ -456,6 +487,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     completedReportSections,
     init,
     setStatus,
+    setMode,
     setPhase,
     setError,
     setRound,

@@ -16,6 +16,7 @@ from src.app.models.simulation import Simulation
 from src.app.models.society_result import SocietyResult
 from src.app.models.evaluation_result import EvaluationResult
 from src.app.models.conversation_log import ConversationLog
+from src.app.services.society.validation_pipeline import summarize_prediction_evaluations
 from src.app.services.society.population_generator import (
     generate_population,
     get_default_population_size,
@@ -163,6 +164,8 @@ async def fork_population(
             shock_sensitivity=agent.shock_sensitivity,
             llm_backend=agent.llm_backend,
             memory_summary=agent.memory_summary,  # 記憶を引き継ぐ
+            rolling_summary=agent.rolling_summary,
+            episodes=agent.episodes,
         )
         session.add(new_agent)
 
@@ -257,7 +260,7 @@ async def get_evaluation_result(
     if not metrics:
         raise HTTPException(status_code=404, detail="評価結果が見つかりません")
 
-    return [
+    metric_rows = [
         {
             "id": m.id,
             "metric_name": m.metric_name,
@@ -269,6 +272,71 @@ async def get_evaluation_result(
         }
         for m in metrics
     ]
+    return {
+        "metrics": metric_rows,
+        "prediction_evaluations": await summarize_prediction_evaluations(
+            session,
+            simulation_id=sim_id,
+        ),
+    }
+
+
+@router.get("/simulations/{sim_id}/evaluation/summary")
+async def get_evaluation_summary(
+    sim_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """シミュレーション評価サマリーを返す。
+
+    gate 判定（EMD/JSD/Brier）・baseline 比較・live replay warning を含む統合サマリー。
+    validation_records が存在しない場合は inconclusive を返す。
+    """
+    from src.app.repositories.validation_repo import ValidationRepository
+    from src.app.services.society.validation_pipeline import build_validation_summary
+    from src.app.services.society.baseline_comparator import build_evaluation_summary_response
+
+    sim = await session.get(Simulation, sim_id)
+    if not sim:
+        raise HTTPException(status_code=404, detail="シミュレーションが見つかりません")
+
+    repo = ValidationRepository(session)
+    records = await repo.list_by_simulation(sim_id)
+
+    records_data = []
+    for r in records:
+        gate_eligible = (r.theme_category or "") != "unknown"
+        records_data.append({
+            "status": "validated" if r.actual_distribution else "report_only",
+            "gate_eligible": gate_eligible,
+            "emd": r.emd,
+            "jsd": r.jsd,
+            "brier_score": r.brier_score,
+        })
+
+    theme_category = records[0].theme_category if records else None
+    gate_result = build_validation_summary(records_data, theme_category=theme_category)
+
+    # baseline comparison は simulated_emd のみ。
+    # random / initial / no_conversation / no_event は実行時アブレーション結果として
+    # 別途 POST で登録・参照する設計（Step 11 以降で拡張）。
+    baseline_comparison = {
+        "simulated_emd": gate_result["avg_emd"],
+        "random_emd": None,
+        "initial_emd": None,
+        "no_conversation_emd": None,
+        "no_event_emd": None,
+        "vs_random_improvement": None,
+        "vs_initial_improvement": None,
+        "vs_no_conversation_improvement": None,
+        "vs_no_event_improvement": None,
+        "primary_metric": "emd",
+    }
+
+    return build_evaluation_summary_response(
+        sim_id=sim_id,
+        gate_result=gate_result,
+        baseline_comparison=baseline_comparison,
+    )
 
 
 @router.get("/simulations/{sim_id}/narrative")
@@ -718,4 +786,63 @@ async def get_conversations(
         "participants": participants,
         "synthesis": synthesis,
         "total_rounds": len(all_rounds),
+    }
+
+
+# === Wondrous Crayon: 時間軸予測 API ===
+
+@router.get("/simulations/{sim_id}/time-axis")
+async def get_time_axis(sim_id: str, session: AsyncSession = Depends(get_session)):
+    """t0..t5 時系列予測の統合レポート全体を返す."""
+    result = await session.execute(select(Simulation).where(Simulation.id == sim_id))
+    sim = result.scalar_one_or_none()
+    if sim is None:
+        raise HTTPException(status_code=404, detail="simulation not found")
+
+    metadata = dict(sim.metadata_json or {})
+    report = metadata.get("time_axis_result")
+    if report is None:
+        raise HTTPException(status_code=404, detail="time-axis result not available")
+    return report
+
+
+@router.get("/simulations/{sim_id}/ensemble")
+async def get_ensemble(sim_id: str, session: AsyncSession = Depends(get_session)):
+    """Ensemble の確率帯 (CI) のみを返す軽量エンドポイント."""
+    result = await session.execute(select(Simulation).where(Simulation.id == sim_id))
+    sim = result.scalar_one_or_none()
+    if sim is None:
+        raise HTTPException(status_code=404, detail="simulation not found")
+
+    metadata = dict(sim.metadata_json or {})
+    report = metadata.get("time_axis_result") or {}
+    timeline = report.get("timeline", [])
+    bands = []
+    for entry in timeline:
+        bands.append({
+            "key": entry.get("key"),
+            "label": entry.get("label"),
+            "distribution": entry.get("distribution", {}),
+            "credible_intervals": entry.get("credible_intervals"),
+        })
+    return {"bands": bands, "horizons": len(bands)}
+
+
+@router.get("/simulations/{sim_id}/report")
+async def get_temporal_report(sim_id: str, session: AsyncSession = Depends(get_session)):
+    """時系列統合レポート (driving_factors / what_if / summary を含む)."""
+    result = await session.execute(select(Simulation).where(Simulation.id == sim_id))
+    sim = result.scalar_one_or_none()
+    if sim is None:
+        raise HTTPException(status_code=404, detail="simulation not found")
+
+    metadata = dict(sim.metadata_json or {})
+    report = metadata.get("time_axis_result")
+    if report is None:
+        raise HTTPException(status_code=404, detail="time-axis result not available")
+    return {
+        "theme": report.get("theme", ""),
+        "summary": report.get("summary", {}),
+        "timeline": report.get("timeline", []),
+        "what_if": report.get("what_if"),
     }

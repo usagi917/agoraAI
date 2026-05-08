@@ -37,16 +37,21 @@ INTERVENTION_METRICS: dict[str, list[str]] = {
 
 MATCHING_RULES = {
     "issue_label": "outcome.issue_label と predicted issue label の一致を優先",
+    "outcome_label": "structured outcome_label と observed outcome_label/issue_label の一致を優先",
     "scenario_text": "予測シナリオ説明と actual_scenario/summary の 2-gram Jaccard overlap",
+    "leading_indicators": "予測した先行指標と実績タグ/説明の一致",
+    "affected_segments": "影響セグメントと実績タグ/説明の一致",
     "tags": "outcome.tags と issue/scenario text の部分一致",
     "thresholds": {
         "hit": 0.67,
         "partial_hit": 0.42,
     },
     "weights": {
-        "issue_label": 0.45,
-        "scenario_text": 0.4,
-        "tags": 0.15,
+        "issue_label": 0.25,
+        "outcome_label": 0.25,
+        "scenario_text": 0.25,
+        "leading_indicators": 0.15,
+        "tags": 0.10,
     },
 }
 
@@ -173,11 +178,32 @@ def _collect_predicted_scenarios(payload: dict[str, Any]) -> list[dict[str, Any]
             description = _clean_text(scenario.get("description"))
             if not description:
                 continue
+            outcome_label = _clean_text(
+                scenario.get("outcome_label")
+                or scenario.get("label")
+                or issue_label
+            )
+            probability = float(
+                scenario.get("probability", scenario.get("scenario_score", 0)) or 0
+            )
             collected.append({
                 "issue_id": issue_id,
                 "issue_label": issue_label,
+                "outcome_label": outcome_label,
                 "description": description,
-                "scenario_score": float(scenario.get("scenario_score", scenario.get("probability", 0)) or 0),
+                "probability": max(0.0, min(1.0, probability)),
+                "scenario_score": float(scenario.get("scenario_score", probability) or 0),
+                "horizon": _clean_text(scenario.get("horizon") or scenario.get("time_horizon")),
+                "leading_indicators": [
+                    _clean_text(item)
+                    for item in (scenario.get("leading_indicators") or [])
+                    if _clean_text(item)
+                ],
+                "affected_segments": [
+                    _clean_text(item)
+                    for item in (scenario.get("affected_segments") or [])
+                    if _clean_text(item)
+                ],
             })
     if collected:
         return collected
@@ -191,11 +217,30 @@ def _collect_predicted_scenarios(payload: dict[str, Any]) -> list[dict[str, Any]
         if match:
             issue_label = match.group(1)
             description = match.group(2)
+        outcome_label = _clean_text(
+            scenario.get("outcome_label")
+            or scenario.get("label")
+            or issue_label
+        )
+        probability = float(scenario.get("probability", scenario.get("scenario_score", 0)) or 0)
         collected.append({
             "issue_id": "",
             "issue_label": issue_label,
+            "outcome_label": outcome_label,
             "description": description,
-            "scenario_score": float(scenario.get("scenario_score", scenario.get("probability", 0)) or 0),
+            "probability": max(0.0, min(1.0, probability)),
+            "scenario_score": float(scenario.get("scenario_score", probability) or 0),
+            "horizon": _clean_text(scenario.get("horizon") or scenario.get("time_horizon")),
+            "leading_indicators": [
+                _clean_text(item)
+                for item in (scenario.get("leading_indicators") or [])
+                if _clean_text(item)
+            ],
+            "affected_segments": [
+                _clean_text(item)
+                for item in (scenario.get("affected_segments") or [])
+                if _clean_text(item)
+            ],
         })
     return collected
 
@@ -215,8 +260,10 @@ def _normalize_case(case: dict[str, Any], index: int) -> dict[str, Any]:
         },
         "outcome": {
             "issue_label": _clean_text(outcome.get("issue_label")),
+            "outcome_label": _clean_text(outcome.get("outcome_label") or outcome.get("issue_label")),
             "summary": _clean_text(outcome.get("summary")),
             "actual_scenario": _clean_text(outcome.get("actual_scenario")),
+            "horizon": _clean_text(outcome.get("horizon") or case.get("horizon")),
             "metrics": {
                 str(metric): float(value)
                 for metric, value in (outcome.get("metrics") or {}).items()
@@ -255,10 +302,13 @@ def _normalize_case(case: dict[str, Any], index: int) -> dict[str, Any]:
 
 def _score_prediction(predicted: dict[str, Any], actual_outcome: dict[str, Any]) -> dict[str, Any]:
     actual_issue = _clean_text(actual_outcome.get("issue_label"))
+    actual_label = _clean_text(actual_outcome.get("outcome_label")) or actual_issue
     actual_text = _clean_text(actual_outcome.get("actual_scenario")) or _clean_text(actual_outcome.get("summary"))
     predicted_issue = _clean_text(predicted.get("issue_label"))
+    predicted_label = _clean_text(predicted.get("outcome_label")) or predicted_issue
     predicted_text = _clean_text(predicted.get("description"))
     tags = [tag for tag in actual_outcome.get("tags") or [] if tag]
+    actual_searchable = f"{actual_label} {actual_issue} {actual_text} {' '.join(tags)}"
 
     label_match = 0.0
     if actual_issue and predicted_issue:
@@ -269,18 +319,36 @@ def _score_prediction(predicted: dict[str, Any], actual_outcome: dict[str, Any])
     elif predicted_issue and predicted_issue in actual_text:
         label_match = 0.55
 
+    outcome_label_match = 0.0
+    if actual_label and predicted_label:
+        if actual_label == predicted_label:
+            outcome_label_match = 1.0
+        elif actual_label in predicted_label or predicted_label in actual_label:
+            outcome_label_match = 0.7
+    elif predicted_label and predicted_label in actual_text:
+        outcome_label_match = 0.55
+
     overlap = _jaccard(_ngrams(predicted_text), _ngrams(actual_text))
 
     tag_hits = 0
-    searchable_text = f"{predicted_issue} {predicted_text}"
+    searchable_text = f"{predicted_issue} {predicted_label} {predicted_text}"
     for tag in tags:
         if tag and tag in searchable_text:
             tag_hits += 1
     tag_overlap = tag_hits / max(len(tags), 1) if tags else 0.0
 
+    indicator_terms = [
+        *list(predicted.get("leading_indicators") or []),
+        *list(predicted.get("affected_segments") or []),
+    ]
+    indicator_hits = sum(1 for item in indicator_terms if item and item in actual_searchable)
+    indicator_overlap = indicator_hits / max(len(indicator_terms), 1) if indicator_terms else 0.0
+
     score = round(
         label_match * float(MATCHING_RULES["weights"]["issue_label"])
+        + outcome_label_match * float(MATCHING_RULES["weights"]["outcome_label"])
         + overlap * float(MATCHING_RULES["weights"]["scenario_text"])
+        + indicator_overlap * float(MATCHING_RULES["weights"]["leading_indicators"])
         + tag_overlap * float(MATCHING_RULES["weights"]["tags"]),
         3,
     )
@@ -288,23 +356,40 @@ def _score_prediction(predicted: dict[str, Any], actual_outcome: dict[str, Any])
     reasons = []
     if label_match:
         reasons.append("issue_label_match")
+    if outcome_label_match:
+        reasons.append("outcome_label_match")
     if overlap >= 0.2:
         reasons.append("scenario_text_overlap")
+    if indicator_overlap:
+        reasons.append("leading_indicator_or_segment_overlap")
     if tag_overlap:
         reasons.append("outcome_tag_overlap")
+
+    probability = float(predicted.get("probability", predicted.get("scenario_score", 0)) or 0)
+    probability = max(0.0, min(1.0, probability))
+    verdict = _verdict(score)
+    did_happen = 1.0 if verdict == "hit" else 0.5 if verdict == "partial_hit" else 0.0
 
     return {
         "issue_id": predicted.get("issue_id", ""),
         "issue_label": predicted_issue,
+        "outcome_label": predicted_label,
         "scenario_description": predicted_text,
+        "probability": probability,
+        "horizon": _clean_text(predicted.get("horizon")),
+        "leading_indicators": list(predicted.get("leading_indicators") or []),
+        "affected_segments": list(predicted.get("affected_segments") or []),
         "predicted_score": float(predicted.get("scenario_score", 0) or 0),
         "actual_summary": _clean_text(actual_outcome.get("summary")),
         "actual_scenario": _clean_text(actual_outcome.get("actual_scenario")),
         "match_score": score,
         "label_match": round(label_match, 3),
+        "outcome_label_match": round(outcome_label_match, 3),
         "text_overlap": round(overlap, 3),
+        "indicator_overlap": round(indicator_overlap, 3),
         "tag_overlap": round(tag_overlap, 3),
-        "verdict": _verdict(score),
+        "probability_brier": round((probability - did_happen) ** 2, 4),
+        "verdict": verdict,
         "reasons": reasons,
     }
 
@@ -326,6 +411,8 @@ def run_backtest_analysis(
     analyzed_cases: list[dict[str, Any]] = []
     best_verdict_counts = {"hit": 0, "partial_hit": 0, "miss": 0}
     total_issue_hits = 0
+    probability_briers: list[float] = []
+    reciprocal_ranks: list[float] = []
 
     for case in result["historical_cases"]:
         matches = [
@@ -342,22 +429,30 @@ def run_backtest_analysis(
         best_match = matches[0] if matches else None
         verdict = str(best_match.get("verdict") if best_match else "miss")
         best_verdict_counts[verdict] += 1
+        if best_match and isinstance(best_match.get("probability_brier"), (int, float)):
+            probability_briers.append(float(best_match["probability_brier"]))
 
         issue_results: list[dict[str, Any]] = []
         issue_seen: set[str] = set()
-        for match in matches:
+        first_success_rank = None
+        for rank, match in enumerate(matches, start=1):
+            if first_success_rank is None and match["verdict"] in {"hit", "partial_hit"}:
+                first_success_rank = rank
             issue_label = str(match.get("issue_label") or "")
             if not issue_label or issue_label in issue_seen:
                 continue
             issue_seen.add(issue_label)
             issue_results.append({
                 "issue_label": issue_label,
+                "outcome_label": match.get("outcome_label", issue_label),
                 "verdict": match["verdict"],
                 "match_score": match["match_score"],
+                "probability": match.get("probability", 0.0),
                 "scenario_description": match["scenario_description"],
             })
             if match["verdict"] == "hit":
                 total_issue_hits += 1
+        reciprocal_ranks.append((1 / first_success_rank) if first_success_rank else 0.0)
 
         analyzed_cases.append({
             **case,
@@ -380,8 +475,15 @@ def run_backtest_analysis(
         "partial_hit_count": best_verdict_counts["partial_hit"],
         "miss_count": best_verdict_counts["miss"],
         "hit_rate": round(best_verdict_counts["hit"] / max(case_count, 1), 3),
+        "partial_hit_rate": round(best_verdict_counts["partial_hit"] / max(case_count, 1), 3),
         "issue_hit_count": total_issue_hits,
         "issue_hit_rate": round(total_issue_hits / max(sum(len(case["issue_results"]) for case in analyzed_cases), 1), 3),
+        "scenario_probability_brier": round(
+            sum(probability_briers) / len(probability_briers), 4
+        ) if probability_briers else None,
+        "mean_reciprocal_rank": round(
+            sum(reciprocal_ranks) / len(reciprocal_ranks), 4
+        ) if reciprocal_ranks else None,
     }
     result["status"] = "ready"
     return result
@@ -390,6 +492,14 @@ def run_backtest_analysis(
 def _signed_metric_delta(metric: str, baseline: float, outcome: float) -> float:
     direction = str(METRIC_DEFINITIONS.get(metric, {}).get("direction") or "up")
     return outcome - baseline if direction == "up" else baseline - outcome
+
+
+def _direction_from_delta(delta: float) -> str:
+    if delta > 0:
+        return "up"
+    if delta < 0:
+        return "down"
+    return "flat"
 
 
 def _collect_metric_observations(
@@ -473,6 +583,51 @@ def overlay_observed_intervention_comparison(
         downside = round(abs(sum(negative) / max(len(negative), 1)), 4) if negative else 0.0
         spread = pstdev(deltas) if len(deltas) > 1 else 0.0
         uncertainty = round(min(1.0, (1 / math.sqrt(len(deltas))) + spread), 4)
+        observed_deltas_by_metric: dict[str, list[float]] = {}
+        for observation in observations:
+            metric = str(observation["metric"])
+            observed_deltas_by_metric.setdefault(metric, []).append(float(observation["signed_delta"]))
+        observed_by_metric = {
+            metric: sum(values) / len(values)
+            for metric, values in observed_deltas_by_metric.items()
+            if values
+        }
+        predicted_effects = list(item.get("predicted_effects") or [])
+        effect_comparisons = []
+        for predicted in predicted_effects:
+            metric = str(predicted.get("metric") or "")
+            if metric not in observed_by_metric:
+                continue
+            expected_delta = float(predicted.get("expected_delta") or 0.0)
+            observed_delta = observed_by_metric[metric]
+            predicted_direction = str(predicted.get("direction") or _direction_from_delta(expected_delta))
+            actual_direction = _direction_from_delta(observed_delta)
+            effect_comparisons.append({
+                "metric": metric,
+                "metric_label": _metric_label(metric),
+                "expected_delta": round(expected_delta, 4),
+                "actual_delta": round(observed_delta, 4),
+                "direction": predicted_direction,
+                "actual_direction": actual_direction,
+                "direction_match": predicted_direction == actual_direction,
+                "absolute_error": round(abs(expected_delta - observed_delta), 4),
+            })
+        direction_accuracy = (
+            round(
+                sum(1 for effect in effect_comparisons if effect["direction_match"])
+                / len(effect_comparisons),
+                4,
+            )
+            if effect_comparisons else None
+        )
+        effect_mae = (
+            round(
+                sum(float(effect["absolute_error"]) for effect in effect_comparisons)
+                / len(effect_comparisons),
+                4,
+            )
+            if effect_comparisons else None
+        )
 
         evidence = []
         for observation in observations[:5]:
@@ -498,6 +653,9 @@ def overlay_observed_intervention_comparison(
             "observed_downside": downside,
             "uncertainty": uncertainty,
             "observed_case_count": len({str(obs['case_id']) for obs in observations}),
+            "direction_accuracy": direction_accuracy,
+            "effect_mae": effect_mae,
+            "effect_comparisons": effect_comparisons,
             "supporting_evidence": evidence,
             "supporting_signals": [
                 entry["summary"]

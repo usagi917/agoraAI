@@ -1,0 +1,57 @@
+name: nightly-benchmark
+
+on:
+  schedule:
+    - cron: "0 18 * * *"  # 03:00 JST
+  workflow_dispatch:
+
+jobs:
+  retrodiction:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Sync dependencies
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uv sync --frozen
+
+      - name: Run retrodiction baseline
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uv run python -m src.app.evaluation.retrodiction_runner \
+            --fixtures tests/fixtures/survey_data_sample.yaml \
+            --output evaluation_results/baseline_nightly.json
+
+      - name: Upload baseline artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-nightly
+          path: backend/evaluation_results/baseline_nightly.json
+
+      - name: Regression check
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uv run python -c "
+          import json
+          from src.app.evaluation.retrodiction_runner import check_regression
+          with open('evaluation_results/baseline_nightly.json') as f:
+              current = json.load(f)
+          try:
+              with open('evaluation_results/baseline_v0.json') as f:
+                  baseline = json.load(f)
+          except FileNotFoundError:
+              print('No baseline_v0.json yet; skipping regression check.')
+              raise SystemExit(0)
+          ok = check_regression(current['summary']['mean_jsd'], baseline['summary']['mean_jsd'])
+          if not ok:
+              print(f\"REGRESSION: current mean_jsd={current['summary']['mean_jsd']:.4f} vs baseline={baseline['summary']['mean_jsd']:.4f}\")
+              raise SystemExit(1)
+          print('Regression check passed.')
+          "

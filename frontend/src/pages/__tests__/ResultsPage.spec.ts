@@ -26,12 +26,6 @@ vi.mock('vue-router', () => ({
 
 vi.mock('../../api/client', () => apiMocks)
 
-vi.mock('../../composables/useForceGraph', () => ({
-  useForceGraph: () => ({
-    setFullGraph: vi.fn(),
-  }),
-}))
-
 describe('ResultsPage', () => {
   beforeEach(() => {
     push.mockReset()
@@ -109,14 +103,8 @@ describe('ResultsPage', () => {
           TemporalSlider: true,
           ProbabilityChart: true,
           ScenarioCompare: true,
-          SocietyTimeline: true,
           AgreementHeatmap: true,
-          AgentMindView: true,
-          MemoryStreamViewer: true,
-          EvaluationDashboard: true,
-          ToMMapVisualization: true,
-          SocialNetworkDynamics: true,
-          KnowledgeGraphExplorer: true,
+          PropagationDashboard: true,
         },
       },
     })
@@ -300,14 +288,8 @@ describe('ResultsPage', () => {
           TemporalSlider: true,
           ProbabilityChart: true,
           ScenarioCompare: true,
-          SocietyTimeline: true,
           AgreementHeatmap: true,
-          AgentMindView: true,
-          MemoryStreamViewer: true,
-          EvaluationDashboard: true,
-          ToMMapVisualization: true,
-          SocialNetworkDynamics: true,
-          KnowledgeGraphExplorer: true,
+          PropagationDashboard: true,
         },
       },
     })

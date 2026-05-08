@@ -1,24 +1,135 @@
-"""Simulation Dispatcher v2: プリセット駆動
+"""Simulation Dispatcher v2: プリセット駆動.
 
 旧9モードを normalize_mode() で5プリセットに正規化し、
 baseline は専用オーケストレータ、それ以外は unified に委譲する。
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
-from src.app.database import async_session
+from src.app.config import settings
+from src.app.database import async_session, engine
 from src.app.models.project import Project
 from src.app.models.scenario_pair import ScenarioPair
 from src.app.models.simulation import Simulation, normalize_mode
+from src.app.services.scenario_pair_status import refresh_scenario_pair_status
 from src.app.services.baseline_orchestrator import run_baseline
 from src.app.services.unified_orchestrator import run_unified
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
+
+_background_tasks: set[asyncio.Task] = set()
+_STARTUP_RESUME_ADVISORY_LOCK_ID = 824319481507
+_startup_resume_leader_conn: AsyncConnection | None = None
+
+
+def _on_task_done(task: asyncio.Task) -> None:
+    """Log unhandled exceptions from background simulation tasks."""
+    _background_tasks.discard(task)
+    if not task.cancelled() and task.exception() is not None:
+        exc = task.exception()
+        logger.error(
+            "Background simulation task failed: %s",
+            exc,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+
+
+def spawn_simulation(simulation_id: str) -> None:
+    """Launch a simulation in the background and keep a strong task reference."""
+    task = asyncio.create_task(dispatch_simulation(simulation_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_on_task_done)
+
+
+def _supports_postgres_advisory_lock() -> bool:
+    return make_url(settings.database_url).get_backend_name().startswith("postgresql")
+
+
+async def _try_acquire_startup_resume_leadership() -> bool:
+    """Elect one API process to perform startup resume.
+
+    PostgreSQL advisory locks are session-scoped, so the leader connection is
+    intentionally kept open until FastAPI shutdown. That prevents another
+    worker that starts slightly later from re-reading the same running rows.
+    """
+    global _startup_resume_leader_conn
+
+    if not _supports_postgres_advisory_lock():
+        return True
+    if _startup_resume_leader_conn is not None:
+        return True
+
+    conn = await engine.connect()
+    try:
+        result = await conn.execute(
+            text("SELECT pg_try_advisory_lock(:lock_id)"),
+            {"lock_id": _STARTUP_RESUME_ADVISORY_LOCK_ID},
+        )
+        acquired = bool(result.scalar())
+        await conn.commit()
+        if not acquired:
+            await conn.close()
+            return False
+
+        _startup_resume_leader_conn = conn
+        return True
+    except Exception:
+        await conn.close()
+        raise
+
+
+async def release_startup_resume_leadership() -> None:
+    """Release the startup resume leader lock held by this process, if any."""
+    global _startup_resume_leader_conn
+
+    conn = _startup_resume_leader_conn
+    if conn is None:
+        return
+
+    _startup_resume_leader_conn = None
+    try:
+        await conn.execute(
+            text("SELECT pg_advisory_unlock(:lock_id)"),
+            {"lock_id": _STARTUP_RESUME_ADVISORY_LOCK_ID},
+        )
+        await conn.commit()
+    finally:
+        await conn.close()
+
+
+async def resume_unfinished_simulations() -> int:
+    """Resume simulations left in an active state after a dev-server restart.
+
+    uvicorn --reload cancels in-process background tasks. The database can then
+    still say "running" even though no Python task exists. Re-enqueueing active
+    records on startup lets checkpointed orchestrators continue from the last
+    persisted phase.
+    """
+    if not await _try_acquire_startup_resume_leadership():
+        logger.info("Skipping startup simulation resume; another process is the resume leader")
+        return 0
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Simulation.id).where(
+                Simulation.status.in_(["queued", "running", "generating_report"])
+            )
+        )
+        simulation_ids = list(result.scalars().all())
+
+    for simulation_id in simulation_ids:
+        logger.info("Resuming unfinished simulation %s", simulation_id)
+        spawn_simulation(simulation_id)
+
+    return len(simulation_ids)
 
 
 async def dispatch_simulation(simulation_id: str) -> None:
@@ -36,6 +147,7 @@ async def dispatch_simulation(simulation_id: str) -> None:
             sim.mode = normalize_mode(sim.mode)
             sim.status = "running"
             sim.started_at = datetime.now(timezone.utc)
+            await refresh_scenario_pair_status(session, sim.scenario_pair_id)
             await session.commit()
 
             # Decision Lab: scenario_pair_id があれば intervention_params を取得
@@ -68,6 +180,7 @@ async def dispatch_simulation(simulation_id: str) -> None:
                 if sim:
                     sim.status = "failed"
                     sim.error_message = error_msg[:500]
+                    await refresh_scenario_pair_status(session, sim.scenario_pair_id)
                     await session.commit()
             except Exception as db_err:
                 logger.error("Failed to update simulation status: %s", db_err)

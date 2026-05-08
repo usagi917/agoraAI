@@ -1,24 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { getStanceColor, getStanceSortIndex } from '../constants/stances'
 
 const props = defineProps<{
   distribution: Record<string, number>
 }>()
 
-const stanceColors: Record<string, string> = {
-  '賛成': '#22c55e',
-  '反対': '#ef4444',
-  '中立': '#a3a3a3',
-  '条件付き賛成': '#86efac',
-  '条件付き反対': '#fca5a5',
-}
-
 const sortedEntries = computed(() => {
-  const order = ['賛成', '条件付き賛成', '中立', '条件付き反対', '反対']
   return Object.entries(props.distribution).sort((a, b) => {
-    const ia = order.indexOf(a[0])
-    const ib = order.indexOf(b[0])
-    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+    return getStanceSortIndex(a[0]) - getStanceSortIndex(b[0])
   })
 })
 </script>
@@ -32,14 +22,14 @@ const sortedEntries = computed(() => {
         class="bar-segment"
         :style="{
           width: (ratio * 100) + '%',
-          backgroundColor: stanceColors[stance] || '#6366f1',
+          backgroundColor: getStanceColor(stance),
         }"
         :title="`${stance}: ${(ratio * 100).toFixed(1)}%`"
       />
     </div>
     <div class="legend">
       <div v-for="[stance, ratio] in sortedEntries" :key="stance" class="legend-item">
-        <span class="legend-dot" :style="{ backgroundColor: stanceColors[stance] || '#6366f1' }" />
+        <span class="legend-dot" :style="{ backgroundColor: getStanceColor(stance) }" />
         <span class="legend-label">{{ stance }}</span>
         <span class="legend-value">{{ (ratio * 100).toFixed(1) }}%</span>
       </div>

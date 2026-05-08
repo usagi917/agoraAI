@@ -5,24 +5,36 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from src.app.config import settings
 from src.app.models.simulation import Simulation
 from src.app.models.society_result import SocietyResult
 from src.app.models.evaluation_result import EvaluationResult
 from src.app.services.society.society_orchestrator import (
+    _estimate_theme_category,
     _get_or_create_population,
     _save_network,
+    _load_population_edges,
 )
 from src.app.services.society.population_generator import get_default_population_size
 from src.app.services.society.agent_selector import select_agents
 from src.app.services.society.activation_layer import run_activation
 from src.app.services.society.evaluation import evaluate_society_simulation
-from src.app.services.society.persona_generator import generate_persona_narratives
+from src.app.services.society.persona_generator import (
+    generate_persona_narratives_post_activation,
+)
 from src.app.services.society.representative_selector import select_representatives
 from src.app.services.society.demographic_analyzer import analyze_demographics
 from src.app.services.society.kg_enricher import enrich_agents_from_kg
 from src.app.services.society.kg_evolution_service import KGEvolutionService
 from src.app.models.conversation_log import ConversationLog
 from src.app.services.conversation_log_store import persist_conversation_logs
+from src.app.services.validation_summary import build_validation_summary
+from src.app.services.society.validation_pipeline import (
+    auto_compare,
+    build_distribution_prediction_payload,
+    register_prediction_evaluation,
+    register_result,
+)
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -37,6 +49,7 @@ class SocietyPulseResult:
     representatives: list[dict]
     usage: dict
     population_count: int = 0
+    validation_summary: dict | None = None
 
 
 async def run_society_pulse(
@@ -63,6 +76,8 @@ async def run_society_pulse(
 
     pop_id, agents = await _get_or_create_population(
         session, sim.population_id, pop_count,
+        seed=sim.seed,
+        strict=bool(getattr(sim, "scenario_pair_id", None)),
     )
     sim.population_id = pop_id
     await session.commit()
@@ -75,14 +90,16 @@ async def run_society_pulse(
 
     await _save_network(session, agents, pop_id)
 
-    # === Selection ===
-    selected_agents = await select_agents(agents, theme, target_count=100)
+    # === Selection (network centrality-aware) ===
+    all_edges = await _load_population_edges(session, pop_id)
+    selected_agents = await select_agents(agents, theme, target_count=100, edges=all_edges)
 
     await sse_manager.publish(simulation_id, "society_selection_completed", {
         "selected_count": len(selected_agents),
         "total_population": len(agents),
         "selected_agents": [
             {
+                "id": a.get("id", ""),
                 "agent_index": a.get("agent_index", i),
                 "name": f"Agent-{a.get('agent_index', i)}",
                 "occupation": a.get("demographics", {}).get("occupation", ""),
@@ -102,17 +119,6 @@ async def run_society_pulse(
             theme,
         )
         logger.info("KG enrichment applied to %d selected agents", len(selected_agents))
-
-    # === Persona Narrative Generation ===
-    await sse_manager.publish(simulation_id, "persona_generation_started", {
-        "agent_count": len(selected_agents),
-    })
-    try:
-        selected_agents = await generate_persona_narratives(selected_agents, theme)
-        generated = sum(1 for a in selected_agents if a.get("persona_narrative"))
-        logger.info("Persona narratives: %d/%d generated", generated, len(selected_agents))
-    except Exception as e:
-        logger.warning("Persona generation failed, continuing without: %s", e)
 
     # === Activation ===
     await sse_manager.publish(simulation_id, "society_activation_started", {
@@ -210,6 +216,19 @@ async def run_society_pulse(
         "usage": activation_result["usage"],
     })
 
+    # === Post-Activation Persona Narrative Generation ===
+    await sse_manager.publish(simulation_id, "persona_generation_started", {
+        "agent_count": len(selected_agents),
+    })
+    try:
+        selected_agents = await generate_persona_narratives_post_activation(
+            selected_agents, activation_result["responses"], theme,
+        )
+        generated = sum(1 for a in selected_agents if a.get("persona_narrative"))
+        logger.info("Post-activation persona narratives: %d/%d generated", generated, len(selected_agents))
+    except Exception as e:
+        logger.warning("Post-activation persona generation failed, continuing without: %s", e)
+
     # === KG Evolution: activation回答からKGを抽出しSSE配信 ===
     try:
         kg_evo = KGEvolutionService()
@@ -254,6 +273,73 @@ async def run_society_pulse(
         "metrics": eval_data,
     })
 
+    # === Validation Summary ===
+    theme_estimate = _estimate_theme_category(theme, [])
+    validation_summary = build_validation_summary(
+        theme=theme,
+        theme_category=theme_estimate.category,
+        distribution=activation_result["aggregation"].get("stance_distribution", {}),
+    )
+    if validation_summary.get("corrected_distribution"):
+        activation_result["aggregation"]["calibrated_stance_distribution"] = validation_summary[
+            "corrected_distribution"
+        ]
+        activation_result["aggregation"]["calibration_status"] = validation_summary[
+            "calibration_status"
+        ]
+    sim.metadata_json = {
+        **dict(sim.metadata_json or {}),
+        "validation_summary": validation_summary,
+    }
+    await session.commit()
+
+    if validation_summary.get("survey_anchor_status") == "実調査アンカーあり":
+        await sse_manager.publish(simulation_id, "validation_comparison_completed", {
+            "distribution_error": validation_summary.get("distribution_error"),
+            "best_match_source": validation_summary.get("best_match_source"),
+            "matched_survey_count": validation_summary.get("matched_survey_count"),
+        })
+
+    try:
+        validation_record = await register_result(
+            session,
+            simulation_id=simulation_id,
+            theme=theme,
+            theme_category=theme_estimate.category,
+            distribution=activation_result["aggregation"].get("stance_distribution", {}),
+            calibrated_distribution=validation_summary.get("corrected_distribution"),
+            theme_category_estimate=theme_estimate,
+        )
+        comparison = await auto_compare(
+            session,
+            validation_record,
+            str(settings.config_dir / "grounding" / "survey_data"),
+        )
+        actual_payload = None
+        if comparison:
+            best_survey = next(
+                (
+                    survey
+                    for survey in comparison.get("matched_surveys", [])
+                    if survey.get("source") == comparison.get("best_match_source")
+                ),
+                None,
+            )
+            if best_survey:
+                actual_payload = {"actual_distribution": best_survey["stance_distribution"]}
+        await register_prediction_evaluation(
+            session,
+            simulation_id=simulation_id,
+            prediction_type="distribution",
+            theme_category=theme_estimate.category,
+            source="society_pulse",
+            predicted_payload=build_distribution_prediction_payload(activation_result["aggregation"]),
+            actual_payload=actual_payload,
+        )
+    except Exception as exc:
+        await session.rollback()
+        logger.warning("Validation record persistence failed, continuing: %s", exc)
+
     # === Demographic Analysis ===
     demographic_analysis = analyze_demographics(
         selected_agents, activation_result["responses"],
@@ -284,4 +370,5 @@ async def run_society_pulse(
         representatives=representatives,
         usage=total_usage,
         population_count=len(agents),
+        validation_summary=validation_summary,
     )

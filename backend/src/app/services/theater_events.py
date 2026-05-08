@@ -9,7 +9,6 @@ Emits five event types:
 """
 
 import logging
-from typing import Any
 
 from src.app.sse.manager import sse_manager
 

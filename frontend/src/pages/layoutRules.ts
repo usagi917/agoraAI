@@ -1,9 +1,11 @@
 export type ResultsPrimaryView = 'report' | 'scenarios' | 'decision_brief'
 export type ResultsSecondaryTab = 'pm' | 'society' | 'evidence' | 'transcript'
 export type LivePrimaryView = 'graph' | 'society'
-export type LiveSecondaryTab = 'progress' | 'debate' | 'activity' | 'society' | 'colonies' | 'thinking' | 'dialogue' | 'connections'
+export type LiveSecondaryTab =
+  | 'conversations' | 'analysis'
+  | 'progress' | 'debate' | 'activity' | 'colonies' | 'thinking'
 
-export interface ResultsLayoutContext {
+interface ResultsLayoutContext {
   mode?: string | null
   hasScenarios: boolean
   hasDecisionBrief: boolean
@@ -13,7 +15,7 @@ export interface ResultsLayoutContext {
   hasTranscript?: boolean
 }
 
-export interface LiveLayoutContext {
+interface LiveLayoutContext {
   mode?: string | null
   hasColonies: boolean
   hasActivity: boolean
@@ -29,11 +31,17 @@ const SCENARIO_FIRST_MODES = new Set([
 ])
 
 const SOCIETY_MODES = new Set([
+  'quick',
+  'standard',
+  'deep',
+  'research',
   'society',
   'society_first',
   'meta_simulation',
   'unified',
 ])
+
+const PIPELINE_MODES = new Set(['pipeline', 'swarm', 'hybrid'])
 
 export function getResultsPrimaryView(context: ResultsLayoutContext): ResultsPrimaryView {
   const mode = context.mode || ''
@@ -101,42 +109,33 @@ export function getLivePrimaryView(context: LiveLayoutContext): LivePrimaryView 
 }
 
 export function getLiveSecondaryTabs(context: LiveLayoutContext): LiveSecondaryTab[] {
-  const tabs: LiveSecondaryTab[] = ['progress']
+  const mode = context.mode || ''
 
-  // Debate cards always available (theater events)
-  tabs.push('debate')
-
-  if (SOCIETY_MODES.has(context.mode || '')) {
-    tabs.push('society')
+  // Society modes: consolidated layout — debate retains alliance/decision visibility
+  if (SOCIETY_MODES.has(mode)) {
+    return ['conversations', 'progress', 'analysis', 'debate']
   }
 
-  if (context.hasActivity) {
-    tabs.push('activity')
+  // Pipeline / swarm / hybrid modes
+  if (PIPELINE_MODES.has(mode)) {
+    const tabs: LiveSecondaryTab[] = ['progress']
+    if (context.hasColonies) tabs.push('colonies')
+    if (context.hasActivity) tabs.push('activity')
+    return tabs
   }
 
-  if (context.hasColonies) {
-    tabs.push('colonies')
-  }
-
-  if (context.hasCognitiveData) {
-    tabs.push('thinking')
-  }
-
-  if (SOCIETY_MODES.has(context.mode || '') || context.hasCognitiveData) {
-    tabs.push('dialogue')
-  }
-
-  if (SOCIETY_MODES.has(context.mode || '')) {
-    tabs.push('connections')
-  }
-
+  // pm_board, single, and other modes
+  const tabs: LiveSecondaryTab[] = ['progress', 'debate']
+  if (context.hasActivity) tabs.push('activity')
+  if (context.hasCognitiveData) tabs.push('thinking')
   return tabs
 }
 
 export function getDefaultLiveSecondaryTab(context: LiveLayoutContext): LiveSecondaryTab {
-  const tabs = getLiveSecondaryTabs(context)
-  if (tabs.includes('society')) {
-    return 'society'
+  const mode = context.mode || ''
+  if (SOCIETY_MODES.has(mode)) {
+    return 'conversations'
   }
+  const tabs = getLiveSecondaryTabs(context)
   return tabs[0] || 'progress'
 }

@@ -372,3 +372,151 @@ class TestComputePoststratificationWeights:
         assert math.isclose(mean_w, 1.0, abs_tol=0.05), (
             f"Mean weight after cap should be ≈ 1.0, got {mean_w:.4f}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase F: 5D Post-Stratification
+# ---------------------------------------------------------------------------
+
+
+class TestFiveDimensionalPostStratification:
+    """Phase F: income_bracket + occupation_category を追加した5次元 raking。"""
+
+    def _make_responses(self, n: int) -> list[dict]:
+        return [{"stance": "賛成", "confidence": 0.8}] * n
+
+    def test_load_target_marginals_has_5_dimensions(self):
+        """load_target_marginals() が5次元を返すこと。"""
+        from src.app.services.society.statistical_inference import load_target_marginals
+        marginals = load_target_marginals()
+        assert "age_bracket" in marginals
+        assert "region" in marginals
+        assert "gender" in marginals
+        assert "income_bracket" in marginals
+        assert "occupation_category" in marginals
+
+    def test_5d_raking_runs_without_error(self):
+        """5次元ターゲットマージナルで raking がエラーなく動作すること。"""
+        from src.app.services.society.statistical_inference import load_target_marginals
+        marginals = load_target_marginals()
+        agents = [
+            {"demographics": {
+                "age": 35, "age_bracket": "30-49", "region": "関東",
+                "gender": "male", "income_bracket": "upper_middle",
+                "occupation": "会社員",
+            }}
+            for _ in range(30)
+        ]
+        responses = self._make_responses(30)
+        weights = compute_poststratification_weights(agents, responses, marginals, cap=8.0)
+        assert len(weights) == 30
+        assert all(w >= 0 for w in weights)
+
+    def test_income_bracket_marginals_sum_to_one(self):
+        """income_bracket マージナルの合計が1.0。"""
+        from src.app.services.society.statistical_inference import load_target_marginals
+        marginals = load_target_marginals()
+        assert abs(sum(marginals["income_bracket"].values()) - 1.0) < 0.01
+
+    def test_occupation_category_marginals_sum_to_one(self):
+        """occupation_category マージナルの合計が1.0。"""
+        from src.app.services.society.statistical_inference import load_target_marginals
+        marginals = load_target_marginals()
+        assert abs(sum(marginals["occupation_category"].values()) - 1.0) < 0.01
+
+
+class TestRegionNormalization:
+    """P0-4: 地域カテゴリ不整合の修正テスト."""
+
+    def test_normalize_region_urban_suburban(self):
+        """都市部/郊外の細分化地域が親カテゴリにマッピングされること."""
+        from src.app.services.society.statistical_inference import _normalize_region
+
+        assert _normalize_region("関東（都市部）") == "関東"
+        assert _normalize_region("関東（郊外）") == "関東"
+        assert _normalize_region("関西（都市部）") == "関西"
+        assert _normalize_region("関西（郊外）") == "関西"
+
+    def test_normalize_region_okinawa_maps_to_other(self):
+        """沖縄はターゲット分布に無いので 'その他' にマッピング."""
+        from src.app.services.society.statistical_inference import _normalize_region
+
+        assert _normalize_region("沖縄") == "その他"
+
+    def test_normalize_region_passthrough(self):
+        """ターゲット分布に存在する地域はそのまま返す."""
+        from src.app.services.society.statistical_inference import _normalize_region
+
+        assert _normalize_region("北海道") == "北海道"
+        assert _normalize_region("東北") == "東北"
+        assert _normalize_region("中部") == "中部"
+        assert _normalize_region("中国") == "中国"
+        assert _normalize_region("四国") == "四国"
+        assert _normalize_region("九州") == "九州"
+
+    def test_poststratification_with_urban_regions(self):
+        """population_generator の細分化地域でも後層化が正しく機能すること."""
+        from src.app.services.society.statistical_inference import (
+            compute_poststratification_weights,
+            load_target_marginals,
+        )
+
+        # population_generator が生成する形式の地域名を使用
+        agents = [
+            {"demographics": {"age": 30, "region": "関東（都市部）", "gender": "male", "occupation": "会社員"}},
+            {"demographics": {"age": 35, "region": "関東（郊外）", "gender": "female", "occupation": "教師"}},
+            {"demographics": {"age": 40, "region": "関西（都市部）", "gender": "male", "occupation": "医師"}},
+            {"demographics": {"age": 50, "region": "関西（郊外）", "gender": "female", "occupation": "看護師"}},
+            {"demographics": {"age": 60, "region": "沖縄", "gender": "male", "occupation": "農業従事者"}},
+            {"demographics": {"age": 25, "region": "北海道", "gender": "female", "occupation": "学生"}},
+            {"demographics": {"age": 45, "region": "東北", "gender": "male", "occupation": "漁業従事者"}},
+            {"demographics": {"age": 55, "region": "中部", "gender": "female", "occupation": "主婦/主夫"}},
+            {"demographics": {"age": 35, "region": "九州", "gender": "male", "occupation": "営業職"}},
+            {"demographics": {"age": 70, "region": "中国", "gender": "female", "occupation": "退職者"}},
+        ]
+        responses = [{"stance": "賛成", "confidence": 0.7}] * 10
+        target = load_target_marginals()
+
+        weights = compute_poststratification_weights(agents, responses, target, cap=5.0)
+
+        assert len(weights) == 10
+        # 全ウェイトが正の値を持つこと（正規化スキップされていないこと）
+        assert all(w > 0 for w in weights), (
+            "全エージェントのウェイトが正の値を持つべき（地域正規化が機能していれば）"
+        )
+
+
+class TestJointTargets:
+    """P4-1b: joint_targets パラメータによる後層化強化テスト."""
+
+    def _make_responses(self, n):
+        return [{"stance": "賛成", "confidence": 0.7}] * n
+
+    def test_joint_targets_applied(self):
+        """joint_targets を指定するとウェイトが変化すること."""
+        from src.app.services.society.statistical_inference import (
+            compute_poststratification_weights,
+            load_target_marginals,
+        )
+
+        agents = [
+            {"demographics": {"age": 25, "region": "関東", "gender": "male", "occupation": "会社員"}},
+            {"demographics": {"age": 55, "region": "関東", "gender": "female", "occupation": "教師"}},
+            {"demographics": {"age": 35, "region": "関西", "gender": "male", "occupation": "営業職"}},
+            {"demographics": {"age": 65, "region": "九州", "gender": "female", "occupation": "退職者"}},
+        ] * 25  # 100 agents
+        responses = self._make_responses(100)
+        target = load_target_marginals()
+
+        # joint_targets なし
+        w_marginal = compute_poststratification_weights(agents, responses, target, cap=5.0)
+
+        # joint_targets あり
+        joint_targets = {("age_bracket", "region"): {("18-29", "関東"): 0.05, ("50-69", "関東"): 0.10}}
+        w_joint = compute_poststratification_weights(
+            agents, responses, target, cap=5.0, joint_targets=joint_targets,
+        )
+
+        assert len(w_marginal) == len(w_joint) == 100
+        # joint_targets がある分、ウェイトが微妙に異なるはず
+        assert w_marginal != w_joint

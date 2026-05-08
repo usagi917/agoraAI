@@ -39,3 +39,6 @@ plan.md
 plans/
 .claude/
 TODOS.md
+.amplifier/
+.gstack/
+spec.md

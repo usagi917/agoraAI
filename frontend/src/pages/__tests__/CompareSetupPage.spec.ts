@@ -47,8 +47,8 @@ describe('CompareSetupPage', () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('シナリオ比較')
-    expect(wrapper.text()).toContain('ベースラインと政策介入を比較し')
+    expect(wrapper.text()).toContain('2つの条件を比べる')
+    expect(wrapper.text()).toContain('同じ母集団で、「介入なし」と「介入あり」を見比べます')
   })
 
   it('shows the submit button', async () => {
@@ -56,7 +56,7 @@ describe('CompareSetupPage', () => {
     await flushPromises()
 
     const btn = wrapper.get('[data-testid="compare-submit-button"]')
-    expect(btn.text()).toContain('シナリオ比較を開始')
+    expect(btn.text()).toContain('この条件で比較する')
   })
 
   it('shows structured intervention parameter fields instead of JSON textarea', async () => {
@@ -106,7 +106,7 @@ describe('CompareSetupPage', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="compare-error"]').text()).toContain('政策の説明を入力してください')
+    expect(wrapper.find('[data-testid="compare-error"]').text()).toContain('比べたいテーマを入力してください')
     expect(scenarioPairMocks.createScenarioPair).not.toHaveBeenCalled()
   })
 

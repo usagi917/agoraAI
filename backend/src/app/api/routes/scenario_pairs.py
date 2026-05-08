@@ -4,15 +4,18 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.api.deps import get_session
+from src.app.models.agent_profile import AgentProfile
 from src.app.models.population import Population
 from src.app.models.scenario_pair import ScenarioPair
 from src.app.services.audit_trail_service import get_audit_trail as get_audit_trail_events
 from src.app.services.population_snapshot_service import create_snapshot
 from src.app.services.scenario_comparison import build_scenario_comparison
 from src.app.services.scenario_pair_factory import create_scenario_pair
+from src.app.services.simulation_dispatcher import spawn_simulation
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +69,25 @@ class PopulationSnapshotResponse(BaseModel):
     created_at: str
 
 
+def _serialize_agent_profile(agent: AgentProfile) -> dict:
+    return {
+        "id": agent.id,
+        "agent_index": agent.agent_index,
+        "demographics": agent.demographics or {},
+        "big_five": agent.big_five or {},
+        "values": agent.values or {},
+        "life_event": agent.life_event,
+        "contradiction": agent.contradiction,
+        "information_source": agent.information_source,
+        "local_context": agent.local_context,
+        "hidden_motivation": agent.hidden_motivation,
+        "speech_style": agent.speech_style,
+        "shock_sensitivity": agent.shock_sensitivity or {},
+        "llm_backend": agent.llm_backend,
+        "memory_summary": agent.memory_summary,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Scenario Pair endpoints
 # ---------------------------------------------------------------------------
@@ -77,14 +99,22 @@ async def create_scenario_pair_endpoint(
     session: AsyncSession = Depends(get_session),
 ):
     """Create a new scenario pair and start both simulations."""
-    pair = await create_scenario_pair(
-        session=session,
-        population_id=body.population_id,
-        intervention_params=body.intervention_params,
-        decision_context=body.decision_context,
-        preset=body.preset,
-        seed=body.seed,
-    )
+    try:
+        pair = await create_scenario_pair(
+            session=session,
+            population_id=body.population_id,
+            intervention_params=body.intervention_params,
+            decision_context=body.decision_context,
+            preset=body.preset,
+            seed=body.seed,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    for simulation_id in (pair.baseline_simulation_id, pair.intervention_simulation_id):
+        if simulation_id:
+            spawn_simulation(simulation_id)
+
     return ScenarioPairResponse(
         id=pair.id,
         population_snapshot_id=pair.population_snapshot_id,
@@ -188,18 +218,24 @@ async def create_population_snapshot(
     if not population:
         raise HTTPException(status_code=404, detail="Population が見つかりません")
 
+    result = await session.execute(
+        select(AgentProfile)
+        .where(AgentProfile.population_id == population_id)
+        .order_by(AgentProfile.agent_index)
+    )
+    agents = [_serialize_agent_profile(agent) for agent in result.scalars().all()]
+    seed = int((population.generation_params or {}).get("seed", 0) or 0)
+
     snapshot = await create_snapshot(
         session=session,
         population_id=population_id,
-        agents=[],
-        seed=0,
+        agents=agents,
+        seed=seed,
     )
-    agents = snapshot.agent_profiles_json
-    agent_count = len(agents) if isinstance(agents, list) else 0
     return PopulationSnapshotResponse(
         id=snapshot.id,
         population_id=snapshot.population_id,
-        agent_count=agent_count,
+        agent_count=len(agents),
         seed=snapshot.seed,
         created_at=snapshot.created_at.isoformat(),
     )

@@ -21,6 +21,7 @@ const dealBreakers = computed(() => props.brief.deal_breakers || [])
 const criticalUnknowns = computed(() => props.brief.critical_unknowns || [])
 const nextDecisions = computed(() => props.brief.next_decisions || [])
 const keyReasons = computed(() => props.brief.key_reasons || [])
+const decisionScorecard = computed(() => props.brief.decision_scorecard || [])
 const timeHorizonEntries = computed(() => (
   props.brief.time_horizon
     ? Object.values(props.brief.time_horizon)
@@ -28,9 +29,11 @@ const timeHorizonEntries = computed(() => (
 ))
 const stakeholderReactions = computed(() => props.brief.stakeholder_reactions || [])
 const evidenceGaps = computed(() => props.brief.evidence_gaps || [])
+const followupPrompts = computed(() => props.brief.followup_prompts || [])
 const legacyOptions = computed(() => props.brief.options || [])
 const legacyRisks = computed(() => props.brief.risk_factors || [])
 const legacyNextSteps = computed(() => props.brief.next_steps || [])
+const conversationHighlights = computed(() => props.brief.conversation_highlights || null)
 
 function recommendationClass(rec: string): string {
   if (rec === 'Go') return 'recommendation-go'
@@ -164,6 +167,66 @@ function pct(value?: number | null): string {
           <p v-if="item.expected_learning" class="detail-body">学べること: {{ item.expected_learning }}</p>
         </div>
       </div>
+    </div>
+
+    <div v-if="decisionScorecard.length" class="brief-section" data-testid="section-decision-scorecard">
+      <h4 class="brief-section-title">判断の基準</h4>
+      <div class="detail-list">
+        <div v-for="(item, index) in decisionScorecard" :key="index" class="detail-card">
+          <div class="detail-header">
+            <span class="detail-title">{{ item.label }}</span>
+            <span class="detail-status">{{ item.value }}</span>
+          </div>
+          <p v-if="item.detail" class="detail-body">{{ item.detail }}</p>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="conversationHighlights" class="brief-section" data-testid="section-conversation-highlights">
+      <h4 class="brief-section-title">議論ハイライト</h4>
+      <p class="section-prose">{{ conversationHighlights.summary }}</p>
+
+      <div v-if="conversationHighlights.consensus.length" class="detail-list" style="margin-top: var(--space-3)">
+        <div v-for="(item, index) in conversationHighlights.consensus" :key="`consensus-${index}`" class="detail-card detail-card-consensus">
+          <div class="detail-header">
+            <span class="detail-title">{{ item.point }}</span>
+          </div>
+          <p v-if="item.impact" class="detail-body">{{ item.impact }}</p>
+        </div>
+      </div>
+
+      <div v-if="conversationHighlights.conflicts.length" class="detail-list" style="margin-top: var(--space-3)">
+        <div v-for="(item, index) in conversationHighlights.conflicts" :key="`conflict-${index}`" class="detail-card detail-card-conflict">
+          <div class="detail-header">
+            <span class="detail-title">{{ item.point }}</span>
+            <span v-if="item.status" class="detail-status">{{ item.status }}</span>
+          </div>
+          <p v-if="item.impact" class="detail-body">{{ item.impact }}</p>
+        </div>
+      </div>
+
+      <div v-if="conversationHighlights.turning_points.length" class="detail-list" style="margin-top: var(--space-3)">
+        <div v-for="(item, index) in conversationHighlights.turning_points" :key="`tp-${index}`" class="detail-card">
+          <div class="detail-header">
+            <span class="detail-title">{{ item.moment }}</span>
+          </div>
+          <p v-if="item.why_it_changed" class="detail-body">{{ item.why_it_changed }}</p>
+        </div>
+      </div>
+
+      <div v-if="conversationHighlights.key_quotes.length" class="detail-list" style="margin-top: var(--space-3)">
+        <blockquote v-for="(item, index) in conversationHighlights.key_quotes" :key="`quote-${index}`" class="quote-card">
+          <p class="quote-text">「{{ item.quote }}」</p>
+          <footer class="quote-footer">— {{ item.speaker }} <span v-if="item.decision_impact" class="quote-impact">({{ item.decision_impact }})</span></footer>
+        </blockquote>
+      </div>
+    </div>
+
+    <div v-if="followupPrompts.length" class="brief-section" data-testid="section-followup-prompts">
+      <h4 class="brief-section-title">深掘りに使う follow-up</h4>
+      <ul class="next-steps-list">
+        <li v-for="(prompt, index) in followupPrompts" :key="index">{{ prompt }}</li>
+      </ul>
     </div>
 
     <div v-if="optionComparison.length || legacyOptions.length" class="brief-section">
@@ -620,6 +683,42 @@ function pct(value?: number | null): string {
   font-size: var(--text-sm);
   color: var(--text-secondary);
   line-height: 1.8;
+}
+
+.detail-card-consensus {
+  border-color: rgba(34, 197, 94, 0.25);
+  background: rgba(34, 197, 94, 0.04);
+}
+
+.detail-card-conflict {
+  border-color: rgba(245, 158, 11, 0.25);
+  background: rgba(245, 158, 11, 0.04);
+}
+
+.quote-card {
+  margin: 0;
+  padding: var(--space-4);
+  border-left: 3px solid var(--accent);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.quote-text {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-style: italic;
+  color: var(--text-primary);
+  line-height: 1.7;
+}
+
+.quote-footer {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.quote-impact {
+  color: var(--text-muted);
 }
 
 @media (max-width: 720px) {

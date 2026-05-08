@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { getStanceColor, STANCE_ORDER } from '../constants/stances'
 
 const props = defineProps<{
   timesteps: Array<{
@@ -8,15 +9,6 @@ const props = defineProps<{
     cluster_count: number
   }>
 }>()
-
-const stanceColors: Record<string, string> = {
-  '賛成': '#22c55e',
-  '条件付き賛成': '#86efac',
-  '中立': '#a3a3a3',
-  '条件付き反対': '#fca5a5',
-  '反対': '#ef4444',
-}
-const stanceOrder = ['賛成', '条件付き賛成', '中立', '条件付き反対', '反対']
 
 const hasData = computed(() => props.timesteps.length >= 2)
 
@@ -34,7 +26,7 @@ const streamPaths = computed(() => {
   const n = ts.length
   const paths: Array<{ stance: string; color: string; d: string }> = []
 
-  for (const stance of [...stanceOrder].reverse()) {
+  for (const stance of [...STANCE_ORDER].reverse()) {
     const topPoints: string[] = []
     const bottomPoints: string[] = []
 
@@ -43,7 +35,7 @@ const streamPaths = computed(() => {
       const dist = ts[i].opinion_distribution
       let cumBefore = 0
       let cumAfter = 0
-      for (const s of stanceOrder) {
+      for (const s of STANCE_ORDER) {
         const val = dist[s] || 0
         if (s === stance) {
           cumAfter = cumBefore + val
@@ -59,7 +51,7 @@ const streamPaths = computed(() => {
 
     paths.push({
       stance,
-      color: stanceColors[stance] || '#6366f1',
+      color: getStanceColor(stance),
       d: `M ${topPoints.join(' L ')} L ${bottomPoints.join(' L ')} Z`,
     })
   }
@@ -155,8 +147,8 @@ const xLabels = computed(() => {
 
     <!-- Legend -->
     <div class="stream-legend">
-      <div v-for="stance in stanceOrder" :key="stance" class="legend-item">
-        <span class="legend-dot" :style="{ backgroundColor: stanceColors[stance] }" />
+        <div v-for="stance in STANCE_ORDER" :key="stance" class="legend-item">
+          <span class="legend-dot" :style="{ backgroundColor: getStanceColor(stance) }" />
         <span class="legend-text">{{ stance }}</span>
       </div>
     </div>

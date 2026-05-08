@@ -72,7 +72,7 @@ test('launches a simulation from the launchpad', async ({ page }) => {
       ],
     })
   })
-  await page.route('**/api/simulations', async (route) => {
+  await page.route('**/api/simulations*', async (route) => {
     if (route.request().method() === 'GET') {
       await route.fulfill({ json: [] })
       return
@@ -84,12 +84,13 @@ test('launches a simulation from the launchpad', async ({ page }) => {
 
   await page.goto('/')
   await Promise.all([healthResponse, templatesResponse, simulationsResponse])
-  await page.getByLabel('分析プロンプト').fill('EV battery market analysis')
+  await page.getByTestId('launchpad-prompt').fill('EV battery market analysis')
   await expect(page.getByTestId('launch-button')).toBeEnabled()
-  await Promise.all([
-    page.waitForURL(/\/sim\/sim-e2e-1$/),
-    page.getByTestId('launch-button').click(),
-  ])
+  const createSimulationResponse = page.waitForResponse((response) => {
+    return response.url().endsWith('/api/simulations') && response.request().method() === 'POST'
+  })
+  await page.getByTestId('launch-button').click()
+  await createSimulationResponse
 
-  await expect(page).toHaveURL(/\/sim\/sim-e2e-1$/)
+  await page.waitForURL(/\/sim\/sim-e2e-1$/, { timeout: 15_000 })
 })

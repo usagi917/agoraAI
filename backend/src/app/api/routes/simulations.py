@@ -1,15 +1,13 @@
 """統一 Simulation API エンドポイント"""
 
-import asyncio
-import json
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.responses import StreamingResponse
 
 from src.app.api.deps import get_session
 from src.app.config import settings
@@ -21,6 +19,7 @@ from src.app.models.world_state import WorldState
 from src.app.api.routes.codex import CodexReviewRequest, create_codex_review, get_codex_review_service
 from src.app.services.decision_briefing import (
     build_single_decision_brief,
+    enrich_decision_brief,
 )
 from src.app.services.codex_review_service import CodexReviewService
 from src.app.services.society.backtest import (
@@ -39,20 +38,30 @@ from src.app.services.quality import (
     normalize_evidence_mode,
     supports_evidence_mode,
 )
-from src.app.services.simulation_dispatcher import dispatch_simulation
+from src.app.services.simulation_dispatcher import spawn_simulation
+from src.app.services.validation_summary import (
+    build_unvalidated_summary,
+    merge_scenario_backtest_status,
+)
+from src.app.services.society.validation_pipeline import (
+    register_prediction_evaluation,
+    summarize_prediction_evaluations,
+)
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_background_tasks: set[asyncio.Task] = set()
-
-
-def _spawn_simulation(simulation_id: str) -> None:
-    task = asyncio.create_task(dispatch_simulation(simulation_id))
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+RERUN_EXECUTION_METADATA_KEYS = {
+    "pulse_result",
+    "council_result",
+    "unified_result",
+    "society_result",
+    "time_axis_result",
+    "time_axis_error",
+    "validation_summary",
+}
 
 
 class SimulationCreate(BaseModel):
@@ -66,8 +75,10 @@ class SimulationCreate(BaseModel):
 
 class HistoricalOutcome(BaseModel):
     issue_label: str | None = None
+    outcome_label: str | None = None
     summary: str = ""
     actual_scenario: str = ""
+    horizon: str | None = None
     metrics: dict[str, float] = {}
     tags: list[str] = []
 
@@ -130,7 +141,7 @@ async def create_simulation(
     await session.commit()
     await session.refresh(sim)
 
-    _spawn_simulation(sim.id)
+    spawn_simulation(sim.id)
 
     return {
         "id": sim.id,
@@ -145,10 +156,14 @@ async def create_simulation(
 
 
 @router.get("")
-async def list_simulations(session: AsyncSession = Depends(get_session)):
+async def list_simulations(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1),
+    session: AsyncSession = Depends(get_session),
+):
     """Simulation 一覧を取得する。"""
     result = await session.execute(
-        select(Simulation).order_by(Simulation.created_at.desc()).limit(50)
+        select(Simulation).order_by(Simulation.created_at.desc()).offset(skip).limit(min(limit, 100))
     )
     sims = result.scalars().all()
     return [
@@ -194,6 +209,46 @@ async def get_simulation(sim_id: str, session: AsyncSession = Depends(get_sessio
 
 def _get_society_first_payload(sim: Simulation) -> dict:
     return dict((sim.metadata_json or {}).get("society_first_result") or {})
+
+
+def _get_validation_summary(sim: Simulation, backtest: dict | None = None) -> dict:
+    stored = dict((sim.metadata_json or {}).get("validation_summary") or {})
+    if not stored:
+        quality = extract_quality((sim.metadata_json or {}).get("sections"))
+        stored = build_unvalidated_summary(
+            calibration_status=str(quality.get("calibration_status") or "uncalibrated")
+        )
+    return merge_scenario_backtest_status(stored, backtest)
+
+
+def _attach_decision_brief_context(
+    response: dict,
+    *,
+    quality: dict,
+    run_config: dict,
+    evidence_refs: list[dict],
+) -> dict:
+    payload = dict(response or {})
+    brief = payload.get("decision_brief")
+    sections = dict(payload.get("sections") or {})
+    if not isinstance(brief, dict) and isinstance(sections.get("decision_brief"), dict):
+        brief = dict(sections.get("decision_brief"))
+    if not isinstance(brief, dict):
+        return payload
+
+    enriched = enrich_decision_brief(
+        brief,
+        quality=quality,
+        run_config=run_config,
+        verification=payload.get("verification"),
+        scenarios=payload.get("scenarios"),
+        evidence_refs=evidence_refs,
+    )
+    payload["decision_brief"] = enriched
+    if sections:
+        sections["decision_brief"] = enriched
+        payload["sections"] = sections
+    return payload
 
 
 @router.get("/{sim_id}/stream")
@@ -287,22 +342,29 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
         evidence_refs=evidence_refs,
         evidence_mode=evidence_mode,
     )
+    prediction_evaluations = await summarize_prediction_evaluations(
+        session,
+        simulation_id=sim_id,
+    )
 
     # 新プリセット方式: unified_result に全結果を格納
     unified_result = dict((sim.metadata_json or {}).get("unified_result") or {})
     if unified_result:
-        return {
+        return _attach_decision_brief_context({
             **unified_result,
             "type": unified_result.get("type", sim.mode),
             "evidence_refs": evidence_refs,
             "run_config": run_config,
             "quality": quality,
-        }
+            "validation_summary": _get_validation_summary(sim),
+            "prediction_evaluations": prediction_evaluations,
+        }, quality=quality, run_config=run_config, evidence_refs=evidence_refs)
 
     # レガシー: society_first 結果
     society_first = dict((sim.metadata_json or {}).get("society_first_result") or {})
     if society_first:
-        return {
+        backtest = society_first.get("backtest") or build_empty_backtest_result()
+        return _attach_decision_brief_context({
             "type": "society_first",
             "content": society_first.get("content", ""),
             "sections": society_first.get("sections", {}),
@@ -311,7 +373,7 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
             "selected_issues": society_first.get("selected_issues", []),
             "issue_colonies": society_first.get("issue_colonies", []),
             "intervention_comparison": society_first.get("intervention_comparison", []),
-            "backtest": society_first.get("backtest") or build_empty_backtest_result(),
+            "backtest": backtest,
             "scenarios": normalize_scenarios(
                 society_first.get("scenarios", []),
                 evidence_refs=evidence_refs,
@@ -321,17 +383,21 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
             "evidence_refs": evidence_refs,
             "run_config": run_config,
             "quality": quality,
-        }
+            "validation_summary": _get_validation_summary(sim, backtest),
+            "prediction_evaluations": prediction_evaluations,
+        }, quality=quality, run_config=run_config, evidence_refs=evidence_refs)
 
     # レガシー: meta_simulation 結果
     meta_report = dict((sim.metadata_json or {}).get("meta_simulation_result") or {})
     if meta_report:
-        response = {
+        response = _attach_decision_brief_context({
             **meta_report,
             "evidence_refs": evidence_refs,
             "run_config": run_config,
             "quality": quality,
-        }
+            "validation_summary": _get_validation_summary(sim),
+            "prediction_evaluations": prediction_evaluations,
+        }, quality=quality, run_config=run_config, evidence_refs=evidence_refs)
         if "content" not in response and response.get("summary_markdown"):
             response["content"] = response["summary_markdown"]
         return response
@@ -358,7 +424,7 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
                     quality=response_quality,
                 )
             )
-            return {
+            return _attach_decision_brief_context({
                 "type": "single",
                 "id": report.id,
                 "run_id": report.run_id,
@@ -374,18 +440,41 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
                     else None
                 ),
                 "quality": response_quality,
-            }
+                "validation_summary": _get_validation_summary(sim),
+                "prediction_evaluations": prediction_evaluations,
+            }, quality=response_quality, run_config=run_config, evidence_refs=evidence_refs)
 
     # レガシー: PM Board 結果 (metadata_json 直接)
     if sim.metadata_json and sim.metadata_json.get("pm_analyses"):
-        return {
+        return _attach_decision_brief_context({
             **sim.metadata_json,
             "evidence_refs": evidence_refs,
             "run_config": run_config,
             "quality": quality,
-        }
+            "validation_summary": _get_validation_summary(sim),
+            "prediction_evaluations": prediction_evaluations,
+        }, quality=quality, run_config=run_config, evidence_refs=evidence_refs)
 
     raise HTTPException(status_code=404, detail="レポートが見つかりません")
+
+
+@router.get("/{sim_id}/colonies")
+async def get_simulation_colonies(sim_id: str, session: AsyncSession = Depends(get_session)):
+    """Return issue colony summaries for legacy society-first result views."""
+    sim = await session.get(Simulation, sim_id)
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation が見つかりません")
+
+    metadata = dict(sim.metadata_json or {})
+    unified_result = dict(metadata.get("unified_result") or {})
+    if isinstance(unified_result.get("issue_colonies"), list):
+        return unified_result["issue_colonies"]
+
+    society_first = dict(metadata.get("society_first_result") or {})
+    if isinstance(society_first.get("issue_colonies"), list):
+        return society_first["issue_colonies"]
+
+    return []
 
 
 @router.get("/{sim_id}/backtest")
@@ -443,8 +532,66 @@ async def create_simulation_backtest(
     sim.metadata_json = {
         **dict(sim.metadata_json or {}),
         "society_first_result": updated_society_first,
+        "validation_summary": _get_validation_summary(sim, backtest),
     }
     await session.commit()
+
+    scenario_predictions = []
+    for colony in society_first.get("issue_colonies", []) or []:
+        for scenario in colony.get("top_scenarios") or []:
+            scenario_predictions.append({
+                "issue_label": colony.get("label", ""),
+                "outcome_label": scenario.get("outcome_label") or scenario.get("label") or colony.get("label", ""),
+                "probability": scenario.get("probability", scenario.get("scenario_score", 0)),
+                "horizon": scenario.get("horizon") or scenario.get("time_horizon") or "",
+                "leading_indicators": scenario.get("leading_indicators") or [],
+                "affected_segments": scenario.get("affected_segments") or [],
+            })
+    if scenario_predictions:
+        await register_prediction_evaluation(
+            session,
+            simulation_id=sim_id,
+            prediction_type="scenario",
+            theme_category=str((sim.metadata_json or {}).get("theme_category") or ""),
+            horizon="historical_cases",
+            source="society_first_backtest",
+            predicted_payload={"predictions": scenario_predictions},
+            actual_payload={
+                "actual_outcomes": [
+                    case.get("outcome", {}).get("outcome_label")
+                    or case.get("outcome", {}).get("issue_label")
+                    for case in normalized_cases
+                    if case.get("outcome")
+                ],
+            },
+        )
+
+    predicted_effects = [
+        effect
+        for intervention in updated_interventions
+        for effect in (intervention.get("predicted_effects") or [])
+    ]
+    actual_effects = [
+        {
+            "intervention_id": intervention.get("intervention_id"),
+            "metric": observation.get("metric"),
+            "actual_delta": observation.get("signed_delta"),
+            "direction": "up" if float(observation.get("signed_delta") or 0) > 0 else "down",
+        }
+        for intervention in updated_interventions
+        for observation in (intervention.get("supporting_evidence") or [])
+    ]
+    if predicted_effects:
+        await register_prediction_evaluation(
+            session,
+            simulation_id=sim_id,
+            prediction_type="intervention",
+            theme_category=str((sim.metadata_json or {}).get("theme_category") or ""),
+            horizon="historical_cases",
+            source="society_first_backtest",
+            predicted_payload={"predictions": predicted_effects},
+            actual_payload={"actuals": actual_effects} if actual_effects else None,
+        )
 
     return backtest
 
@@ -501,6 +648,12 @@ async def rerun_simulation(sim_id: str, session: AsyncSession = Depends(get_sess
     if not original:
         raise HTTPException(status_code=404, detail="Simulation が見つかりません")
 
+    rerun_metadata = {
+        key: value
+        for key, value in dict(original.metadata_json or {}).items()
+        if key not in RERUN_EXECUTION_METADATA_KEYS
+    }
+
     new_sim = Simulation(
         id=str(uuid.uuid4()),
         project_id=original.project_id,
@@ -509,11 +662,11 @@ async def rerun_simulation(sim_id: str, session: AsyncSession = Depends(get_sess
         template_name=original.template_name,
         execution_profile=original.execution_profile,
         status="queued",
-        metadata_json=dict(original.metadata_json or {}),
+        metadata_json=rerun_metadata,
     )
     session.add(new_sim)
     await session.commit()
 
-    _spawn_simulation(new_sim.id)
+    spawn_simulation(new_sim.id)
 
     return {"id": new_sim.id, "status": "queued"}

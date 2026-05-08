@@ -31,11 +31,19 @@ function makeBrief(overrides: Partial<DecisionBriefType> = {}): DecisionBriefTyp
       { action: '価格ヒアリングを実施', owner: 'CEO', deadline: '2週間', expected_learning: '価格受容性が分かる', priority: 'high' },
       { action: '日報プロトタイプを作成', owner: 'CTO', deadline: '3週間', expected_learning: 'UXの成立性が分かる', priority: 'high' },
     ],
+    decision_scorecard: [
+      { label: '実行条件', value: 'mode=strict / trust=high_trust / refs=6', detail: 'quality=verified。document=2 / prompt=1 を根拠に構成。' },
+      { label: '使いどころ', value: '判断材料として使える', detail: 'guardrails と deal breakers を一緒に確認する。' },
+    ],
     option_comparison: [
       { label: '条件付きで進める', upside: '学習を進められる', downside: '速度が落ちる', fit: '不確実性が残る案件', when_to_choose: '主要前提を短期検証できる場合' },
     ],
     confidence_explainer: '市場性は見えているが、価格と定着率の不確実性が残るため中程度の確信度。',
     evidence_gaps: ['価格受容性の一次情報が不足'],
+    followup_prompts: [
+      '価格仮説は成立するか が解消された場合、recommendation はどう変わるか',
+      '競合が先に同機能を展開する が起きた場合の代替案と縮小プランは何か',
+    ],
     options: [
       { label: '即時参入', expected_effect: '先行者優位を獲得', risk: '競合の反撃' },
       { label: '段階参入', expected_effect: 'リスク低減', risk: '機会損失' },
@@ -104,7 +112,9 @@ describe('DecisionBrief', () => {
     expect(text).toContain('価格受容性が成立すること')
     expect(text).toContain('競合が先に同機能を展開する')
     expect(text).toContain('価格ヒアリングを実施')
+    expect(text).toContain('判断材料として使える')
     expect(text).toContain('価格受容性の一次情報が不足')
+    expect(text).toContain('recommendation はどう変わるか')
   })
 
   it('renders strongest counterargument', () => {
@@ -205,6 +215,8 @@ describe('DecisionBrief', () => {
     expect(wrapper.find('[data-testid="section-guardrails"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="section-deal-breakers"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="section-critical-unknowns"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="section-decision-scorecard"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="section-followup-prompts"]').exists()).toBe(true)
   })
 
   it('renders the hero card with summary and recommendation', () => {
@@ -214,5 +226,117 @@ describe('DecisionBrief', () => {
     const hero = wrapper.get('[data-testid="brief-hero-card"]')
     expect(hero.text()).toContain('Go')
     expect(hero.text()).toContain('市場参入を進めるが')
+  })
+
+  // --- Conversation Highlights tests ---
+
+  const sampleHighlights = {
+    summary: '価格仮説と市場規模について概ね合意が得られたが、参入タイミングで意見が分かれた。',
+    source_phase: 'council' as const,
+    consensus: [
+      { point: '市場規模は十分に大きい', impact: 'Go判断の前提が成立' },
+    ],
+    conflicts: [
+      { point: '参入タイミングが早すぎるか', status: 'unresolved', impact: '3ヶ月の遅延リスク' },
+    ],
+    turning_points: [
+      { moment: 'パイロット成功率の共有後', why_it_changed: '懐疑派が条件付き賛成に転向' },
+    ],
+    key_quotes: [
+      { speaker: 'CFO代理', quote: 'パイロットの転換率が40%を超えれば投資回収は見込める', decision_impact: '投資判断の閾値を定義' },
+    ],
+  }
+
+  it('renders conversation highlights section when present', () => {
+    const wrapper = mount(DecisionBrief, {
+      props: { brief: makeBrief({ conversation_highlights: sampleHighlights }) },
+    })
+    const section = wrapper.find('[data-testid="section-conversation-highlights"]')
+    expect(section.exists()).toBe(true)
+    expect(section.text()).toContain('価格仮説と市場規模について概ね合意が得られたが、参入タイミングで意見が分かれた。')
+  })
+
+  it('hides conversation highlights section when absent', () => {
+    const wrapper = mount(DecisionBrief, {
+      props: { brief: makeBrief() },
+    })
+    expect(wrapper.find('[data-testid="section-conversation-highlights"]').exists()).toBe(false)
+  })
+
+  it('renders consensus items with green style', () => {
+    const wrapper = mount(DecisionBrief, {
+      props: { brief: makeBrief({ conversation_highlights: sampleHighlights }) },
+    })
+    const section = wrapper.get('[data-testid="section-conversation-highlights"]')
+    expect(section.text()).toContain('市場規模は十分に大きい')
+    expect(section.text()).toContain('Go判断の前提が成立')
+    const consensusCard = section.find('.detail-card-consensus')
+    expect(consensusCard.exists()).toBe(true)
+  })
+
+  it('renders conflict items with yellow style', () => {
+    const wrapper = mount(DecisionBrief, {
+      props: { brief: makeBrief({ conversation_highlights: sampleHighlights }) },
+    })
+    const section = wrapper.get('[data-testid="section-conversation-highlights"]')
+    expect(section.text()).toContain('参入タイミングが早すぎるか')
+    expect(section.text()).toContain('3ヶ月の遅延リスク')
+    const conflictCard = section.find('.detail-card-conflict')
+    expect(conflictCard.exists()).toBe(true)
+  })
+
+  it('renders turning points', () => {
+    const wrapper = mount(DecisionBrief, {
+      props: { brief: makeBrief({ conversation_highlights: sampleHighlights }) },
+    })
+    const section = wrapper.get('[data-testid="section-conversation-highlights"]')
+    expect(section.text()).toContain('パイロット成功率の共有後')
+    expect(section.text()).toContain('懐疑派が条件付き賛成に転向')
+  })
+
+  it('renders key quotes as blockquotes', () => {
+    const wrapper = mount(DecisionBrief, {
+      props: { brief: makeBrief({ conversation_highlights: sampleHighlights }) },
+    })
+    const section = wrapper.get('[data-testid="section-conversation-highlights"]')
+    expect(section.text()).toContain('パイロットの転換率が40%を超えれば投資回収は見込める')
+    expect(section.text()).toContain('CFO代理')
+    expect(section.text()).toContain('投資判断の閾値を定義')
+    expect(section.find('blockquote').exists()).toBe(true)
+  })
+
+  it('renders highlights between scorecard and followup sections', () => {
+    const wrapper = mount(DecisionBrief, {
+      props: { brief: makeBrief({ conversation_highlights: sampleHighlights }) },
+    })
+    const allSections = wrapper.findAll('[data-testid]')
+    const testIds = allSections.map(el => el.attributes('data-testid'))
+    const scorecardIdx = testIds.indexOf('section-decision-scorecard')
+    const highlightsIdx = testIds.indexOf('section-conversation-highlights')
+    const followupIdx = testIds.indexOf('section-followup-prompts')
+    expect(scorecardIdx).toBeGreaterThanOrEqual(0)
+    expect(highlightsIdx).toBeGreaterThanOrEqual(0)
+    expect(followupIdx).toBeGreaterThanOrEqual(0)
+    expect(highlightsIdx).toBeGreaterThan(scorecardIdx)
+    expect(highlightsIdx).toBeLessThan(followupIdx)
+  })
+
+  it('handles highlights with empty arrays gracefully', () => {
+    const sparseHighlights = {
+      summary: 'サマリーのみ存在する。',
+      source_phase: 'meeting' as const,
+      consensus: [],
+      conflicts: [],
+      turning_points: [],
+      key_quotes: [],
+    }
+    const wrapper = mount(DecisionBrief, {
+      props: { brief: makeBrief({ conversation_highlights: sparseHighlights }) },
+    })
+    const section = wrapper.get('[data-testid="section-conversation-highlights"]')
+    expect(section.text()).toContain('サマリーのみ存在する。')
+    expect(section.find('.detail-card-consensus').exists()).toBe(false)
+    expect(section.find('.detail-card-conflict').exists()).toBe(false)
+    expect(section.find('blockquote').exists()).toBe(false)
   })
 })

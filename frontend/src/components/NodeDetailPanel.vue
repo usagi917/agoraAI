@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useSocietyGraphStore, STANCE_COLORS } from '../stores/societyGraphStore'
+import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
+import { STANCE_COLORS } from '../constants/stances'
 
 const props = defineProps<{
   nodeId: string
@@ -10,6 +11,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   highlightAgents: [agentIds: string[]]
+  'select-agent': [agentId: string]
 }>()
 
 const societyGraphStore = useSocietyGraphStore()
@@ -156,6 +158,7 @@ const TYPE_LABELS: Record<string, string> = {
               class="stance-dot"
               :style="{ background: STANCE_COLORS[a.stance] || '#a3a3a3' }"
             />
+            <button class="btn-story" @click="emit('select-agent', a.id)">全ストーリー</button>
           </div>
         </div>
       </div>
@@ -340,6 +343,22 @@ const TYPE_LABELS: Record<string, string> = {
   align-items: center;
   gap: 0.35rem;
   padding: 0.15rem 0;
+}
+.btn-story {
+  margin-left: auto;
+  padding: 0.1rem 0.4rem;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 4px;
+  color: rgba(165, 180, 252, 0.8);
+  font-size: 0.58rem;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.btn-story:hover {
+  background: rgba(99, 102, 241, 0.22);
+  color: rgba(165, 180, 252, 1);
 }
 .agent-name {
   font-size: 0.68rem;

@@ -11,18 +11,8 @@ const apiMocks = vi.hoisted(() => ({
   getSimulationColonies: vi.fn(),
   getSimulationGraph: vi.fn(),
   getSimulationTimeline: vi.fn(),
-}))
-
-const pulseMocks = vi.hoisted(() => ({
-  addPulseLine: vi.fn(),
-  update: vi.fn(),
-  dispose: vi.fn(),
-}))
-
-const statusRingMocks = vi.hoisted(() => ({
-  nodeExtension: vi.fn(),
-  startAnimationLoop: vi.fn(),
-  stopAnimationLoop: vi.fn(),
+  getSocialGraph: vi.fn(),
+  getConversations: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -39,47 +29,15 @@ vi.mock('../../composables/useSimulationSSE', () => ({
   }),
 }))
 
-vi.mock('../../composables/useCommunicationPulse', () => ({
-  useCommunicationPulse: () => pulseMocks,
-}))
-
-vi.mock('../../composables/useAgentStatusRing', () => ({
-  useAgentStatusRing: () => statusRingMocks,
-}))
-
-const webglMock = vi.hoisted(() => ({
-  isWebGLSupported: vi.fn().mockReturnValue(true),
-}))
-
-vi.mock('../../composables/useWebGLDetect', () => webglMock)
-
-vi.mock('../../composables/useForceGraph', async () => {
-  const { ref } = await import('vue')
-  return {
-    useForceGraph: () => ({
-      graph: ref(null),
-      graphError: null,
-      setFullGraph: vi.fn(),
-      applyDiff: vi.fn(),
-      resetCamera: vi.fn(),
-      getInternalNodes: vi.fn(() => []),
-    }),
-  }
-})
-
 describe('SimulationPage', () => {
   beforeEach(() => {
     push.mockReset()
     window.sessionStorage.clear()
-    pulseMocks.addPulseLine.mockReset()
-    pulseMocks.update.mockReset()
-    pulseMocks.dispose.mockReset()
-    statusRingMocks.nodeExtension.mockReset()
-    statusRingMocks.startAnimationLoop.mockReset()
-    statusRingMocks.stopAnimationLoop.mockReset()
     apiMocks.getSimulationGraph.mockResolvedValue({ nodes: [], edges: [] })
     apiMocks.getSimulationTimeline.mockResolvedValue([])
     apiMocks.getSimulationColonies.mockResolvedValue([])
+    apiMocks.getSocialGraph.mockResolvedValue({ nodes: [], edges: [], population_id: null })
+    apiMocks.getConversations.mockRejectedValue(new Error('not ready'))
   })
 
   function mountPage() {
@@ -94,7 +52,7 @@ describe('SimulationPage', () => {
           LiveSocietyGraph: { template: '<div>live-society-graph</div>' },
           ColonyGrid: { template: '<div>colony-grid</div>' },
           ActivityFeed: { template: '<div>activity-feed</div>' },
-          ForceGraph2D: { template: '<div data-testid="graph-2d-fallback">2d-graph</div>' },
+          ForceGraph2D: { template: '<div data-testid="graph-2d">2d-graph</div>' },
         },
       },
     })
@@ -171,13 +129,69 @@ describe('SimulationPage', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-testid="simulation-primary-view"]').text()).toContain('Society Live')
-    expect(wrapper.text()).toContain('Society')
-    expect(wrapper.text()).toContain('Colonies')
+    // society mode uses consolidated 3-tab layout: 会話 / Progress / 分析
+    expect(wrapper.text()).toContain('会話')
+    expect(wrapper.text()).toContain('分析')
+    expect(wrapper.text()).not.toContain('Colonies')
   })
 
-  it('shows 2D SVG fallback when WebGL is not supported', async () => {
-    webglMock.isWebGLSupported.mockReturnValue(false)
+  it('treats preset standard mode as society live and hydrates existing pulse data', async () => {
+    apiMocks.getSimulation.mockResolvedValue({
+      id: 'sim-live-1',
+      project_id: null,
+      mode: 'standard',
+      prompt_text: 'ガソリン車を廃止',
+      template_name: 'policy_simulation',
+      execution_profile: 'standard',
+      colony_count: 0,
+      deep_colony_count: 0,
+      status: 'running',
+      error_message: '',
+      pipeline_stage: 'pending',
+      stage_progress: {},
+      run_id: null,
+      swarm_id: null,
+      metadata: {
+        pulse_result: {
+          aggregation: {
+            stance_distribution: { 反対: 0.6, 条件付き賛成: 0.4 },
+          },
+          evaluation: { diversity: 0.8 },
+        },
+      },
+      created_at: '2026-03-24T00:00:00Z',
+      started_at: '2026-03-24T00:00:10Z',
+      completed_at: null,
+    })
+    apiMocks.getSocialGraph.mockResolvedValue({
+      population_id: 'pop-1',
+      nodes: [
+        {
+          id: 'agent-1',
+          agent_index: 1,
+          demographics: { occupation: '会社員', age: 45, region: '関東' },
+          big_five: {},
+          values: {},
+          speech_style: '',
+          stance: '反対',
+          confidence: 0.8,
+          reason: '',
+          concern: '',
+          priority: '',
+        },
+      ],
+      edges: [],
+    })
 
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="simulation-primary-view"]').text()).toContain('Society Live')
+    expect(wrapper.text()).toContain('評議会 Round 0')
+    expect(apiMocks.getSocialGraph).toHaveBeenCalledWith('sim-live-1')
+  })
+
+  it('renders the 2D graph surface for standard modes', async () => {
     apiMocks.getSimulation.mockResolvedValue({
       id: 'sim-live-1',
       project_id: null,
@@ -202,57 +216,7 @@ describe('SimulationPage', () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="graph-2d-fallback"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="graph-2d"]').exists()).toBe(true)
     expect(wrapper.find('.graph-canvas-host').exists()).toBe(false)
-
-    webglMock.isWebGLSupported.mockReturnValue(true)
-  })
-
-  it('starts overlay animation loops and disposes them on unmount', async () => {
-    apiMocks.getSimulation.mockResolvedValue({
-      id: 'sim-live-1',
-      project_id: null,
-      mode: 'single',
-      prompt_text: '市場分析',
-      template_name: 'business_analysis',
-      execution_profile: 'standard',
-      colony_count: 0,
-      deep_colony_count: 0,
-      status: 'running',
-      error_message: '',
-      pipeline_stage: 'pending',
-      stage_progress: {},
-      run_id: 'run-1',
-      swarm_id: null,
-      metadata: {},
-      created_at: '2026-03-24T00:00:00Z',
-      started_at: '2026-03-24T00:00:10Z',
-      completed_at: null,
-    })
-
-    const rafSpy = vi.spyOn(window, 'requestAnimationFrame')
-    const cancelSpy = vi.spyOn(window, 'cancelAnimationFrame')
-    let queuedFrame: ((time: number) => void) | null = null
-
-    rafSpy.mockImplementation((cb: FrameRequestCallback) => {
-      queuedFrame = cb
-      return 42
-    })
-
-    const wrapper = mountPage()
-    await flushPromises()
-
-    expect(statusRingMocks.startAnimationLoop).toHaveBeenCalledTimes(1)
-    expect(queuedFrame).toBeTypeOf('function')
-
-    const runQueuedFrame = queuedFrame as ((time: number) => void) | null
-    runQueuedFrame?.(16)
-    expect(pulseMocks.update).toHaveBeenCalledWith(0.016)
-
-    wrapper.unmount()
-
-    expect(statusRingMocks.stopAnimationLoop).toHaveBeenCalledTimes(1)
-    expect(cancelSpy).toHaveBeenCalledWith(42)
-    expect(pulseMocks.dispose).toHaveBeenCalledTimes(1)
   })
 })

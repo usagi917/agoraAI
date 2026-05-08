@@ -1,30 +1,48 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted, watch } from 'vue'
-import { useLiveSocietyGraph } from '../composables/useLiveSocietyGraph'
-import { useSocietyGraphStore, STANCE_COLORS } from '../stores/societyGraphStore'
+import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
-import { RELATION_TYPE_STYLES } from '../composables/useForceGraph'
 import { useSimulationStore } from '../stores/simulationStore'
-import type { ThinkingVisualMode } from '../composables/useThinkingParticles'
+import { STANCE_COLORS } from '../constants/stances'
 import ConversationToast from './ConversationToast.vue'
 import NodeDetailPanel from './NodeDetailPanel.vue'
 import TemporalSlider from './TemporalSlider.vue'
+import ForceGraph2D from './ForceGraph2D.vue'
 
-defineProps<{
+interface GraphEdgePayload {
+  id?: string
+  source: string
+  target: string
+  relation_type: string
+  weight: number
+}
+
+const RELATION_TYPE_STYLES: Record<string, { color: string; width: number; particleColor: string }> = {
+  friend: { color: '#4FC3F7', width: 1.4, particleColor: '#81D4FA' },
+  family: { color: '#FFB74D', width: 1.6, particleColor: '#FFE0B2' },
+  colleague: { color: '#81C784', width: 1.2, particleColor: '#A5D6A7' },
+  neighbor: { color: '#4DB6AC', width: 1.1, particleColor: '#80CBC4' },
+  acquaintance: { color: '#90A4AE', width: 0.9, particleColor: '#CFD8DC' },
+  mentions: { color: '#BA68C8', width: 1.0, particleColor: '#CE93D8' },
+  default: { color: '#90A4AE', width: 1.0, particleColor: '#CFD8DC' },
+}
+
+const props = defineProps<{
   simulationId: string
+  spotlightAgentId?: string | null
 }>()
 
-const graphContainer = ref<HTMLElement | null>(null)
+const emit = defineEmits<{
+  (e: 'select-agent', agentId: string): void
+}>()
+
 const store = useSimulationStore()
 const societyGraphStore = useSocietyGraphStore()
 const kgStore = useKGEvolutionStore()
+const selectedAgentId = ref<string | null>(null)
+const highlightedAgentIds = ref<string[]>([])
 
-const thinkingMode = computed<ThinkingVisualMode>(() => {
-  if (store.phase === 'report' || store.status === 'generating_report') return 'report'
-  return 'society'
-})
-
-const { selectedAgentId, resetCamera, graphError, toggleBloom, bloomEnabled, highlightAgentsForEntity, clearHighlight } = useLiveSocietyGraph(graphContainer, thinkingMode)
+const selectedGraphNodeId = computed(() => selectedAgentId.value ?? props.spotlightAgentId ?? null)
 
 const phaseLabel = computed(() => {
   // Unified mode phase labels
@@ -100,17 +118,49 @@ const edgeInteractionCount = computed(() => {
 
 function clearSelection() {
   selectedAgentId.value = null
-  clearHighlight()
+  highlightedAgentIds.value = []
 }
 
 function clearEdgeSelection() {
   societyGraphStore.setSelectedEdge(null)
 }
 
-function handleHighlightAgents(_agentIds: string[]) {
-  if (selectedAgentId.value?.startsWith('kg-')) {
-    highlightAgentsForEntity(selectedAgentId.value)
+function handleHighlightAgents(agentIds: string[]) {
+  highlightedAgentIds.value = agentIds
+}
+
+function handleNodeSelect(node: { id: string }) {
+  highlightedAgentIds.value = []
+  if (node.id.startsWith('kg-')) {
+    selectedAgentId.value = node.id
+    return
   }
+  emit('select-agent', node.id)
+  selectedAgentId.value = null
+}
+
+function handleEdgeHover(edge: GraphEdgePayload | null) {
+  if (!edge) {
+    societyGraphStore.setHoveredEdge(null)
+    return
+  }
+  societyGraphStore.setHoveredEdge({
+    id: edge.id || `${edge.source}:${edge.target}`,
+    relationType: edge.relation_type,
+    weight: edge.weight,
+    sourceId: edge.source,
+    targetId: edge.target,
+  })
+}
+
+function handleEdgeSelect(edge: GraphEdgePayload) {
+  societyGraphStore.setSelectedEdge({
+    id: edge.id || `${edge.source}:${edge.target}`,
+    relationType: edge.relation_type,
+    weight: edge.weight,
+    sourceId: edge.source,
+    targetId: edge.target,
+  })
 }
 
 // Time scrubber for KG replay
@@ -187,17 +237,19 @@ onUnmounted(() => {
 
 <template>
   <div class="live-society-graph">
-    <!-- 3D Canvas -->
-    <div ref="graphContainer" class="graph-canvas-host" />
-
-    <!-- Error -->
-    <div v-if="graphError" class="graph-overlay error-overlay">
-      <p>{{ graphError }}</p>
-    </div>
+    <ForceGraph2D
+      :nodes="societyGraphStore.graphNodes"
+      :edges="societyGraphStore.graphEdges"
+      :selected-node-id="selectedGraphNodeId"
+      :highlighted-node-ids="highlightedAgentIds"
+      @select-node="handleNodeSelect"
+      @hover-edge="handleEdgeHover"
+      @select-edge="handleEdgeSelect"
+    />
 
     <!-- Empty state (before selection) -->
     <div
-      v-else-if="societyGraphStore.nodeCount === 0"
+      v-if="societyGraphStore.nodeCount === 0"
       class="graph-overlay empty-overlay"
     >
       <div class="empty-shell">
@@ -301,25 +353,6 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Control buttons -->
-    <div v-if="societyGraphStore.nodeCount > 0" class="graph-controls">
-      <button
-        class="graph-ctrl-btn"
-        title="中心に戻す"
-        @click="resetCamera"
-      >
-        &#8962;
-      </button>
-      <button
-        class="graph-ctrl-btn"
-        :class="{ active: bloomEnabled }"
-        title="Bloom エフェクト"
-        @click="toggleBloom()"
-      >
-        &#10022;
-      </button>
-    </div>
-
     <!-- Layer toggles -->
     <div v-if="kgStore.entityCount > 0" class="layer-toggles">
       <button
@@ -367,12 +400,13 @@ onUnmounted(() => {
       :round="societyGraphStore.currentRound"
     />
 
-    <!-- Node detail panel (on click) -->
-    <div v-if="selectedAgentId" class="agent-detail-overlay">
+    <!-- Node detail panel: KG nodes only (agent nodes open drawer in parent) -->
+    <div v-if="selectedAgentId?.startsWith('kg-')" class="agent-detail-overlay">
       <NodeDetailPanel
         :node-id="selectedAgentId"
         @close="clearSelection"
         @highlight-agents="handleHighlightAgents"
+        @select-agent="emit('select-agent', $event)"
       />
     </div>
   </div>
@@ -385,11 +419,6 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.graph-canvas-host {
-  position: absolute;
-  inset: 0;
-}
-
 .graph-overlay {
   position: absolute;
   inset: 0;
@@ -398,11 +427,6 @@ onUnmounted(() => {
   justify-content: center;
   z-index: 1;
   pointer-events: none;
-}
-
-.error-overlay p {
-  color: var(--danger, #ef4444);
-  font-size: 0.85rem;
 }
 
 .empty-shell {
@@ -550,40 +574,6 @@ onUnmounted(() => {
 .legend-label {
   font-size: 0.65rem;
   color: rgba(200, 200, 220, 0.65);
-}
-
-.graph-controls {
-  position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
-  margin-top: 1.4rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  z-index: 5;
-}
-
-.graph-ctrl-btn {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1rem;
-  background: rgba(16, 16, 30, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  color: rgba(200, 200, 220, 0.6);
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.graph-ctrl-btn:hover {
-  background: rgba(30, 30, 50, 0.9);
-  color: rgba(230, 230, 245, 0.8);
-}
-.graph-ctrl-btn.active {
-  border-color: rgba(100, 187, 106, 0.4);
-  color: rgba(100, 187, 106, 0.8);
 }
 
 .layer-toggles {

@@ -1,26 +1,25 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   getSimulation,
   getSimulationReport,
-  getSimulationGraph,
-  getSimulationGraphHistory,
   getSimulationColonies,
   submitCodexReview,
   getCodexHealth,
   rerunSimulation,
   type SimulationResponse,
   type ColonyResponse,
-  type GraphSnapshot,
   type EvidenceRef,
   type QualitySummary,
+  type ValidationSummary,
   type SimulationReportResponse,
   type PMBoardReportResponse,
   type RunConfig,
   type SocietyFirstReportResponse,
   type SocietyFirstBacktestResponse,
   type SocietyFirstIntervention,
+  type SocietyFirstInterventionEffectComparison,
   type SocietyFirstInterventionEvidence,
   type MetaSimulationReportResponse,
   type MetaInterventionPlan,
@@ -32,12 +31,13 @@ import {
   type PropagationData,
   type CodexHealthResponse,
 } from '../api/client'
-import { useForceGraph } from '../composables/useForceGraph'
 import DecisionBriefComponent from '../components/DecisionBrief.vue'
 import ProbabilityChart from '../components/ProbabilityChart.vue'
 import ScenarioCompare from '../components/ScenarioCompare.vue'
 import AgreementHeatmap from '../components/AgreementHeatmap.vue'
 import PropagationDashboard from '../components/PropagationDashboard.vue'
+import IntegratedReport from '../components/IntegratedReport.vue'
+import { useTimeAxis } from '../composables/useTimeAxis'
 import {
   getDefaultResultsSecondaryTab,
   getResultsPrimaryView,
@@ -49,19 +49,11 @@ import {
 const route = useRoute()
 const router = useRouter()
 const simId = route.params.id as string
-const ROUND_DURATION_MS = 1200
 
 const sim = ref<SimulationResponse | null>(null)
 const report = ref<SimulationReportResponse | null>(null)
 const error = ref('')
 const loading = ref(true)
-const graphContainer = ref<HTMLElement | null>(null)
-const graphSnapshots = ref<GraphSnapshot[]>([])
-const fallbackGraph = ref<{ nodes: any[]; edges: any[] } | null>(null)
-const currentRound = ref(0)
-const transitionTargetRound = ref<number | null>(null)
-const transitionProgress = ref(0)
-const isPlaying = ref(false)
 const colonies = ref<ColonyResponse[]>([])
 const propagationData = ref<PropagationData | null>(null)
 const transcriptEntries = ref<TranscriptEntry[]>([])
@@ -69,14 +61,11 @@ const transcriptLoading = ref(false)
 const transcriptPhaseFilter = ref<string>('')
 const activeSecondaryTab = ref<ResultsSecondaryTab>('society')
 let playbackFrame: number | null = null
-let playbackStartedAt: number | null = null
 
-const {
-  setFullGraph,
-  startGraphTransition,
-  updateGraphTransition,
-  finishGraphTransition,
-} = useForceGraph(graphContainer)
+// Time-axis (t0..t5) prediction view — lazily attached if backend produced it.
+const { report: timeAxisReport, loading: timeAxisLoading, error: timeAxisError, fetch: fetchTimeAxis } = useTimeAxis()
+const timeAxisAvailable = ref(false)
+const timeAxisExpanded = ref(false)
 
 const codexReviewQuestion = ref('')
 const codexReviewAnswers = ref<Array<{ question: string; answer: string; loading?: boolean; evidenceRefs?: EvidenceRef[] }>>([])
@@ -147,6 +136,9 @@ interface SocietyInterventionViewModel {
   observedUplift?: number | null
   observedDownside?: number | null
   uncertainty?: number | null
+  directionAccuracy?: number | null
+  effectMae?: number | null
+  effectComparisons: SocietyFirstInterventionEffectComparison[]
   supportingEvidence: SocietyFirstInterventionEvidence[]
 }
 
@@ -167,6 +159,9 @@ function normalizeSocietyIntervention(
       observedUplift: intervention.observed_uplift,
       observedDownside: intervention.observed_downside,
       uncertainty: intervention.uncertainty,
+      directionAccuracy: intervention.direction_accuracy,
+      effectMae: intervention.effect_mae,
+      effectComparisons: intervention.effect_comparisons || [],
       supportingEvidence: intervention.supporting_evidence || [],
     }
   }
@@ -180,6 +175,7 @@ function normalizeSocietyIntervention(
     issues: intervention.target_issues || [],
     expectedEffect: intervention.expected_effect,
     isObserved: false,
+    effectComparisons: [],
     supportingEvidence: [],
   }
 }
@@ -252,6 +248,40 @@ const reportQuality = computed<QualitySummary | null>(() => {
   if (pmBoardData.value?.quality) return pmBoardData.value.quality
   return null
 })
+const validationSummary = computed<ValidationSummary | null>(() => report.value?.validation_summary || null)
+const predictionEvaluations = computed(() => report.value?.prediction_evaluations || null)
+const predictionAccuracyCards = computed(() => {
+  const summary = predictionEvaluations.value
+  if (!summary) return []
+  const cards = []
+  const distribution = summary.distribution
+  if (distribution?.count) {
+    cards.push({
+      label: '分布予測',
+      value: distribution.best_variant || 'pending',
+      detail: typeof distribution.avg_calibration_improvement === 'number'
+        ? `補正改善 ${distribution.avg_calibration_improvement.toFixed(3)}`
+        : `${distribution.validated_count}/${distribution.count} validated`,
+    })
+  }
+  const scenario = summary.scenario
+  if (scenario?.count) {
+    cards.push({
+      label: 'シナリオ',
+      value: typeof scenario.probability_brier === 'number' ? `Brier ${scenario.probability_brier.toFixed(3)}` : 'pending',
+      detail: typeof scenario.mean_reciprocal_rank === 'number' ? `MRR ${scenario.mean_reciprocal_rank.toFixed(2)}` : `${scenario.validated_count}/${scenario.count} validated`,
+    })
+  }
+  const intervention = summary.intervention
+  if (intervention?.count) {
+    cards.push({
+      label: '介入効果',
+      value: typeof intervention.direction_accuracy === 'number' ? `${(intervention.direction_accuracy * 100).toFixed(0)}%` : 'pending',
+      detail: typeof intervention.mae === 'number' ? `MAE ${intervention.mae.toFixed(3)}` : `${intervention.validated_count}/${intervention.count} validated`,
+    })
+  }
+  return cards
+})
 const reportEvidenceRefs = computed<EvidenceRef[]>(() => report.value?.evidence_refs || [])
 const runConfig = computed<RunConfig | null>(() => {
   if (report.value?.run_config) return report.value.run_config
@@ -276,6 +306,22 @@ const evidenceSummary = computed(() => {
   if (!quality) return ''
   return `mode=${quality.evidence_mode || runConfig.value?.evidence_mode || 'prefer'} · document=${quality.document_refs_count ?? 0} · refs=${quality.evidence_refs_count}`
 })
+const validationLabel = computed(() => {
+  const summary = validationSummary.value
+  if (!summary) return ''
+  const anchor = summary.survey_anchor_status || '未検証'
+  const scenario = summary.scenario_backtest_status === '過去ケース検証あり'
+    ? `過去ケース Hit ${(Number(summary.hit_rate || 0) * 100).toFixed(0)}%`
+    : '過去ケース未検証'
+  return `${anchor} · ${scenario}`
+})
+const distributionErrorLabel = computed(() => {
+  const err = validationSummary.value?.distribution_error
+  if (!err) return ''
+  const kl = typeof err.kl_divergence === 'number' ? err.kl_divergence.toFixed(3) : 'n/a'
+  const emd = typeof err.emd === 'number' ? err.emd.toFixed(3) : 'n/a'
+  return `KL=${kl} · EMD=${emd}`
+})
 
 const reportText = computed(() => {
   if (typeof report.value?.content === 'string') return report.value.content
@@ -286,7 +332,6 @@ const agreementMatrix = computed(() => {
   return report.value.agreement_matrix as { colony_ids: string[]; matrix: number[][] }
 })
 const canCopyReport = computed(() => reportText.value.trim().length > 0)
-const snapshotByRound = computed(() => new Map(graphSnapshots.value.map((snapshot) => [snapshot.round, snapshot])))
 function backtestVerdictLabel(verdict?: string | null) {
   if (verdict === 'hit') return 'Hit'
   if (verdict === 'partial_hit') return 'Partial'
@@ -300,12 +345,6 @@ function backtestVerdictClass(verdict?: string | null) {
   return 'verdict-miss'
 }
 
-const totalRounds = computed(() => {
-  if (isMetaMode.value) return 0
-  if (graphSnapshots.value.length === 0) return 0
-  return graphSnapshots.value[graphSnapshots.value.length - 1].round
-})
-const showGraphViews = computed(() => !isMetaMode.value)
 const layoutContext = computed(() => ({
   mode: sim.value?.mode,
   hasScenarios: hasScenarios.value,
@@ -349,85 +388,6 @@ function stopPlaybackLoop() {
     cancelAnimationFrame(playbackFrame)
     playbackFrame = null
   }
-  playbackStartedAt = null
-}
-
-function resetTransitionState() {
-  transitionTargetRound.value = null
-  transitionProgress.value = 0
-  playbackStartedAt = null
-}
-
-function showRound(round: number) {
-  const snapshot = snapshotByRound.value.get(round)
-  if (!snapshot) return false
-
-  currentRound.value = round
-  resetTransitionState()
-  setFullGraph(snapshot.nodes, snapshot.edges)
-  return true
-}
-
-function stopPlayback(round = currentRound.value) {
-  stopPlaybackLoop()
-  isPlaying.value = false
-  showRound(round)
-}
-
-function queueNextTransition(fromRound: number) {
-  stopPlaybackLoop()
-  playbackFrame = requestAnimationFrame(() => {
-    if (!isPlaying.value) return
-    beginRoundTransition(fromRound)
-  })
-}
-
-function stepPlayback(timestamp: number) {
-  if (!isPlaying.value || transitionTargetRound.value === null) return
-
-  if (playbackStartedAt === null) {
-    playbackStartedAt = timestamp
-  }
-
-  const rawProgress = Math.min((timestamp - playbackStartedAt) / ROUND_DURATION_MS, 1)
-  transitionProgress.value = rawProgress
-  updateGraphTransition(rawProgress)
-
-  if (rawProgress < 1) {
-    playbackFrame = requestAnimationFrame(stepPlayback)
-    return
-  }
-
-  finishGraphTransition()
-  currentRound.value = transitionTargetRound.value
-  resetTransitionState()
-
-  if (currentRound.value < totalRounds.value) {
-    queueNextTransition(currentRound.value)
-    return
-  }
-
-  isPlaying.value = false
-}
-
-function beginRoundTransition(fromRound: number) {
-  const fromSnapshot = snapshotByRound.value.get(fromRound)
-  const toSnapshot = snapshotByRound.value.get(fromRound + 1)
-  if (!toSnapshot) {
-    stopPlayback(fromRound)
-    return
-  }
-
-  stopPlaybackLoop()
-  currentRound.value = fromRound
-  transitionTargetRound.value = toSnapshot.round
-  transitionProgress.value = 0
-  if (fromSnapshot) {
-    startGraphTransition(fromSnapshot.nodes, fromSnapshot.edges, toSnapshot.nodes, toSnapshot.edges)
-  } else {
-    setFullGraph(toSnapshot.nodes, toSnapshot.edges)
-  }
-  playbackFrame = requestAnimationFrame(stepPlayback)
 }
 
 onMounted(async () => {
@@ -450,13 +410,9 @@ onMounted(async () => {
         codexHealthLoading.value = false
       })
 
-    const [reportData, graphHistory] = await Promise.all([
-      getSimulationReport(simId).catch(() => null),
-      getSimulationGraphHistory(simId).catch(() => []),
-    ])
+    const reportData = await getSimulationReport(simId).catch(() => null)
 
     report.value = reportData
-    graphSnapshots.value = graphHistory
 
     // レポートが未取得かつシミュレーション完了済みなら数秒後にリトライ
     if (!reportData && sim.value?.status === 'completed') {
@@ -486,21 +442,11 @@ onMounted(async () => {
       }
     }).catch(() => { /* no propagation data */ })
 
-    // 最新グラフ表示
-    if (showGraphViews.value && graphHistory.length > 0) {
-      const latest = graphHistory[graphHistory.length - 1]
-      currentRound.value = latest.round
-      fallbackGraph.value = { nodes: latest.nodes, edges: latest.edges }
-      await nextTick()
-      setFullGraph(latest.nodes, latest.edges)
-    } else if (showGraphViews.value) {
-      const graphData = await getSimulationGraph(simId).catch(() => null)
-      if (graphData?.nodes?.length) {
-        fallbackGraph.value = { nodes: graphData.nodes, edges: graphData.edges }
-        await nextTick()
-        setFullGraph(graphData.nodes, graphData.edges)
-      }
-    }
+    // Time-axis (t0..t5) report — only present when backend simulation
+    // wrote `time_axis_result` into sim.metadata_json. 404 is a soft absence.
+    fetchTimeAxis(simId).then(() => {
+      timeAxisAvailable.value = !!timeAxisReport.value
+    }).catch(() => { /* gracefully hidden */ })
   } catch (e) {
     error.value = 'データの読み込みに失敗しました。'
   } finally {
@@ -727,6 +673,18 @@ function renderMarkdown(content: string): string {
         <span v-if="verification" class="quality-meta">
           verification={{ verification.status }} ({{ (verification.score * 100).toFixed(0) }}%)
         </span>
+      </div>
+
+      <div
+        v-if="validationSummary"
+        data-testid="validation-summary"
+        class="validation-banner"
+        :class="{ verified: validationSummary.survey_anchor_status !== '未検証' || validationSummary.scenario_backtest_status === '過去ケース検証あり' }"
+      >
+        <strong>検証状態</strong>
+        <span>{{ validationLabel }}</span>
+        <span class="quality-meta">calibration={{ validationSummary.calibration_status }}</span>
+        <span v-if="distributionErrorLabel" class="quality-meta">{{ distributionErrorLabel }}</span>
       </div>
 
       <div v-if="reportEvidenceRefs.length" class="evidence-panel">
@@ -1003,6 +961,16 @@ function renderMarkdown(content: string): string {
                   </span>
                 </div>
               </div>
+              <div v-if="predictionAccuracyCards.length" class="society-section">
+                <h4 class="society-section-title">予測精度</h4>
+                <div class="society-backtest-summary">
+                  <div v-for="card in predictionAccuracyCards" :key="card.label" class="society-metric-card">
+                    <span class="society-metric-label">{{ card.label }}</span>
+                    <span class="society-metric-score">{{ card.value }}</span>
+                    <span class="society-metric-sub">{{ card.detail }}</span>
+                  </div>
+                </div>
+              </div>
               <div v-if="societyInterventions.length" class="society-section">
                 <h4 class="society-section-title">介入比較</h4>
                 <div class="society-intervention-grid">
@@ -1014,6 +982,17 @@ function renderMarkdown(content: string): string {
                     <p class="society-intervention-desc">{{ intervention.description }}</p>
                     <p class="society-intervention-issues">対象: {{ intervention.issues.join(', ') }}</p>
                     <p class="society-intervention-hint">{{ intervention.expectedEffect }}</p>
+                    <div
+                      v-if="(intervention.directionAccuracy !== null && intervention.directionAccuracy !== undefined) || (intervention.effectMae !== null && intervention.effectMae !== undefined)"
+                      class="society-intervention-metrics"
+                    >
+                      <span v-if="intervention.directionAccuracy !== null && intervention.directionAccuracy !== undefined">
+                        方向一致 {{ (intervention.directionAccuracy * 100).toFixed(0) }}%
+                      </span>
+                      <span v-if="intervention.effectMae !== null && intervention.effectMae !== undefined">
+                        MAE {{ intervention.effectMae.toFixed(3) }}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1031,6 +1010,14 @@ function renderMarkdown(content: string): string {
                   <div class="society-metric-card">
                     <span class="society-metric-label">issue hit rate</span>
                     <span class="society-metric-score">{{ (societyBacktest.summary.issue_hit_rate * 100).toFixed(0) }}%</span>
+                  </div>
+                  <div v-if="societyBacktest.summary.scenario_probability_brier !== null && societyBacktest.summary.scenario_probability_brier !== undefined" class="society-metric-card">
+                    <span class="society-metric-label">scenario brier</span>
+                    <span class="society-metric-score">{{ societyBacktest.summary.scenario_probability_brier.toFixed(3) }}</span>
+                  </div>
+                  <div v-if="societyBacktest.summary.mean_reciprocal_rank !== null && societyBacktest.summary.mean_reciprocal_rank !== undefined" class="society-metric-card">
+                    <span class="society-metric-label">MRR</span>
+                    <span class="society-metric-score">{{ societyBacktest.summary.mean_reciprocal_rank.toFixed(2) }}</span>
                   </div>
                 </div>
                 <div v-if="societyBacktest.summary.case_count" class="society-backtest-grid">
@@ -1235,6 +1222,38 @@ function renderMarkdown(content: string): string {
           </div>
         </div>
       </div>
+
+      <!-- Time-axis (t0..t5) prediction — only renders when backend produced a result. -->
+      <section
+        v-if="timeAxisAvailable && timeAxisReport"
+        data-testid="time-axis-section"
+        class="time-axis-section"
+      >
+        <div class="time-axis-header">
+          <div class="time-axis-copy">
+            <span class="workspace-eyebrow">Time-axis Forecast</span>
+            <h3 class="workspace-title">t0..t5 の予測分布と駆動要因</h3>
+            <p class="workspace-description">
+              6 時点ホライズンの分布、駆動要因、What-if 比較を確認できます。
+            </p>
+          </div>
+          <button
+            type="button"
+            class="btn btn-ghost"
+            @click="timeAxisExpanded = !timeAxisExpanded"
+          >
+            {{ timeAxisExpanded ? '閉じる' : '時系列レポートを開く' }}
+          </button>
+        </div>
+        <div v-if="timeAxisExpanded" class="time-axis-body">
+          <div v-if="timeAxisLoading" class="loading-state">
+            <div class="loading-dots"><span></span><span></span><span></span></div>
+            <p>時系列レポートを読み込み中...</p>
+          </div>
+          <div v-else-if="timeAxisError" class="error-banner">{{ timeAxisError }}</div>
+          <IntegratedReport v-else :report="timeAxisReport" />
+        </div>
+      </section>
     </template>
   </div>
 </template>
@@ -1317,6 +1336,9 @@ function renderMarkdown(content: string): string {
 .quality-verified { background: rgba(34,197,94,0.08); color: var(--success); border-color: rgba(34,197,94,0.2); }
 .quality-draft { background: rgba(245,158,11,0.08); color: #f59e0b; border-color: rgba(245,158,11,0.2); }
 .quality-unsupported { background: rgba(239,68,68,0.08); color: var(--danger); border-color: rgba(239,68,68,0.2); }
+.validation-banner { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; padding: 0.75rem 1.25rem; border-radius: var(--radius-sm); font-size: 0.82rem; border: 1px solid rgba(245,158,11,0.2); background: rgba(245,158,11,0.08); color: #f59e0b; }
+.validation-banner.verified { border-color: rgba(34,197,94,0.22); background: rgba(34,197,94,0.08); color: var(--success); }
+.validation-banner strong { font-family: var(--font-mono); font-size: 0.74rem; }
 .evidence-panel { display: flex; flex-direction: column; gap: 0.75rem; }
 .evidence-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem; }
 .evidence-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.85rem; display: flex; flex-direction: column; gap: 0.5rem; }
@@ -1797,6 +1819,7 @@ function renderMarkdown(content: string): string {
 .society-metric-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem; text-align: center; display: flex; flex-direction: column; gap: 0.25rem; }
 .society-metric-label { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; }
 .society-metric-score { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+.society-metric-sub { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); }
 .society-meeting-summary { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.7; }
 .society-participants-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .society-participant-chip { font-size: 0.78rem; padding: 0.3rem 0.6rem; border-radius: 999px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); display: flex; align-items: center; gap: 0.35rem; }
@@ -1866,5 +1889,33 @@ function renderMarkdown(content: string): string {
   .stakeholder-bar-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .confidence-gauge-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .recommendation-badge { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+}
+
+.time-axis-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: clamp(1rem, 1vw + 0.8rem, 1.5rem) clamp(1rem, 2vw, 2rem);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.time-axis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.time-axis-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.time-axis-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 </style>

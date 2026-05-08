@@ -3,7 +3,6 @@ from fastapi import APIRouter
 from src.app.api.routes.projects import router as projects_router
 from src.app.api.routes.templates import router as templates_router
 from src.app.api.routes.runs import router as runs_router
-from src.app.api.routes.stream import router as stream_router
 from src.app.api.routes.admin import router as admin_router
 from src.app.api.routes.codex import router as codex_router
 from src.app.api.routes.simulations import router as simulations_router
@@ -18,7 +17,6 @@ api_router = APIRouter()
 api_router.include_router(projects_router, prefix="/projects", tags=["projects"])
 api_router.include_router(templates_router, prefix="/templates", tags=["templates"])
 api_router.include_router(runs_router, prefix="/runs", tags=["runs"])
-api_router.include_router(stream_router, prefix="/runs", tags=["stream"])
 api_router.include_router(admin_router, prefix="/admin", tags=["admin"])
 api_router.include_router(codex_router, prefix="/codex", tags=["codex"])
 api_router.include_router(simulations_router, prefix="/simulations", tags=["simulations"])

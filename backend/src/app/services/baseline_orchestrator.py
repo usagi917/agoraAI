@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from src.app.database import async_session
 from src.app.llm.client import LLMClient
 from src.app.models.simulation import Simulation
+from src.app.services.scenario_pair_status import refresh_scenario_pair_status
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ async def run_baseline(simulation_id: str) -> None:
             return
 
         theme = sim.prompt_text
+        scenario_pair_id = sim.scenario_pair_id
         llm = LLMClient()
 
         try:
@@ -101,6 +103,7 @@ async def run_baseline(simulation_id: str) -> None:
             }
             sim.status = "completed"
             sim.completed_at = datetime.now(timezone.utc)
+            await refresh_scenario_pair_status(session, scenario_pair_id)
             await session.commit()
 
             await sse_manager.publish(simulation_id, "simulation_completed", {
@@ -113,9 +116,12 @@ async def run_baseline(simulation_id: str) -> None:
         except Exception as e:
             logger.error("Baseline simulation %s failed: %s", simulation_id, e, exc_info=True)
             await session.rollback()
-            sim.status = "failed"
-            sim.error_message = f"{type(e).__name__}: {e}"[:500]
-            await session.commit()
+            failed_sim = await session.get(Simulation, simulation_id)
+            if failed_sim:
+                failed_sim.status = "failed"
+                failed_sim.error_message = f"{type(e).__name__}: {e}"[:500]
+                await refresh_scenario_pair_status(session, scenario_pair_id)
+                await session.commit()
 
             await sse_manager.publish(simulation_id, "simulation_failed", {
                 "simulation_id": simulation_id,

@@ -1,213 +1,296 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import ForceGraph from 'force-graph'
 
-interface Node2D {
-  id: string
-  label: string
-  type: string
-  importance_score: number
-  activity_score: number
-  x: number
-  y: number
-  vx: number
-  vy: number
-}
+import {
+  buildAdjacency,
+  clamp01,
+  linkColor as computeLinkColor,
+  linkWidth as computeLinkWidth,
+  mergeGraphData,
+  nodeColor,
+  nodeDisplayColor,
+  nodeRadius,
+  toEdgeProp,
+  toNodeProp,
+  withAlpha,
+  type EdgeProp,
+  type NodeProp,
+  type SimLink,
+  type SimNode,
+} from './forceGraphHelpers'
 
-interface NodeProp {
-  id: string
-  label: string
-  type: string
-  importance_score: number
-  activity_score: number
-}
-
-interface EdgeProp {
-  source: string
-  target: string
-  relation_type: string
-  weight: number
-  label?: string
-}
-
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   nodes: NodeProp[]
   edges: EdgeProp[]
+  selectedNodeId?: string | null
+  highlightedNodeIds?: string[]
+}>(), {
+  selectedNodeId: null,
+  highlightedNodeIds: () => [],
+})
+
+const emit = defineEmits<{
+  (e: 'select-node', node: NodeProp): void
+  (e: 'select-edge', edge: EdgeProp): void
+  (e: 'hover-edge', edge: EdgeProp | null): void
 }>()
 
-const TYPE_COLORS: Record<string, string> = {
-  organization: '#4FC3F7',
-  person: '#FFB74D',
-  policy: '#81C784',
-  market: '#E57373',
-  technology: '#BA68C8',
-  resource: '#4DB6AC',
-  concept: '#64B5F6',
-  risk: '#FF8A65',
-  opportunity: '#AED581',
-  agent: '#FFB74D',
-  unknown: '#90A4AE',
+const host = ref<HTMLElement | null>(null)
+const hoveredNodeId = ref<string | null>(null)
+
+let graph: ReturnType<typeof createGraph> | null = null
+let resizeObserver: ResizeObserver | null = null
+const currentNodes = ref<SimNode[]>([])
+const currentLinks = ref<SimLink[]>([])
+let didFitOnce = false
+const LAYOUT_COOLDOWN_TICKS = 160
+const LAYOUT_COOLDOWN_TIME_MS = 5000
+
+const adjacency = computed(() => buildAdjacency(currentLinks.value))
+
+const highlightedSet = computed(() => {
+  if (!props.highlightedNodeIds?.length) return null
+  const ids = new Set(props.highlightedNodeIds)
+  if (props.selectedNodeId) ids.add(props.selectedNodeId)
+  return ids
+})
+
+function activeFocusId(): string | null {
+  return props.selectedNodeId || hoveredNodeId.value
 }
 
-const WIDTH = 800
-const HEIGHT = 600
-
-const simNodes = ref<Node2D[]>([])
-const simEdges = ref<EdgeProp[]>([])
-
-let animFrame: number | null = null
-
-function nodeColor(type: string) {
-  return TYPE_COLORS[type] ?? TYPE_COLORS.unknown
+function isNodeDimmed(nodeId: string): boolean {
+  if (highlightedSet.value) return !highlightedSet.value.has(nodeId)
+  const focus = activeFocusId()
+  if (!focus) return false
+  if (focus === nodeId) return false
+  return !(adjacency.value.get(focus)?.has(nodeId) ?? false)
 }
 
-function nodeRadius(importance: number) {
-  return 4 + importance * 8
+function endpointId(end: unknown): string {
+  if (end == null) return ''
+  if (typeof end === 'string') return end
+  if (typeof end === 'number') return String(end)
+  if (typeof end === 'object' && end !== null && 'id' in end) {
+    return String((end as { id?: string | number }).id ?? '')
+  }
+  return ''
 }
 
-function initSimulation() {
-  simNodes.value = props.nodes.map((n, i) => ({
-    ...n,
-    x: WIDTH / 2 + (Math.cos(i * 2.4) * 100),
-    y: HEIGHT / 2 + (Math.sin(i * 2.4) * 100),
-    vx: 0,
-    vy: 0,
-  }))
-  simEdges.value = [...props.edges]
+function isLinkDimmed(link: SimLink): boolean {
+  const source = endpointId(link.source)
+  const target = endpointId(link.target)
+  if (highlightedSet.value) {
+    return !highlightedSet.value.has(source) && !highlightedSet.value.has(target)
+  }
+  const focus = activeFocusId()
+  if (!focus) return false
+  return source !== focus && target !== focus
 }
 
-function tick() {
-  const nodes = simNodes.value
-  const edges = simEdges.value
-  const alpha = 0.3
+function createGraph(element: HTMLElement) {
+  // force-graph default export is a class in TS but is also callable.
+  // Use `new` for a clean typed constructor path.
+  const FG = ForceGraph as unknown as new (el: HTMLElement) => InstanceType<typeof ForceGraph>
+  return new FG(element)
+}
 
-  // Repulsion
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      let dx = nodes[j].x - nodes[i].x
-      let dy = nodes[j].y - nodes[i].y
-      const dist = Math.sqrt(dx * dx + dy * dy) || 1
-      const force = -200 / (dist * dist) * alpha
-      const fx = force * dx / dist
-      const fy = force * dy / dist
-      nodes[i].vx -= fx
-      nodes[i].vy -= fy
-      nodes[j].vx += fx
-      nodes[j].vy += fy
-    }
+function paintNode(node: SimNode, ctx: CanvasRenderingContext2D, globalScale: number) {
+  if (typeof node.x !== 'number' || typeof node.y !== 'number') return
+  const r = nodeRadius(node)
+  const baseColor = nodeDisplayColor(node)
+  const dimmed = isNodeDimmed(node.id)
+  const selected = props.selectedNodeId === node.id
+  const alpha = dimmed ? 0.18 : selected ? 1 : 0.88
+
+  ctx.beginPath()
+  ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
+  ctx.fillStyle = withAlpha(baseColor, alpha)
+  ctx.fill()
+
+  if (selected) {
+    ctx.strokeStyle = '#f8fafc'
+    ctx.lineWidth = 2.5 / globalScale
+    ctx.stroke()
   }
 
-  // Attraction (edges)
-  const nodeMap = new Map(nodes.map(n => [n.id, n]))
-  for (const edge of edges) {
-    const s = nodeMap.get(edge.source)
-    const t = nodeMap.get(edge.target)
-    if (!s || !t) continue
-    const dx = t.x - s.x
-    const dy = t.y - s.y
-    const dist = Math.sqrt(dx * dx + dy * dy) || 1
-    const force = (dist - 80) * 0.01 * alpha
-    const fx = force * dx / dist
-    const fy = force * dy / dist
-    s.vx += fx
-    s.vy += fy
-    t.vx -= fx
-    t.vy -= fy
-  }
-
-  // Centering
-  for (const n of nodes) {
-    n.vx += (WIDTH / 2 - n.x) * 0.002
-    n.vy += (HEIGHT / 2 - n.y) * 0.002
-  }
-
-  // Apply velocity with damping
-  for (const n of nodes) {
-    n.vx *= 0.85
-    n.vy *= 0.85
-    n.x += n.vx
-    n.y += n.vy
-    // Bounds
-    n.x = Math.max(20, Math.min(WIDTH - 20, n.x))
-    n.y = Math.max(20, Math.min(HEIGHT - 20, n.y))
-  }
-
-  // Trigger reactivity
-  simNodes.value = [...nodes]
-}
-
-function startLoop() {
-  const loop = () => {
-    tick()
-    animFrame = requestAnimationFrame(loop)
-  }
-  animFrame = requestAnimationFrame(loop)
-}
-
-function stopLoop() {
-  if (animFrame !== null) {
-    cancelAnimationFrame(animFrame)
-    animFrame = null
+  if (globalScale > 0.6 && !dimmed) {
+    const fontSize = 10 / globalScale
+    ctx.font = `${fontSize}px sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    ctx.lineWidth = 3 / globalScale
+    ctx.strokeStyle = 'rgba(8, 9, 18, 0.88)'
+    ctx.lineJoin = 'round'
+    const labelY = node.y + r + 3
+    ctx.strokeText(node.label, node.x, labelY)
+    ctx.fillStyle = 'rgba(226, 232, 240, 0.85)'
+    ctx.fillText(node.label, node.x, labelY)
   }
 }
 
-function getSourceNode(edge: EdgeProp) {
-  return simNodes.value.find(n => n.id === edge.source)
+function paintNodePointerArea(node: SimNode, color: string, ctx: CanvasRenderingContext2D) {
+  if (typeof node.x !== 'number' || typeof node.y !== 'number') return
+  ctx.fillStyle = color
+  ctx.beginPath()
+  ctx.arc(node.x, node.y, nodeRadius(node) + 2, 0, Math.PI * 2)
+  ctx.fill()
 }
 
-function getTargetNode(edge: EdgeProp) {
-  return simNodes.value.find(n => n.id === edge.target)
+function configureForces(g: ReturnType<typeof createGraph>) {
+  // Adjust the default forces force-graph already wires up.
+  const charge = g.d3Force('charge') as { strength?: (v: number) => unknown; distanceMax?: (v: number) => unknown } | undefined
+  charge?.strength?.(-220)
+  charge?.distanceMax?.(420)
+
+  const link = g.d3Force('link') as
+    | { distance?: (fn: (l: SimLink) => number) => unknown; strength?: (fn: (l: SimLink) => number) => unknown }
+    | undefined
+  link?.distance?.((l: SimLink) => 60 + (1 - clamp01(l.weight)) * 80)
+  link?.strength?.((l: SimLink) => 0.3 + clamp01(l.weight) * 0.5)
+
+  const center = g.d3Force('center') as { strength?: (v: number) => unknown } | undefined
+  center?.strength?.(0.04)
 }
 
-watch(() => [props.nodes, props.edges], () => {
-  stopLoop()
-  initSimulation()
-  startLoop()
-}, { deep: true })
+function syncSize() {
+  if (!host.value || !graph) return
+  const rect = host.value.getBoundingClientRect()
+  const w = Math.max(320, Math.round(rect.width || 900))
+  const h = Math.max(280, Math.round(rect.height || 620))
+  graph.width(w).height(h)
+}
+
+function applyData() {
+  if (!graph) return
+  const merged = mergeGraphData(currentNodes.value, props.nodes, props.edges)
+  currentNodes.value = merged.nodes
+  currentLinks.value = merged.links
+  graph.graphData({ nodes: merged.nodes, links: merged.links })
+}
+
+function refreshCanvas() {
+  // Trigger a redraw without restarting the simulation. d3ReheatSimulation()
+  // bumps alpha briefly which also forces a render in idle state.
+  graph?.d3ReheatSimulation()
+}
 
 onMounted(() => {
-  initSimulation()
-  startLoop()
+  if (!host.value) return
+  graph = createGraph(host.value)
+
+  graph
+    .nodeId('id')
+    .linkSource('source')
+    .linkTarget('target')
+    .backgroundColor('rgba(8, 9, 18, 1)')
+    .nodeRelSize(1)
+    .nodeVal(0)
+    .nodeCanvasObjectMode(() => 'replace')
+    .nodeCanvasObject(paintNode as never)
+    .nodePointerAreaPaint(paintNodePointerArea as never)
+    .linkColor(((l: SimLink) => computeLinkColor(l.relation_type, l.weight, isLinkDimmed(l))) as never)
+    .linkWidth(((l: SimLink) => computeLinkWidth(l.weight)) as never)
+    .linkDirectionalParticles(((l: SimLink) => (clamp01(l.weight) > 0.6 ? 2 : 0)) as never)
+    .linkDirectionalParticleWidth(2)
+    .linkDirectionalParticleColor(((l: SimLink) => withAlpha(nodeColor(l.relation_type), 0.85)) as never)
+    .warmupTicks(0)
+    .cooldownTicks(LAYOUT_COOLDOWN_TICKS)
+    .cooldownTime(LAYOUT_COOLDOWN_TIME_MS)
+    .d3AlphaDecay(0.0228)
+    .d3VelocityDecay(0.4)
+    .enableNodeDrag(true)
+    .enableZoomInteraction(true)
+    .enablePanInteraction(true)
+    .onNodeHover((node: SimNode | null) => {
+      hoveredNodeId.value = node?.id != null ? String(node.id) : null
+      refreshCanvas()
+    })
+    .onNodeClick((node: SimNode, event: MouseEvent) => {
+      if (event && event.detail >= 2) {
+        // Double click releases the pinned position.
+        const sim = node
+        sim.fx = undefined
+        sim.fy = undefined
+        graph?.d3ReheatSimulation()
+        return
+      }
+      const np = toNodeProp(node)
+      if (np) emit('select-node', np)
+    })
+    .onNodeDragEnd((node: SimNode) => {
+      const sim = node
+      sim.fx = sim.x
+      sim.fy = sim.y
+      refreshCanvas()
+    })
+    .onLinkClick((link: SimLink) => {
+      const ep = toEdgeProp(link)
+      if (ep) emit('select-edge', ep)
+    })
+    .onLinkHover((link: SimLink | null) => {
+      const ep = link ? toEdgeProp(link) : null
+      emit('hover-edge', ep)
+      refreshCanvas()
+    })
+    .onEngineStop(() => {
+      if (!didFitOnce && currentNodes.value.length > 0) {
+        didFitOnce = true
+        graph?.zoomToFit(400, 40)
+      }
+    })
+
+  configureForces(graph)
+  syncSize()
+  applyData()
+
+  if (typeof ResizeObserver !== 'undefined' && host.value) {
+    resizeObserver = new ResizeObserver(() => syncSize())
+    resizeObserver.observe(host.value)
+  }
 })
 
 onUnmounted(() => {
-  stopLoop()
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  if (graph) {
+    ;(graph as unknown as { _destructor: () => void })._destructor()
+    graph = null
+  }
 })
+
+watch(
+  () => [props.nodes, props.edges] as const,
+  () => {
+    applyData()
+    didFitOnce = false
+    refreshCanvas()
+  },
+  { deep: true },
+)
+
+watch(
+  () => props.selectedNodeId,
+  (id) => {
+    if (!graph || !id) return
+    const target = currentNodes.value.find((n) => n.id === id)
+    if (target && typeof target.x === 'number' && typeof target.y === 'number') {
+      graph.centerAt(target.x, target.y, 600)
+    }
+    refreshCanvas()
+  },
+)
+
+watch(
+  () => props.highlightedNodeIds,
+  () => refreshCanvas(),
+  { deep: true },
+)
 </script>
 
 <template>
-  <div class="force-graph-2d" data-testid="graph-2d-fallback">
-    <svg :viewBox="`0 0 ${WIDTH} ${HEIGHT}`" class="graph-svg">
-      <line
-        v-for="edge in simEdges"
-        :key="`${edge.source}-${edge.target}`"
-        :x1="getSourceNode(edge)?.x ?? 0"
-        :y1="getSourceNode(edge)?.y ?? 0"
-        :x2="getTargetNode(edge)?.x ?? 0"
-        :y2="getTargetNode(edge)?.y ?? 0"
-        :stroke="nodeColor(edge.relation_type)"
-        stroke-opacity="0.4"
-        :stroke-width="edge.weight * 2 + 0.5"
-      />
-      <g v-for="node in simNodes" :key="node.id">
-        <circle
-          :cx="node.x"
-          :cy="node.y"
-          :r="nodeRadius(node.importance_score)"
-          :fill="nodeColor(node.type)"
-          fill-opacity="0.85"
-          :stroke="nodeColor(node.type)"
-          stroke-opacity="0.4"
-          stroke-width="2"
-        />
-        <text
-          :x="node.x"
-          :y="node.y + nodeRadius(node.importance_score) + 12"
-          text-anchor="middle"
-          class="node-label"
-        >{{ node.label }}</text>
-      </g>
-    </svg>
-  </div>
+  <div ref="host" class="force-graph-2d" data-testid="graph-2d" />
 </template>
 
 <style scoped>
@@ -215,18 +298,20 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   min-height: 300px;
-}
-
-.graph-svg {
-  width: 100%;
-  height: 100%;
-  background: radial-gradient(ellipse at 30% 40%, #0d0d2b 0%, #060614 50%, #020208 100%);
+  overflow: hidden;
   border-radius: var(--radius, 8px);
+  background:
+    radial-gradient(circle at 25% 20%, rgba(59, 130, 246, 0.08), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
+    #080912;
 }
 
-.node-label {
-  font-size: 10px;
-  fill: rgba(255, 255, 255, 0.7);
-  pointer-events: none;
+.force-graph-2d :deep(canvas) {
+  display: block;
+  cursor: grab;
+}
+
+.force-graph-2d :deep(canvas:active) {
+  cursor: grabbing;
 }
 </style>

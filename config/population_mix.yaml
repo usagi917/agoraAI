@@ -59,7 +59,35 @@ population:
 
   # 社会ネットワーク
   network:
-    type: watts_strogatz
+    type: hybrid
     k: 6          # 各ノードの近傍接続数
     beta: 0.3     # 再配線確率
+    m: 3          # BA ネットワークの新規ノードあたり接続数
+    ba_ratio: 0.3 # hybrid 時の BA エッジ割合 (0.0=WS のみ, 1.0=BA のみ)
     cluster_by_attributes: true
+
+# 精度改善機能のオン/オフフラグ（replay 再現性確保用）
+# false にすると対応機能を無効化してベースライン動作と比較できる
+accuracy_improvements:
+  memory_anchor: true          # FJ-MM 記憶効果（Step 8）
+  confirmation_bias: true      # Motivated cognition 確証バイアス（Step 8）
+  bayesian_param_opt: true     # Optuna TPE パラメータ推定（Step 8）
+  event_loss_aversion: true    # Prospect Theory 非対称イベント効果（Step 9）
+  event_two_phase_decay: true  # Two-phase event decay（Step 9）
+  ipf_population_weights: true # IPF 代表性補正（Step 6）
+  agreeableness_in_dynamics: true   # Agreeableness→confidence 閾値（改善3）
+  hybrid_network: true              # Barabási-Albert ハイブリッドネットワーク（改善2）
+  post_activation_persona: true     # ペルソナ生成を activation 後に移動（改善1）
+  meeting_feedback_propagation: true  # 会議→母集団フィードバック伝播（改善4）
+  episodic_memory: true               # 二層メモリ Layer B: テーマ付きエピソード記録+検索
+  rolling_summary: true               # 二層メモリ Layer A: LLM性格要約
+  # Wondrous Prancing Crayon: 純粋群知能 + 時間軸予測
+  time_axis_orchestrator: true        # t0..t5 時系列予測 (デフォルトで有効化)
+  cascade_propagation: false          # 多段階会話伝播 (society_orchestrator 統合は次フェーズ)
+  bayesian_belief_update: false       # ベイジアン信念更新 (society_orchestrator 統合は次フェーズ)
+  multi_outcome_market: false         # 多銘柄 LMSR (society_orchestrator 統合は次フェーズ)
+  monte_carlo_ensemble: false         # Monte Carlo Ensemble (next phase)
+  calibration_learner: false          # 自動キャリブレーション学習
+  diversity_enforcement: false        # 多様性強制
+  population_drift: false             # 人口 drift
+  temporal_report: false              # 時系列統合レポート

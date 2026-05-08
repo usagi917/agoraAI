@@ -43,14 +43,16 @@ class TestSnapshotCapture:
     @pytest.mark.asyncio
     async def test_save_snapshot(self, db_session):
         from src.app.evaluation.snapshot import save_experiment_snapshot
-        from src.app.repositories.simulation_repo import SimulationRepository
         from src.app.models.experiment_config import ExperimentConfig
+        from src.app.models.simulation import Simulation
 
-        sim_repo = SimulationRepository(db_session)
-        sim = await sim_repo.create(
+        sim = Simulation(
             mode="standard", prompt_text="test",
             template_name="g", execution_profile="preview",
         )
+        db_session.add(sim)
+        await db_session.commit()
+        await db_session.refresh(sim)
 
         with patch("src.app.evaluation.snapshot.capture_git_hash", return_value="abc123"):
             with patch("src.app.evaluation.snapshot.capture_packages", return_value={"sqlalchemy": "2.0.0"}):

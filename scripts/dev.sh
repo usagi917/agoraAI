@@ -1,19 +1,45 @@
 #!/usr/bin/env bash
+# backend (uvicorn) + frontend (vite) を 1 コマンドで起動する
+# 使い方: ./scripts/dev.sh [--backend-port 8000] [--frontend-port 5173]
+# Ctrl+C で両方停止
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 
-backend_pid=""
-frontend_pid=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --backend-port)
+      BACKEND_PORT="$2"
+      shift 2
+      ;;
+    --frontend-port)
+      FRONTEND_PORT="$2"
+      shift 2
+      ;;
+    -h|--help)
+      echo "Usage: $0 [--backend-port N] [--frontend-port N]"
+      exit 0
+      ;;
+    *)
+      echo "unknown arg: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+PIDS=()
 
 cleanup() {
-  if [[ -n "${backend_pid}" ]]; then
-    kill "${backend_pid}" 2>/dev/null || true
-  fi
-  if [[ -n "${frontend_pid}" ]]; then
-    kill "${frontend_pid}" 2>/dev/null || true
+  if [[ ${#PIDS[@]} -gt 0 ]]; then
+    echo
+    echo "[dev.sh] stopping..."
+    for pid in "${PIDS[@]}"; do
+      kill "$pid" 2>/dev/null || true
+    done
+    wait 2>/dev/null || true
   fi
 }
 
@@ -23,38 +49,33 @@ trap 'cleanup; exit 143' TERM
 
 if [[ ! -f "${ROOT_DIR}/.env" && -f "${ROOT_DIR}/.env.example" ]]; then
   cp "${ROOT_DIR}/.env.example" "${ROOT_DIR}/.env"
-  echo "Created .env from .env.example"
+  echo "[dev.sh] created .env from .env.example"
 fi
 
 if [[ ! -d "${ROOT_DIR}/backend/.venv" ]]; then
-  echo "Installing backend dependencies..."
+  echo "[dev.sh] installing backend dependencies..."
   (cd "${ROOT_DIR}/backend" && uv sync --extra dev)
 fi
 
 if [[ ! -d "${ROOT_DIR}/frontend/node_modules" ]]; then
-  echo "Installing frontend dependencies..."
+  echo "[dev.sh] installing frontend dependencies..."
   (cd "${ROOT_DIR}/frontend" && pnpm install)
 fi
 
-echo "Starting backend on http://localhost:${BACKEND_PORT}"
-(cd "${ROOT_DIR}/backend" && uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port "${BACKEND_PORT}") &
-backend_pid="$!"
+echo "[dev.sh] backend  -> http://localhost:${BACKEND_PORT}"
+echo "[dev.sh] frontend -> http://localhost:${FRONTEND_PORT}"
+echo
 
-echo "Starting frontend on http://localhost:${FRONTEND_PORT}"
-(cd "${ROOT_DIR}/frontend" && pnpm dev --host 0.0.0.0 --port "${FRONTEND_PORT}") &
-frontend_pid="$!"
+(
+  cd "${ROOT_DIR}/backend"
+  uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port "${BACKEND_PORT}" 2>&1 | sed 's/^/[backend] /'
+) &
+PIDS+=("$!")
 
-echo "Press Ctrl+C to stop both servers."
-while true; do
-  if ! kill -0 "${backend_pid}" 2>/dev/null; then
-    echo "Backend stopped."
-    exit 1
-  fi
+(
+  cd "${ROOT_DIR}/frontend"
+  pnpm dev --host 0.0.0.0 --port "${FRONTEND_PORT}" 2>&1 | sed 's/^/[frontend] /'
+) &
+PIDS+=("$!")
 
-  if ! kill -0 "${frontend_pid}" 2>/dev/null; then
-    echo "Frontend stopped."
-    exit 1
-  fi
-
-  sleep 1
-done
+wait

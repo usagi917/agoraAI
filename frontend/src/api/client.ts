@@ -142,6 +142,40 @@ export interface QualitySummary {
   issues: string[]
 }
 
+export interface ValidationSummary {
+  survey_anchor_status: string
+  distribution_error: {
+    kl_divergence?: number | null
+    emd?: number | null
+  } | null
+  scenario_backtest_status: string
+  hit_rate: number | null
+  calibration_status: string
+  matched_survey_count?: number
+  best_match_source?: string
+  corrected_distribution?: Record<string, number> | null
+  transfer_uncertainty?: number | null
+}
+
+export interface PredictionEvaluationBucket {
+  count: number
+  validated_count: number
+  best_variant?: string
+  avg_calibration_improvement?: number
+  hit_rate?: number | null
+  mean_reciprocal_rank?: number | null
+  probability_brier?: number | null
+  direction_accuracy?: number | null
+  mae?: number | null
+}
+
+export interface PredictionEvaluationSummary {
+  distribution?: PredictionEvaluationBucket
+  scenario?: PredictionEvaluationBucket
+  intervention?: PredictionEvaluationBucket
+  [key: string]: PredictionEvaluationBucket | undefined
+}
+
 export interface RunConfig {
   evidence_mode: 'strict' | 'prefer' | 'off'
   trust_mode: string
@@ -212,6 +246,12 @@ export interface DecisionOptionComparison {
   when_to_choose?: string
 }
 
+export interface DecisionScorecardItem {
+  label: string
+  value: string
+  detail?: string
+}
+
 export interface ScenarioReport {
   description: string
   probability?: number
@@ -244,6 +284,8 @@ export interface SimulationReportBase {
   evidence_refs: EvidenceRef[]
   run_config: RunConfig
   quality: QualitySummary
+  validation_summary?: ValidationSummary
+  prediction_evaluations?: PredictionEvaluationSummary
   verification?: VerificationSummary | null
 }
 
@@ -342,8 +384,32 @@ export interface SocietyFirstIntervention {
   observed_downside?: number | null
   uncertainty?: number | null
   observed_case_count?: number
+  direction_accuracy?: number | null
+  effect_mae?: number | null
+  predicted_effects?: SocietyFirstInterventionEffect[]
+  effect_comparisons?: SocietyFirstInterventionEffectComparison[]
   supporting_signals?: string[]
   supporting_evidence?: SocietyFirstInterventionEvidence[]
+}
+
+export interface SocietyFirstInterventionEffect {
+  intervention_id: string
+  metric: string
+  expected_delta: number
+  direction: string
+  confidence: number
+  time_horizon: string
+}
+
+export interface SocietyFirstInterventionEffectComparison {
+  metric: string
+  metric_label: string
+  expected_delta: number
+  actual_delta: number
+  direction: string
+  actual_direction: string
+  direction_match: boolean
+  absolute_error: number
 }
 
 export interface SocietyFirstInterventionEvidence {
@@ -361,14 +427,22 @@ export interface SocietyFirstInterventionEvidence {
 export interface SocietyFirstBacktestMatch {
   issue_id: string
   issue_label: string
+  outcome_label?: string
   scenario_description: string
+  probability?: number
+  horizon?: string
+  leading_indicators?: string[]
+  affected_segments?: string[]
   predicted_score: number
   actual_summary: string
   actual_scenario: string
   match_score: number
   label_match: number
+  outcome_label_match?: number
   text_overlap: number
+  indicator_overlap?: number
   tag_overlap: number
+  probability_brier?: number
   verdict: 'hit' | 'partial_hit' | 'miss'
   reasons: string[]
 }
@@ -421,8 +495,11 @@ export interface SocietyFirstBacktestSummary {
   partial_hit_count: number
   miss_count: number
   hit_rate: number
+  partial_hit_rate?: number
   issue_hit_count: number
   issue_hit_rate: number
+  scenario_probability_brier?: number | null
+  mean_reciprocal_rank?: number | null
 }
 
 export interface SocietyFirstBacktestResponse {
@@ -500,6 +577,15 @@ export interface MetaSimulationReportResponse extends SimulationReportBase {
   scenarios?: ScenarioReport[]
 }
 
+export interface ConversationHighlights {
+  summary: string
+  source_phase: 'council' | 'meeting' | 'discussion'
+  consensus: Array<{ point: string; impact: string }>
+  conflicts: Array<{ point: string; status: string; impact: string }>
+  turning_points: Array<{ moment: string; why_it_changed: string }>
+  key_quotes: Array<{ speaker: string; quote: string; decision_impact: string }>
+}
+
 export interface DecisionBrief {
   recommendation: 'Go' | 'No-Go' | '条件付きGo'
   agreement_score?: number
@@ -513,8 +599,10 @@ export interface DecisionBrief {
   next_decisions?: DecisionNextDecision[]
   recommended_actions?: DecisionAction[]
   option_comparison?: DecisionOptionComparison[]
+  decision_scorecard?: DecisionScorecardItem[]
   confidence_explainer?: string
   evidence_gaps?: string[]
+  followup_prompts?: string[]
   options?: Array<{ label: string; expected_effect: string; risk: string }>
   strongest_counterargument?: string
   risk_factors?: Array<{ condition: string; impact: string }>
@@ -525,6 +613,7 @@ export interface DecisionBrief {
     long_term: { period: string; prediction: string }
   }
   stakeholder_reactions?: Array<{ group: string; reaction: string; percentage: number }>
+  conversation_highlights?: ConversationHighlights
 }
 
 export interface UnifiedReportResponse extends SimulationReportBase {
@@ -785,8 +874,14 @@ export async function getSocialGraph(simId: string): Promise<SocialGraphResponse
   return data
 }
 
-export async function getAgentDetail(simId: string, agentId: string): Promise<AgentDetailResponse> {
-  const { data } = await api.get(`/society/simulations/${simId}/agents/${agentId}`)
+export async function getAgentDetail(
+  simId: string,
+  agentId: string,
+  options?: { signal?: AbortSignal },
+): Promise<AgentDetailResponse> {
+  const { data } = await api.get(`/society/simulations/${simId}/agents/${agentId}`, {
+    signal: options?.signal,
+  })
   return data
 }
 
@@ -894,7 +989,7 @@ export interface TranscriptEntry {
   created_at: string
 }
 
-export interface TranscriptResponse {
+interface TranscriptResponse {
   simulation_id: string
   total_entries: number
   entries: TranscriptEntry[]
@@ -909,5 +1004,53 @@ export async function getTranscript(
   if (phase) params.phase = phase
   if (round != null) params.round = String(round)
   const { data } = await api.get(`/society/simulations/${simId}/transcript`, { params })
+  return data
+}
+
+// === Time-axis (t0..t5) Prediction API ===
+
+export interface TimelineEntry {
+  key: string
+  label: string
+  delta_days: number
+  t_index: number
+  distribution: Record<string, number>
+  driving_factors: { stance: string; delta: number }[]
+  credible_intervals?: Record<string, Record<string, { lower: number; median: number; upper: number }>>
+  market_prices?: number[]
+  metadata?: Record<string, unknown>
+}
+
+export interface WhatIfEntry {
+  key: string
+  delta: Record<string, number>
+  baseline: Record<string, number>
+  alternative: Record<string, number>
+}
+
+export interface TimeAxisReport {
+  theme: string
+  timeline: TimelineEntry[]
+  summary: { long_term_shift: Record<string, number>; horizons: number; from?: string; to?: string }
+  what_if?: WhatIfEntry[]
+}
+
+export interface EnsembleResponse {
+  bands: { key: string; label: string; distribution: Record<string, number>; credible_intervals?: TimelineEntry['credible_intervals'] }[]
+  horizons: number
+}
+
+export async function getTimeAxis(simId: string): Promise<TimeAxisReport> {
+  const { data } = await api.get(`/society/simulations/${simId}/time-axis`)
+  return data
+}
+
+export async function getEnsemble(simId: string): Promise<EnsembleResponse> {
+  const { data } = await api.get(`/society/simulations/${simId}/ensemble`)
+  return data
+}
+
+export async function getTemporalReport(simId: string): Promise<TimeAxisReport> {
+  const { data } = await api.get(`/society/simulations/${simId}/report`)
   return data
 }

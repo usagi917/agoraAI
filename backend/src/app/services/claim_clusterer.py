@@ -5,7 +5,6 @@ Phase 2: LLM でクラスタ間の意味的重複を検出し統合
 Phase 3: 代表テキストを LLM で再生成（複数主張の統合要約）
 """
 
-import json
 import logging
 import uuid
 

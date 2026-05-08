@@ -118,7 +118,6 @@ export function useSimulationSSE(simulationId: string) {
       // Unified モード イベント
       'unified_phase_changed',
       'persona_generation_started',
-      'report_completed',
       // Meeting Layer イベント
       'meeting_started',
       'meeting_dialogue',
@@ -410,8 +409,13 @@ export function useSimulationSSE(simulationId: string) {
 
       case 'report_completed':
         store.setReportError('')
-        store.setStatus('running')
+        if (store.status === 'generating_report') {
+          store.setStatus('running')
+        }
         activity.addEntry('event', '▣', 'レポート生成完了', {
+          detail: payload.agreement_score != null
+            ? `合意度: ${(payload.agreement_score * 100).toFixed(0)}%`
+            : undefined,
           track: 'report',
           status: 'completed',
         })
@@ -586,8 +590,15 @@ export function useSimulationSSE(simulationId: string) {
 
       // === Unified モード ===
       case 'unified_phase_changed':
+        if (
+          ['society_pulse', 'council', 'synthesis'].includes(String(payload.phase))
+          && !store.isUnifiedMode
+        ) {
+          store.setMode('standard')
+        }
         store.setUnifiedPhase(payload.phase || 'idle')
         store.setUnifiedPhaseIndex(payload.index || 0, payload.total || 3)
+        store.setPhase(`unified_${payload.phase || 'idle'}`)
         store.setStatus('running')
         {
           const phaseLabels: Record<string, string> = {
@@ -610,16 +621,6 @@ export function useSimulationSSE(simulationId: string) {
         activity.addEntry('event', '✦', `ペルソナ生成開始 (${payload.agent_count || 0}人)`, {
           track: 'agent',
           status: 'running',
-        })
-        break
-
-      case 'report_completed':
-        activity.addEntry('event', '◈', 'レポート生成完了', {
-          detail: payload.agreement_score != null
-            ? `合意度: ${(payload.agreement_score * 100).toFixed(0)}%`
-            : undefined,
-          track: 'report',
-          status: 'completed',
         })
         break
 

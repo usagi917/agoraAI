@@ -1,14 +1,13 @@
 """LLM API クライアント: OpenAI / Ollama 対応 + JSON 抽出 + retry"""
 
 import asyncio
-import json
 import logging
-import re
 from typing import Any, Callable, Optional
 
 import httpx
 
 from src.app.config import settings
+from src.app.llm.json_extraction import extract_json as _extract_json
 from src.app.llm.rate_limiter import RateLimiter
 from src.app.llm.validator import get_task_validator
 
@@ -44,38 +43,6 @@ REQUIRED_TASKS = {
     "tom_infer",
     "world_build",
 }
-
-
-def _extract_json(text: str) -> Optional[Any]:
-    """テキストから JSON を抽出する。thinking タグや markdown コードブロックに対応。"""
-    # thinking タグを除去
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    text = text.strip()
-
-    # そのまま JSON パース
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # ```json ... ``` ブロック抽出
-    match = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1).strip())
-        except json.JSONDecodeError:
-            pass
-
-    # { ... } の最初と最後のマッチを探す
-    first_brace = text.find("{")
-    last_brace = text.rfind("}")
-    if first_brace >= 0 and last_brace > first_brace:
-        try:
-            return json.loads(text[first_brace : last_brace + 1])
-        except json.JSONDecodeError:
-            pass
-
-    return None
 
 
 def _merge_usage(usage1: dict, usage2: dict) -> dict:
@@ -177,7 +144,7 @@ class LLMClient:
         }
         if self._uses_reasoning_controls(model):
             if temperature not in (1, 1.0):
-                logger.info(
+                logger.debug(
                     "Skipping unsupported temperature override for reasoning model %s: %s",
                     model,
                     temperature,

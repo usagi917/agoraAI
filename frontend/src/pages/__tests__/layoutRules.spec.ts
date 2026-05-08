@@ -108,12 +108,34 @@ describe('layoutRules', () => {
         mode: 'society_first',
         hasColonies: true,
         hasActivity: true,
-      })).toEqual(['progress', 'debate', 'society', 'activity', 'colonies', 'dialogue', 'connections'])
+      })).toEqual(['conversations', 'progress', 'analysis', 'debate'])
       expect(getDefaultLiveSecondaryTab({
         mode: 'society_first',
         hasColonies: true,
         hasActivity: true,
-      })).toBe('society')
+      })).toBe('conversations')
+    })
+
+    it('uses consolidated tabs for all society modes', () => {
+      for (const mode of ['quick', 'standard', 'deep', 'research', 'society', 'unified', 'meta_simulation']) {
+        expect(getLiveSecondaryTabs({ mode, hasColonies: false, hasActivity: false }))
+          .toEqual(['conversations', 'progress', 'analysis', 'debate'])
+        expect(getDefaultLiveSecondaryTab({ mode, hasColonies: false, hasActivity: false }))
+          .toBe('conversations')
+      }
+    })
+
+    it('uses progress/colonies/activity for pipeline modes', () => {
+      expect(getLiveSecondaryTabs({
+        mode: 'pipeline',
+        hasColonies: true,
+        hasActivity: true,
+      })).toEqual(['progress', 'colonies', 'activity'])
+      expect(getLiveSecondaryTabs({
+        mode: 'swarm',
+        hasColonies: false,
+        hasActivity: true,
+      })).toEqual(['progress', 'activity'])
     })
 
     it('keeps progress first for standard simulation modes', () => {

@@ -26,16 +26,6 @@ vi.mock('vue-router', () => ({
 
 vi.mock('../../api/client', () => apiMocks)
 
-vi.mock('../../composables/useForceGraph', () => ({
-  useForceGraph: () => ({
-    setFullGraph: vi.fn(),
-    startGraphTransition: vi.fn(),
-    updateGraphTransition: vi.fn(),
-    finishGraphTransition: vi.fn(),
-    graphError: null,
-  }),
-}))
-
 const unifiedReport = {
   type: 'unified',
   content: '# 統合レポート\n\n市場参入は推奨されます。',
@@ -53,6 +43,15 @@ const unifiedReport = {
     issues: [],
   },
   verification: null,
+  validation_summary: {
+    survey_anchor_status: '実調査アンカーあり',
+    distribution_error: { kl_divergence: 0.12, emd: 0.08 },
+    scenario_backtest_status: 'no_data',
+    hit_rate: null,
+    calibration_status: 'survey_anchored',
+    matched_survey_count: 1,
+    best_match_source: 'sample survey',
+  },
   decision_brief: {
     recommendation: 'Go',
     agreement_score: 0.82,
@@ -64,6 +63,9 @@ const unifiedReport = {
     ],
     guardrails: [
       { condition: '価格受容性が成立すること', status: '未検証', why_it_matters: '採算が変わる' },
+    ],
+    critical_unknowns: [
+      { question: '価格受容性を実測で確認できるか', importance: '採算判断の前提', how_to_validate: '顧客ヒアリング' },
     ],
     recommended_actions: [
       { action: '価格ヒアリングを実施', owner: 'CEO', deadline: '2週間', expected_learning: '価格受容性が分かる', priority: 'high' },
@@ -138,7 +140,7 @@ describe('ResultsPage — unified report', () => {
       transport: 'stdio',
       error: '',
     })
-    apiMocks.getTranscript.mockResolvedValue([])
+    apiMocks.getTranscript.mockResolvedValue({ entries: [] })
     apiMocks.getPropagation.mockResolvedValue(null)
   })
 
@@ -152,12 +154,7 @@ describe('ResultsPage — unified report', () => {
           ProbabilityChart: true,
           ScenarioCompare: true,
           AgreementHeatmap: true,
-          AgentMindView: true,
-          MemoryStreamViewer: true,
-          EvaluationDashboard: true,
-          ToMMapVisualization: true,
-          SocialNetworkDynamics: true,
-          KnowledgeGraphExplorer: true,
+          PropagationDashboard: true,
         },
       },
     })
@@ -175,7 +172,7 @@ describe('ResultsPage — unified report', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('市場参入を進めるが')
-    expect(wrapper.text()).toContain('価格受容性が成立すること')
+    expect(wrapper.text()).toContain('価格受容性を実測で確認できるか')
   })
 
   it('keeps report text visible below the decision brief workspace', async () => {
@@ -199,5 +196,14 @@ describe('ResultsPage — unified report', () => {
 
     expect(wrapper.text()).toContain('田中太郎')
     expect(wrapper.text()).toContain('佐藤花子')
+  })
+
+  it('shows compact validation status above the workspace', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const validation = wrapper.get('[data-testid="validation-summary"]')
+    expect(validation.text()).toContain('実調査アンカーあり')
+    expect(validation.text()).toContain('KL=0.120')
   })
 })

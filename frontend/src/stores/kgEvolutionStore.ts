@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { GraphNode, GraphEdge } from './graphStore'
 
-export interface KGEntityNode {
+interface KGEntityNode {
   id: string
   label: string
   type: string
@@ -10,7 +10,7 @@ export interface KGEntityNode {
   round: number
 }
 
-export interface KGRelationEdge {
+interface KGRelationEdge {
   id: string
   source: string
   target: string
