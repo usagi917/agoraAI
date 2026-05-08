@@ -14,7 +14,7 @@
 - Switch between five presets: `quick`, `standard`, `deep`, `research`, and `baseline`.
 - Attach `.txt`, `.md`, and `.pdf` files to a project and run evidence-aware analysis on top of them.
 - Follow progress live over SSE with activity feed, social response views, conversations, and graph updates.
-- Review Decision Briefs, scenario comparison, propagation analysis, transcripts, reruns, and follow-up questions on the results page.
+- Review Decision Briefs, scenario comparison, propagation analysis, transcripts, reruns, and Codex Review Agent questions on the results page.
 - Generate, inspect, and fork synthetic populations from `/populations`.
 - Start Decision Lab from `/compare`, then run two scenarios against the same population side by side to compare opinion shifts, coalition changes, and audit trails.
 - Theater UI shows debate cards, live dialogue streams, and real-time stance shifts during simulation.
@@ -53,7 +53,7 @@ How to read it:
 | --- | --- | --- |
 | `/` | LaunchPad | question templates, free-form prompt, file upload, preset selection, run history |
 | `/sim/:id` | Live Simulation | SSE progress, activity feed, social response views, conversations, live graph, Theater UI (debate cards, dialogue stream) |
-| `/sim/:id/results` | Results | Decision Brief, scenario comparison, propagation, transcript, follow-up |
+| `/sim/:id/results` | Results | Decision Brief, scenario comparison, propagation, transcript, Codex Review |
 | `/populations` | Populations | generation, listing, detail view, forking |
 | `/compare` | Compare Setup | configure two scenarios, execution presets, and population settings for comparison |
 | `/scenario/:id` | Decision Lab | scenario pair comparison, opinion shift table, coalition map, audit timeline |
@@ -298,6 +298,9 @@ REDIS_URL=redis://localhost:6379/0
 | Population mix | `config/population_mix.yaml` |
 | GraphRAG / grounding | `config/graphrag.yaml`, `config/grounding/` |
 | LaunchPad templates | `templates/ja/*.yaml` |
+| Codex Review settings | `.env` variables `CODEX_REVIEW_ENABLED`, `CODEX_BIN`, `CODEX_REVIEW_TRANSPORT`, `CODEX_REVIEW_TIMEOUT_SECONDS`, `CODEX_REVIEW_MOCK`, `CODEX_REVIEW_MAX_CONTEXT_CHARS`, `CODEX_REVIEW_WORKDIR` |
+
+To use the AI check feature, install the Codex CLI, log in, start the backend with `CODEX_REVIEW_ENABLED=true`, and let the backend launch `codex app-server --listen stdio://` over stdio. v1 uses stdio only and limits Codex to read-only checks against completed reports. The legacy `AGORAAI_CODEX_*` variables are still read as compatibility aliases.
 
 ## Main API
 
@@ -319,7 +322,8 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/simulations/{sim_id}/colonies` | colony-level execution state |
 | `GET/POST` | `/simulations/{sim_id}/backtest` | read or run backtests |
 | `GET` | `/simulations/{sim_id}/audit-trail` | audit trail for scenario comparison |
-| `POST` | `/simulations/{sim_id}/followups` | ask follow-up questions against the result |
+| `GET` | `/codex/health` | Codex App Server connection status |
+| `POST` | `/simulations/{sim_id}/codex-review` | ask Codex review questions against a completed report |
 | `POST` | `/simulations/{sim_id}/rerun` | rerun with the same conditions |
 | `POST` | `/scenario-pairs` | start a scenario comparison |
 | `GET` | `/scenario-pairs/{scenario_pair_id}` | get scenario comparison status |
@@ -337,7 +341,6 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/runs/{run_id}/timeline` | get run timeline |
 | `GET` | `/runs/{run_id}/events` | get run events |
 | `GET` | `/runs/{run_id}/graph` | get run graph |
-| `POST` | `/runs/{run_id}/followups` | ask follow-up questions against a run |
 | `POST` | `/runs/{run_id}/rerun` | rerun a run |
 
 ### Society and operational endpoints

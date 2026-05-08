@@ -115,12 +115,6 @@ tasks:
     max_tokens: 2048
     reasoning_effort: low
 
-  followup:
-    model: gpt-5.4-nano
-    temperature: 0.3
-    max_tokens: 4096
-    reasoning_effort: low
-
   swarm_report:
     model: gpt-5.4-nano
     temperature: 0.4

@@ -27,7 +27,6 @@ REQUIRED_TASKS = {
     "entity_dedup",
     "entity_extract",
     "final_report",
-    "followup",
     "gm_action_resolve",
     "gm_consistency_check",
     "memory_importance",

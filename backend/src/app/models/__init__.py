@@ -9,7 +9,7 @@ from src.app.models.graph_state import GraphState
 from src.app.models.graph_diff import GraphDiff
 from src.app.models.timeline_event import TimelineEvent
 from src.app.models.report import Report
-from src.app.models.followup import Followup
+from src.app.models.codex_review import CodexReview
 from src.app.models.token_usage import TokenUsage
 from src.app.models.log import Log
 from src.app.models.outcome_claim import OutcomeClaim
@@ -54,7 +54,7 @@ __all__ = [
     "GraphDiff",
     "TimelineEvent",
     "Report",
-    "Followup",
+    "CodexReview",
     "TokenUsage",
     "Log",
     "OutcomeClaim",

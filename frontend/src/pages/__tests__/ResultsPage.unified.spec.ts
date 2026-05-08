@@ -12,10 +12,11 @@ const apiMocks = vi.hoisted(() => ({
   getSimulationGraph: vi.fn(),
   getSimulationGraphHistory: vi.fn(),
   getSimulationColonies: vi.fn(),
-  submitSimulationFollowup: vi.fn(),
-  rerunSimulation: vi.fn(),
+  submitCodexReview: vi.fn(),
+  getCodexHealth: vi.fn(),
   getTranscript: vi.fn(),
   getPropagation: vi.fn(),
+  rerunSimulation: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -132,6 +133,13 @@ describe('ResultsPage — unified report', () => {
     apiMocks.getSimulationGraphHistory.mockResolvedValue([])
     apiMocks.getSimulationGraph.mockResolvedValue({ nodes: [], edges: [] })
     apiMocks.getSimulationColonies.mockResolvedValue([])
+    apiMocks.getCodexHealth.mockResolvedValue({
+      enabled: false,
+      available: false,
+      initialized: false,
+      transport: 'stdio',
+      error: '',
+    })
     apiMocks.getTranscript.mockResolvedValue({ entries: [] })
     apiMocks.getPropagation.mockResolvedValue(null)
   })

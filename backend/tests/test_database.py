@@ -93,6 +93,40 @@ async def test_sqlite_compatibility_migration_adds_simulation_scenario_pair_id(t
 
 
 @pytest.mark.asyncio
+async def test_sqlite_compatibility_migration_preserves_legacy_followups(tmp_path):
+    db_path = tmp_path / "legacy-followups.sqlite3"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
+
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                CREATE TABLE followups (
+                    id VARCHAR(36) NOT NULL,
+                    simulation_id VARCHAR(36) NOT NULL,
+                    question TEXT NOT NULL,
+                    answer TEXT NOT NULL,
+                    PRIMARY KEY (id)
+                )
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO followups (id, simulation_id, question, answer) "
+                "VALUES ('f1', 's1', 'q1', 'a1')"
+            )
+        )
+
+        await _apply_sqlite_compatibility_migrations(conn)
+
+        rows = await conn.execute(text("SELECT question, answer FROM followups"))
+        assert [tuple(row) for row in rows.fetchall()] == [("q1", "a1")]
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_sqlite_compatibility_migration_preserves_simulation_foreign_keys_and_indexes(tmp_path):
     db_path = tmp_path / "legacy-simulations-fks.sqlite3"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
@@ -181,14 +215,17 @@ class _FakeResult:
 
 
 class _FakePostgresConn:
-    def __init__(self):
+    def __init__(self, tables: list[str] | None = None):
         self.executed_sql: list[str] = []
+        self.tables = tables or ["simulations"]
 
     async def run_sync(self, fn):
+        tables = self.tables
+
         class _Dialect:
             @staticmethod
             def get_table_names(_conn):
-                return ["simulations"]
+                return tables
 
         class _SyncConn:
             dialect = _Dialect()
@@ -233,6 +270,15 @@ async def test_postgres_compatibility_migration_adds_simulation_scenario_pair_id
         "ALTER TABLE simulations ADD COLUMN scenario_pair_id VARCHAR(36)" in sql
         for sql in conn.executed_sql
     )
+
+
+@pytest.mark.asyncio
+async def test_postgres_compatibility_migration_preserves_legacy_followups():
+    conn = _FakePostgresConn(tables=["followups", "simulations"])
+
+    await _apply_postgres_compatibility_migrations(conn)
+
+    assert not any("DROP TABLE IF EXISTS followups" in sql for sql in conn.executed_sql)
 
 
 def test_simulation_model_excludes_legacy_swarm_columns():

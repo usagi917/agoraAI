@@ -20,6 +20,15 @@ export interface HealthResponse {
   live_simulation_message: string
 }
 
+export interface CodexHealthResponse {
+  enabled: boolean
+  available: boolean
+  initialized: boolean
+  transport: 'stdio'
+  mock?: boolean
+  error: string
+}
+
 export async function createProject(name: string) {
   const { data } = await api.post(`/projects?name=${encodeURIComponent(name)}`)
   return data
@@ -39,6 +48,11 @@ export async function getTemplates(): Promise<TemplateResponse[]> {
 
 export async function getHealth(): Promise<HealthResponse> {
   const { data } = await api.get('/health')
+  return data
+}
+
+export async function getCodexHealth(): Promise<CodexHealthResponse> {
+  const { data } = await api.get('/codex/health')
   return data
 }
 
@@ -692,8 +706,8 @@ export async function getSimulationTimeline(simId: string): Promise<SimulationTi
   return data
 }
 
-export async function submitSimulationFollowup(simId: string, question: string) {
-  const { data } = await api.post(`/simulations/${simId}/followups?question=${encodeURIComponent(question)}`)
+export async function submitCodexReview(simId: string, question: string) {
+  const { data } = await api.post(`/simulations/${simId}/codex-review`, { question })
   return data
 }
 

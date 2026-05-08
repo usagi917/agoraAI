@@ -203,34 +203,34 @@ onMounted(() => {
     .enableNodeDrag(true)
     .enableZoomInteraction(true)
     .enablePanInteraction(true)
-    .onNodeHover((node) => {
+    .onNodeHover((node: SimNode | null) => {
       hoveredNodeId.value = node?.id != null ? String(node.id) : null
       refreshCanvas()
     })
-    .onNodeClick((node, event) => {
+    .onNodeClick((node: SimNode, event: MouseEvent) => {
       if (event && event.detail >= 2) {
         // Double click releases the pinned position.
-        const sim = node as SimNode
+        const sim = node
         sim.fx = undefined
         sim.fy = undefined
         graph?.d3ReheatSimulation()
         return
       }
-      const np = toNodeProp(node as SimNode)
+      const np = toNodeProp(node)
       if (np) emit('select-node', np)
     })
-    .onNodeDragEnd((node) => {
-      const sim = node as SimNode
+    .onNodeDragEnd((node: SimNode) => {
+      const sim = node
       sim.fx = sim.x
       sim.fy = sim.y
       refreshCanvas()
     })
-    .onLinkClick((link) => {
-      const ep = toEdgeProp(link as SimLink)
+    .onLinkClick((link: SimLink) => {
+      const ep = toEdgeProp(link)
       if (ep) emit('select-edge', ep)
     })
-    .onLinkHover((link) => {
-      const ep = toEdgeProp(link as SimLink)
+    .onLinkHover((link: SimLink | null) => {
+      const ep = link ? toEdgeProp(link) : null
       emit('hover-edge', ep)
       refreshCanvas()
     })

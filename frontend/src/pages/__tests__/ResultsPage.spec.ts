@@ -12,7 +12,10 @@ const apiMocks = vi.hoisted(() => ({
   getSimulationGraph: vi.fn(),
   getSimulationGraphHistory: vi.fn(),
   getSimulationColonies: vi.fn(),
-  submitSimulationFollowup: vi.fn(),
+  submitCodexReview: vi.fn(),
+  getCodexHealth: vi.fn(),
+  getTranscript: vi.fn(),
+  getPropagation: vi.fn(),
   rerunSimulation: vi.fn(),
 }))
 
@@ -80,6 +83,15 @@ describe('ResultsPage', () => {
     apiMocks.getSimulationGraphHistory.mockResolvedValue([])
     apiMocks.getSimulationGraph.mockResolvedValue({ nodes: [], edges: [] })
     apiMocks.getSimulationColonies.mockResolvedValue([])
+    apiMocks.getCodexHealth.mockResolvedValue({
+      enabled: false,
+      available: false,
+      initialized: false,
+      transport: 'stdio',
+      error: '',
+    })
+    apiMocks.getTranscript.mockResolvedValue([])
+    apiMocks.getPropagation.mockResolvedValue(null)
   })
 
   it('renders unsupported quality state with strict error context', async () => {
@@ -103,6 +115,33 @@ describe('ResultsPage', () => {
     expect(banner.text()).toContain('Unsupported')
     expect(banner.text()).toContain('strict_document_evidence_required')
     expect(banner.text()).toContain('verification=failed')
+  })
+
+  it('disables AI check action when unavailable', async () => {
+    const wrapper = mount(ResultsPage, {
+      global: {
+        plugins: [createPinia()],
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+          TemporalSlider: true,
+          ProbabilityChart: true,
+          ScenarioCompare: true,
+          SocietyTimeline: true,
+          AgreementHeatmap: true,
+          AgentMindView: true,
+          MemoryStreamViewer: true,
+          EvaluationDashboard: true,
+          ToMMapVisualization: true,
+          SocialNetworkDynamics: true,
+          KnowledgeGraphExplorer: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('レビュー機能の準備ができていません')
+    expect(wrapper.get('.ai-check-primary').attributes('disabled')).toBeDefined()
   })
 
   it('renders society_first backtest and observed intervention comparison', async () => {

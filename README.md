@@ -14,7 +14,7 @@
 - `quick` / `standard` / `deep` / `research` / `baseline` の5つのプリセットで、速度と深さを切り替えられます。
 - `.txt` / `.md` / `.pdf` をプロジェクトに添付し、エビデンス付きの分析フローに載せられます。
 - ライブ画面では SSE で進捗を配信し、Activity Feed、社会反応、会話、グラフの変化を追跡できます。
-- 結果画面では Decision Brief、シナリオ比較、伝播分析、Transcript、再実行、フォローアップ質問を扱えます。
+- 結果画面では Decision Brief、シナリオ比較、伝播分析、Transcript、再実行、Codex Review Agent への質問を扱えます。
 - `/populations` では人口生成、一覧確認、世代 fork ができます。
 - `/compare` から Decision Lab を開始し、2つのシナリオを同一人口で並行実行して意見シフト・連合変動・監査証跡を比較できます。
 - Theater UI ではディベートカード、ライブ対話ストリーム、スタンス変化をリアルタイムに可視化します。
@@ -53,7 +53,7 @@ flowchart LR
 | --- | --- | --- |
 | `/` | LaunchPad | 質問テンプレート、自由入力、ファイル添付、プリセット選択、実行履歴 |
 | `/sim/:id` | Live Simulation | SSE 進捗、Activity Feed、社会反応、会話、ライブグラフ、Theater UI（ディベートカード・対話ストリーム） |
-| `/sim/:id/results` | Results | Decision Brief、シナリオ比較、Propagation、Transcript、Follow-up |
+| `/sim/:id/results` | Results | Decision Brief、シナリオ比較、Propagation、Transcript、Codex Review |
 | `/populations` | Populations | 人口生成、人口一覧、詳細表示、fork |
 | `/compare` | Compare Setup | 2つのシナリオ、実行プリセット、人口設定を指定して比較実行を開始 |
 | `/scenario/:id` | Decision Lab | シナリオペア比較、意見シフト表、連合マップ、監査タイムライン |
@@ -298,6 +298,9 @@ REDIS_URL=redis://localhost:6379/0
 | 人口構成 | `config/population_mix.yaml` |
 | GraphRAG / grounding | `config/graphrag.yaml`, `config/grounding/` |
 | LaunchPad テンプレート | `templates/ja/*.yaml` |
+| Codex Review 設定 | `.env` の `CODEX_REVIEW_ENABLED`, `CODEX_BIN`, `CODEX_REVIEW_TRANSPORT`, `CODEX_REVIEW_TIMEOUT_SECONDS`, `CODEX_REVIEW_MOCK`, `CODEX_REVIEW_MAX_CONTEXT_CHARS`, `CODEX_REVIEW_WORKDIR` |
+
+AI確認機能を使う場合は、Codex CLI をインストールしてログインした状態で backend を起動し、`CODEX_REVIEW_ENABLED=true` を設定してください。v1 は `codex app-server --listen stdio://` の stdio transport のみを使い、完了済みレポートへの読み取り専用確認に限定します。旧 `AGORAAI_CODEX_*` 変数も互換 alias として読み取ります。
 
 ## 主要 API
 
@@ -319,7 +322,8 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/simulations/{sim_id}/colonies` | colony 単位の実行状態 |
 | `GET/POST` | `/simulations/{sim_id}/backtest` | backtest 結果取得・実行 |
 | `GET` | `/simulations/{sim_id}/audit-trail` | シナリオ比較用の監査証跡 |
-| `POST` | `/simulations/{sim_id}/followups` | 結果に対する follow-up 質問 |
+| `GET` | `/codex/health` | Codex App Server 接続状態 |
+| `POST` | `/simulations/{sim_id}/codex-review` | 完了済みレポートへの Codex review 質問 |
 | `POST` | `/simulations/{sim_id}/rerun` | 同条件で再実行 |
 | `POST` | `/scenario-pairs` | シナリオ比較開始 |
 | `GET` | `/scenario-pairs/{scenario_pair_id}` | シナリオ比較の状態取得 |
@@ -337,7 +341,6 @@ REDIS_URL=redis://localhost:6379/0
 | `GET` | `/runs/{run_id}/timeline` | run タイムライン取得 |
 | `GET` | `/runs/{run_id}/events` | run イベント取得 |
 | `GET` | `/runs/{run_id}/graph` | run グラフ取得 |
-| `POST` | `/runs/{run_id}/followups` | run への follow-up 質問 |
 | `POST` | `/runs/{run_id}/rerun` | run 再実行 |
 
 ### Society / 運用系

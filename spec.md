@@ -1,7 +1,7 @@
 # agoraAI Codex App Server活用 仕様書
 
-作成日: 2026-05-07  
-対象: `usagi917/agoraAI`  
+作成日: 2026-05-07
+対象: `usagi917/agoraAI`
 仕様対象: Codex App Serverを用いた世界線分岐・外部エージェントレビュー・イベント統合機能
 
 ---

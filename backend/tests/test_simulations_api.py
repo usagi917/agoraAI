@@ -10,8 +10,9 @@ from src.app.config import settings
 from src.app.database import Base
 from src.app.main import app
 from src.app.models import _import_all_models
+from src.app.api.routes.codex import get_codex_review_service
+from src.app.models.codex_review import CodexReview
 from src.app.models.document import Document
-from src.app.models.followup import Followup
 from src.app.models.project import Project
 from src.app.models.report import Report
 from src.app.models.run import Run
@@ -653,37 +654,91 @@ async def test_get_meta_simulation_report_returns_meta_payload(client, session_f
 
 
 @pytest.mark.asyncio
-async def test_create_simulation_followup_returns_answer_and_relevant_evidence_refs(
+async def test_create_simulation_codex_review_returns_answer(
     client,
     session_factory,
     monkeypatch: pytest.MonkeyPatch,
 ):
     seeded = await _seed_single_simulation(session_factory)
 
-    async def _fake_handle_followup(*args, **kwargs):
-        return "規制変更の前提検証を先に進めるべきです。"
+    class FakeCodexReviewService:
+        async def review_simulation(self, session, simulation_id, question):
+            review = CodexReview(
+                id=str(uuid.uuid4()),
+                simulation_id=simulation_id,
+                run_id=seeded["run_id"],
+                question=question,
+                answer="規制変更の前提検証を先に進めるべきです。",
+                status="completed",
+            )
+            session.add(review)
+            await session.commit()
+            await session.refresh(review)
+            return review
 
+    monkeypatch.setattr(settings, "codex_enabled", True)
     monkeypatch.setattr(
-        "src.app.api.routes.simulations.handle_followup",
-        _fake_handle_followup,
+        "src.app.services.codex_bridge.client.CodexAppServerClient.command_available",
+        staticmethod(lambda: True),
     )
+    app.dependency_overrides[get_codex_review_service] = lambda: FakeCodexReviewService()
+
+    response = await client.post(
+        f"/simulations/{seeded['simulation_id']}/codex-review",
+        json={"question": "regulation risk matters?"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert payload["provider"] == "codex"
+    assert "規制変更" in payload["answer"]
+
+    async with session_factory() as session:
+        stored = await session.get(CodexReview, payload["id"])
+        assert stored is not None
+        assert stored.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_create_simulation_codex_review_disabled_returns_503(
+    client,
+    session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    seeded = await _seed_single_simulation(session_factory)
+    monkeypatch.setattr(settings, "codex_enabled", False)
+
+    response = await client.post(
+        f"/simulations/{seeded['simulation_id']}/codex-review",
+        json={"question": "regulation risk matters?"},
+    )
+
+    assert response.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_codex_health_reports_disabled_state(client, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings, "codex_enabled", False)
+
+    response = await client.get("/codex/health")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["enabled"] is False
+    assert payload["transport"] == "stdio"
+
+
+@pytest.mark.asyncio
+async def test_legacy_simulation_followup_endpoint_removed(client, session_factory):
+    seeded = await _seed_single_simulation(session_factory)
 
     response = await client.post(
         f"/simulations/{seeded['simulation_id']}/followups",
         params={"question": "regulation risk matters?"},
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "completed"
-    assert "規制変更" in payload["answer"]
-    assert payload["quality"]["trust_level"] == "high_trust"
-    assert any(ref["source_type"] == "document_chunk" for ref in payload["evidence_refs"])
-
-    async with session_factory() as session:
-        stored = await session.get(Followup, payload["id"])
-        assert stored is not None
-        assert stored.status == "completed"
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio
