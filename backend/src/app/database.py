@@ -309,6 +309,7 @@ async def _apply_postgres_compatibility_migrations(conn: AsyncConnection) -> Non
         CONVERSATION_LOG_PARTICIPANT_ROLE_MAX_LENGTH,
         CONVERSATION_LOG_STANCE_MAX_LENGTH,
     )
+    from src.app.models.society_result import SOCIETY_RESULT_LAYER_MAX_LENGTH
 
     existing_tables = await _get_existing_tables(conn)
 
@@ -370,6 +371,28 @@ async def _apply_postgres_compatibility_migrations(conn: AsyncConnection) -> Non
         ]:
             if col_name not in vr_columns:
                 await conn.execute(text(col_ddl))
+
+    if "society_results" in existing_tables:
+        result = await conn.execute(
+            text(
+                """
+                SELECT character_maximum_length
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'society_results'
+                  AND column_name = 'layer'
+                """
+            )
+        )
+        current_layer_length = result.scalar()
+
+        if (current_layer_length or 0) < SOCIETY_RESULT_LAYER_MAX_LENGTH:
+            await conn.execute(
+                text(
+                    f"ALTER TABLE society_results ALTER COLUMN layer "
+                    f"TYPE VARCHAR({SOCIETY_RESULT_LAYER_MAX_LENGTH})"
+                )
+            )
 
     if "conversation_logs" not in existing_tables:
         return
