@@ -100,6 +100,85 @@ class SocietyPulseResult:
     validation_summary: dict | None = None
 
 
+async def _run_population_propagation_phase(
+    *,
+    simulation_id: str,
+    pop_id: str,
+    agents: list[dict],
+    selected_agents: list[dict],
+    individual_responses: list[dict],
+    all_edges: list[dict],
+    aggregation: dict,
+    session: Any,
+    seed: int | None,
+    propagation_cfg: dict,
+) -> None:
+    """全人口意見伝播フェーズ。失敗しても本流を止めない（警告ログのみ）。
+
+    activation 完了後、未活性化の大衆へ意見を伝播させ、ラウンドごとに SSE 配信し、
+    結果を population_propagation レイヤーとして永続化する。aggregation には
+    population_stance_distribution を in-place で追記する。
+
+    伝播が無効、または未活性化の大衆が居ない（全員選抜済み）場合は何もしない。
+    """
+    if not (propagation_cfg["enabled"] and len(agents) > len(selected_agents)):
+        return
+    try:
+        await sse_manager.publish(simulation_id, "population_propagation_started", {
+            "population_count": len(agents),
+            "edge_count": len(all_edges),
+            "max_timesteps": propagation_cfg["max_timesteps"],
+        })
+
+        async def on_propagation_round(delta):
+            await sse_manager.publish(simulation_id, "population_propagation_round", {
+                "round": delta.round,
+                "changes": [
+                    {"i": c["agent_index"], "s": c["stance"]}
+                    for c in delta.changes
+                ],
+                "changed_count": delta.changed_count,
+                "distribution": delta.distribution,
+            })
+
+        propagation_result = await run_population_propagation(
+            agents,
+            individual_responses,
+            all_edges,
+            seed=seed,
+            max_timesteps=propagation_cfg["max_timesteps"],
+            confidence_threshold=propagation_cfg["confidence_threshold"],
+            on_round=on_propagation_round,
+        )
+
+        aggregation["population_stance_distribution"] = propagation_result.distribution
+
+        session.add(SocietyResult(
+            id=str(uuid.uuid4()),
+            simulation_id=simulation_id,
+            population_id=pop_id,
+            layer="population_propagation",
+            phase_data={
+                "population_count": len(agents),
+                "distribution": propagation_result.distribution,
+                "total_rounds": propagation_result.total_rounds,
+                "converged": propagation_result.converged,
+                "changed_per_round": [d.changed_count for d in propagation_result.rounds],
+            },
+            usage={},
+        ))
+        await session.commit()
+
+        await sse_manager.publish(simulation_id, "population_propagation_completed", {
+            "distribution": propagation_result.distribution,
+            "converged": propagation_result.converged,
+            "total_rounds": propagation_result.total_rounds,
+            "changed_total": sum(d.changed_count for d in propagation_result.rounds),
+        })
+    except Exception as e:
+        logger.warning("Population propagation failed, continuing: %s", e)
+
+
 async def run_society_pulse(
     session: Any,
     sim: Simulation,
@@ -273,64 +352,18 @@ async def run_society_pulse(
     })
 
     # === Population Propagation: 全人口への意見伝播 ===
-    propagation_cfg = _propagation_config()
-    if propagation_cfg["enabled"] and len(agents) > len(selected_agents):
-        try:
-            await sse_manager.publish(simulation_id, "population_propagation_started", {
-                "population_count": len(agents),
-                "edge_count": len(all_edges),
-                "max_timesteps": propagation_cfg["max_timesteps"],
-            })
-
-            async def on_propagation_round(delta):
-                await sse_manager.publish(simulation_id, "population_propagation_round", {
-                    "round": delta.round,
-                    "changes": [
-                        {"i": c["agent_index"], "s": c["stance"]}
-                        for c in delta.changes
-                    ],
-                    "changed_count": delta.changed_count,
-                    "distribution": delta.distribution,
-                })
-
-            propagation_result = await run_population_propagation(
-                agents,
-                individual_responses,
-                all_edges,
-                seed=sim.seed,
-                max_timesteps=propagation_cfg["max_timesteps"],
-                confidence_threshold=propagation_cfg["confidence_threshold"],
-                on_round=on_propagation_round,
-            )
-
-            activation_result["aggregation"]["population_stance_distribution"] = (
-                propagation_result.distribution
-            )
-
-            session.add(SocietyResult(
-                id=str(uuid.uuid4()),
-                simulation_id=simulation_id,
-                population_id=pop_id,
-                layer="population_propagation",
-                phase_data={
-                    "population_count": len(agents),
-                    "distribution": propagation_result.distribution,
-                    "total_rounds": propagation_result.total_rounds,
-                    "converged": propagation_result.converged,
-                    "changed_per_round": [d.changed_count for d in propagation_result.rounds],
-                },
-                usage={},
-            ))
-            await session.commit()
-
-            await sse_manager.publish(simulation_id, "population_propagation_completed", {
-                "distribution": propagation_result.distribution,
-                "converged": propagation_result.converged,
-                "total_rounds": propagation_result.total_rounds,
-                "changed_total": sum(d.changed_count for d in propagation_result.rounds),
-            })
-        except Exception as e:
-            logger.warning("Population propagation failed, continuing: %s", e)
+    await _run_population_propagation_phase(
+        simulation_id=simulation_id,
+        pop_id=pop_id,
+        agents=agents,
+        selected_agents=selected_agents,
+        individual_responses=individual_responses,
+        all_edges=all_edges,
+        aggregation=activation_result["aggregation"],
+        session=session,
+        seed=sim.seed,
+        propagation_cfg=_propagation_config(),
+    )
 
     # === Post-Activation Persona Narrative Generation ===
     await sse_manager.publish(simulation_id, "persona_generation_started", {
