@@ -321,3 +321,31 @@ describe('labelAlpha', () => {
     expect(labelAlpha(3)).toBe(1)
   })
 })
+
+describe('mergeGraphData dangling edge protection', () => {
+  it('drops links whose endpoints are missing from the node set', () => {
+    const nodes: NodeProp[] = [
+      baseNode({ id: 'a' }),
+      baseNode({ id: 'b' }),
+    ]
+    const edges: EdgeProp[] = [
+      { source: 'a', target: 'b', relation_type: 'friend', weight: 0.5 },
+      // 存在しないノードを参照 (d3 forceLink が "node not found" で例外を投げる)
+      { source: 'a', target: 'ghost', relation_type: 'friend', weight: 0.9 },
+      { source: 'ghost2', target: 'b', relation_type: 'friend', weight: 0.9 },
+    ]
+    const { links } = mergeGraphData([], nodes, edges)
+    expect(links).toHaveLength(1)
+    expect(links[0]).toMatchObject({ source: 'a', target: 'b' })
+  })
+
+  it('keeps all links when endpoints all exist', () => {
+    const nodes: NodeProp[] = [baseNode({ id: 'a' }), baseNode({ id: 'b' }), baseNode({ id: 'c' })]
+    const edges: EdgeProp[] = [
+      { source: 'a', target: 'b', relation_type: 'friend', weight: 0.5 },
+      { source: 'b', target: 'c', relation_type: 'family', weight: 0.5 },
+    ]
+    const { links } = mergeGraphData([], nodes, edges)
+    expect(links).toHaveLength(2)
+  })
+})

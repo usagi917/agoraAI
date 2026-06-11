@@ -64,6 +64,11 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'e2e') {
     name: 'sse-probe',
     component: () => import('./pages/SSEProbePage.vue'),
   })
+  router.addRoute({
+    path: '/__dev__/graph',
+    name: 'graph-dev',
+    component: () => import('./pages/GraphDevPage.vue'),
+  })
 }
 
 export default router

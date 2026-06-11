@@ -210,14 +210,19 @@ export function mergeGraphData(
     }
     return { ...n }
   })
-  const links: SimLink[] = newEdges.map((e) => ({
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    relation_type: e.relation_type,
-    weight: e.weight,
-    label: e.label,
-  }))
+  // 両端が存在しないエッジは除外する。d3 forceLink は未知のノード id を見ると
+  // "node not found" 例外を投げ、グラフ全体が描画されなくなるため。
+  const nodeIds = new Set(nodes.map((n) => n.id))
+  const links: SimLink[] = newEdges
+    .filter((e) => nodeIds.has(endpointId(e.source)) && nodeIds.has(endpointId(e.target)))
+    .map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      relation_type: e.relation_type,
+      weight: e.weight,
+      label: e.label,
+    }))
   return { nodes, links }
 }
 
