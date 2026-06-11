@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
 dist/
 build/
 
@@ -17,6 +20,8 @@ frontend/test-results/
 # Environment
 .env
 .env.local
+.env.*
+!.env.example
 
 # Data
 data/
@@ -40,5 +45,7 @@ plans/
 .claude/
 TODOS.md
 .amplifier/
+amplifier/
+.context/
 .gstack/
 spec.md
