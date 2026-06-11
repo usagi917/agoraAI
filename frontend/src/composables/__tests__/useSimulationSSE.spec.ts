@@ -139,6 +139,59 @@ describe('useSimulationSSE', () => {
     })
   })
 
+  describe('全人口伝播 (population propagation) handling', () => {
+    it('population_propagation_round が societyGraphStore へ波を適用する', async () => {
+      const { useSocietyGraphStore } = await import('../../stores/societyGraphStore')
+      const graph = useSocietyGraphStore()
+      graph.setSelectedAgents([
+        { id: 'sel-0', agent_index: 0, name: 'A0', occupation: '会社員', age: 30, region: '関東' },
+      ])
+      graph.setPopulationNetwork({
+        population_id: 'pop-1',
+        node_count: 2,
+        edge_count: 1,
+        nodes: [
+          { id: 'sel-0', agent_index: 0 },
+          { id: 'pop-1-a', agent_index: 1 },
+        ],
+        edges: [[0, 1, 0.8]],
+      })
+
+      const { start } = await createSSE()
+      start()
+      const source = MockEventSource.instances[MockEventSource.instances.length - 1]
+      expect(source.listeners.population_propagation_round).toHaveLength(1)
+
+      source.emit('population_propagation_round', { changes: [{ i: 1, s: '条件付き賛成' }] })
+
+      const popNode = graph.graphNodes.find((n) => n.id === 'pop-1-a')
+      expect(popNode?.stance).toBe('条件付き賛成')
+    })
+
+    it('population_propagation_completed が分布反映と完了ログを行う', async () => {
+      const { useSimulationStore } = await import('../../stores/simulationStore')
+      const { useActivityStore } = await import('../../stores/activityStore')
+      const store = useSimulationStore()
+      const activity = useActivityStore()
+
+      const { start } = await createSSE()
+      start()
+      const source = MockEventSource.instances[MockEventSource.instances.length - 1]
+
+      source.emit('population_propagation_completed', {
+        distribution: { 賛成: 0.6, 反対: 0.4 },
+        total_rounds: 5,
+        converged: true,
+        changed_total: 12,
+      })
+
+      expect(store.opinionDistribution).toEqual({ 賛成: 0.6, 反対: 0.4 })
+      expect(
+        activity.entries.some((e) => e.message.includes('全人口伝播完了')),
+      ).toBe(true)
+    })
+  })
+
   describe('report_completed handling', () => {
     it('registers and handles report completion once', async () => {
       const { useSimulationStore } = await import('../../stores/simulationStore')

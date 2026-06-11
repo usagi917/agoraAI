@@ -143,6 +143,30 @@ class TestRoundsAndResult:
             assert abs(sum(d.distribution.values()) - 1.0) < 1e-6
 
     @pytest.mark.asyncio
+    async def test_on_round_accepts_sync_callback(self):
+        """同期コールバックも await されず正しく呼ばれる。"""
+        agents = [_agent(i) for i in range(5)]
+        edges = []
+        for i in range(1, 5):
+            edges.append(_edge(i, 0))
+            edges.append(_edge(0, i))
+        responses = [_response(0, "賛成", confidence=1.0)]
+
+        received: list = []
+
+        def on_round(delta):  # 非同期ではない普通の関数
+            received.append(delta)
+
+        result = await run_population_propagation(
+            agents, responses, edges, max_timesteps=8, on_round=on_round,
+        )
+
+        assert len(received) == result.total_rounds
+        assert all(
+            d.changed_count == len(d.changes) for d in received
+        )
+
+    @pytest.mark.asyncio
     async def test_distribution_covers_population(self):
         """最終分布は全人口ベースで合計 1。"""
         agents = [_agent(i) for i in range(10)]

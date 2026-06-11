@@ -1,7 +1,11 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { useSocietyGraphStore, type MeetingArgument } from '../societyGraphStore'
+import {
+  POPULATION_EDGE_DISPLAY_CAP,
+  useSocietyGraphStore,
+  type MeetingArgument,
+} from '../societyGraphStore'
 
 function createArgument(overrides: Partial<MeetingArgument> = {}): MeetingArgument {
   return {
@@ -259,5 +263,56 @@ describe('societyGraphStore: 人口レイヤー（全人口伝播）', () => {
 
     expect(store.populationNodeCount).toBe(0)
     expect(store.graphNodes).toHaveLength(0)
+  })
+
+  it('setPopulationNetwork がエッジ上限を超えると強度上位だけ残す', () => {
+    const store = useSocietyGraphStore()
+    store.setSelectedAgents([
+      { id: 'n-0', agent_index: 0, name: 'A0', occupation: '会社員', age: 30, region: '関東' },
+    ])
+
+    // 2 ノード間に上限+1 本のエッジ。1 本だけ極端に弱い強度にする。
+    const edges: Array<[number, number, number]> = []
+    for (let i = 0; i < POPULATION_EDGE_DISPLAY_CAP; i++) {
+      edges.push([0, 1, 0.9])
+    }
+    edges.push([0, 1, 0.001]) // 最弱: 上限カットで落ちるべき
+
+    store.setPopulationNetwork({
+      population_id: 'pop-cap',
+      node_count: 2,
+      edge_count: edges.length,
+      nodes: [
+        { id: 'n-0', agent_index: 0 },
+        { id: 'n-1', agent_index: 1 },
+      ],
+      edges,
+    })
+
+    const popEdges = store.graphEdges.filter((e) => e.id?.startsWith('pop-edge-'))
+    expect(popEdges).toHaveLength(POPULATION_EDGE_DISPLAY_CAP)
+    // 最弱エッジ (0.001) は上限カットで除外される
+    expect(popEdges.some((e) => e.weight === 0.001)).toBe(false)
+  })
+
+  it('updateStancesFromPropagation が liveAgents のスタンスとシフトを更新する', () => {
+    const store = useSocietyGraphStore()
+    store.setSelectedAgents([
+      { id: 'sel-0', agent_index: 0, name: 'A0', occupation: '会社員', age: 30, region: '関東' },
+      { id: 'sel-1', agent_index: 1, name: 'A1', occupation: '経営者', age: 40, region: '関西' },
+    ])
+
+    store.updateStancesFromPropagation([
+      { agentId: 'sel-0', stance: '賛成' },
+      { agentId: 'sel-1', stance: '中立' }, // 既定が中立なら変化なし
+      { agentId: 'ghost', stance: '反対' }, // liveAgents に居ない: 無視される
+    ])
+
+    expect(store.liveAgents.get('sel-0')?.stance).toBe('賛成')
+    const shift = store.pendingStanceShifts.find((s) => s.agentId === 'sel-0')
+    expect(shift?.toStance).toBe('賛成')
+    expect(shift?.reason).toBe('network propagation')
+    // 存在しないエージェントはシフトを生まない
+    expect(store.pendingStanceShifts.some((s) => s.agentId === 'ghost')).toBe(false)
   })
 })

@@ -103,3 +103,42 @@ async def test_population_network_returns_compact_graph(client, seeded_sim):
 async def test_population_network_404_when_simulation_missing(client):
     response = await client.get("/society/simulations/nope/population-network")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_population_network_skips_dangling_edges(client, session_factory):
+    """端点が存在しないエッジは圧縮グラフから除外される。"""
+    async with session_factory() as session:
+        pop = Population(id="pop-d", agent_count=2, status="ready")
+        session.add(pop)
+        for i in range(2):
+            session.add(AgentProfile(
+                id=f"d-agent-{i}",
+                population_id="pop-d",
+                agent_index=i,
+                demographics={"occupation": "会社員", "age": 30, "region": "関東"},
+                big_five={"O": 0.5, "C": 0.5, "E": 0.5, "A": 0.5, "N": 0.5},
+            ))
+        # 有効なエッジ
+        session.add(SocialEdge(
+            id="d-edge-ok", population_id="pop-d",
+            agent_id="d-agent-0", target_id="d-agent-1",
+            relation_type="friend", strength=0.7,
+        ))
+        # target が存在しない孤立エッジ（スキップされるべき）
+        session.add(SocialEdge(
+            id="d-edge-dangling", population_id="pop-d",
+            agent_id="d-agent-0", target_id="ghost-agent",
+            relation_type="friend", strength=0.9,
+        ))
+        session.add(Simulation(id="sim-d", prompt_text="テスト", population_id="pop-d"))
+        await session.commit()
+
+    response = await client.get("/society/simulations/sim-d/population-network")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["node_count"] == 2
+    # 孤立エッジは除外され、有効な 1 本だけが残る
+    assert payload["edge_count"] == 1
+    assert payload["edges"] == [[0, 1, 0.7]]
