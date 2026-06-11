@@ -40,6 +40,27 @@ from src.app.sse.manager import sse_manager
 logger = logging.getLogger(__name__)
 
 
+def _phase_limits(cognitive_config: dict | None = None) -> dict[str, int]:
+    """選抜数・活性化同時実行数を cognitive config (game_master) から導出する。
+
+    値が欠損・不正な場合は従来のハードコード値にフォールバックする。
+    """
+    defaults = {"target_count": 100, "max_concurrency": 30}
+    try:
+        config = cognitive_config if cognitive_config is not None else settings.load_cognitive_config()
+        gm = config.get("game_master") or {}
+    except Exception:
+        logger.warning("Failed to load cognitive config; using default phase limits")
+        return defaults
+
+    limits = dict(defaults)
+    for key, cfg_key in (("target_count", "max_active_agents"), ("max_concurrency", "max_concurrent_agents")):
+        value = gm.get(cfg_key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and int(value) > 0:
+            limits[key] = int(value)
+    return limits
+
+
 @dataclass
 class SocietyPulseResult:
     agents: list[dict]
@@ -91,8 +112,14 @@ async def run_society_pulse(
     await _save_network(session, agents, pop_id)
 
     # === Selection (network centrality-aware) ===
+    limits = _phase_limits()
     all_edges = await _load_population_edges(session, pop_id)
-    selected_agents = await select_agents(agents, theme, target_count=100, edges=all_edges)
+    selected_agents = await select_agents(
+        agents, theme,
+        target_count=limits["target_count"],
+        edges=all_edges,
+        seed=sim.seed,
+    )
 
     await sse_manager.publish(simulation_id, "society_selection_completed", {
         "selected_count": len(selected_agents),
@@ -133,7 +160,9 @@ async def run_society_pulse(
         })
 
     activation_result = await run_activation(
-        selected_agents, theme, on_progress=on_progress,
+        selected_agents, theme,
+        max_concurrency=limits["max_concurrency"],
+        on_progress=on_progress,
     )
 
     for key in total_usage:

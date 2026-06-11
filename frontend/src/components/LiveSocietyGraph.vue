@@ -8,6 +8,8 @@ import ConversationToast from './ConversationToast.vue'
 import NodeDetailPanel from './NodeDetailPanel.vue'
 import TemporalSlider from './TemporalSlider.vue'
 import ForceGraph2D from './ForceGraph2D.vue'
+import GraphSettingsPanel from './GraphSettingsPanel.vue'
+import { DEFAULT_PHYSICS, type GraphPhysics } from './forceGraphHelpers'
 
 interface GraphEdgePayload {
   id?: string
@@ -41,6 +43,8 @@ const societyGraphStore = useSocietyGraphStore()
 const kgStore = useKGEvolutionStore()
 const selectedAgentId = ref<string | null>(null)
 const highlightedAgentIds = ref<string[]>([])
+const graphPhysics = ref<GraphPhysics>({ ...DEFAULT_PHYSICS })
+const showPhysicsPanel = ref(false)
 
 const selectedGraphNodeId = computed(() => selectedAgentId.value ?? props.spotlightAgentId ?? null)
 
@@ -136,7 +140,13 @@ function handleNodeSelect(node: { id: string }) {
     return
   }
   emit('select-agent', node.id)
-  selectedAgentId.value = null
+  // Obsidian 風: 選択を保持し、隣接以外のフェードを維持する（背景クリックで解除）
+  selectedAgentId.value = node.id
+}
+
+function handleBackgroundClick() {
+  clearSelection()
+  clearEdgeSelection()
 }
 
 function handleEdgeHover(edge: GraphEdgePayload | null) {
@@ -242,10 +252,28 @@ onUnmounted(() => {
       :edges="societyGraphStore.graphEdges"
       :selected-node-id="selectedGraphNodeId"
       :highlighted-node-ids="highlightedAgentIds"
+      :physics="graphPhysics"
       @select-node="handleNodeSelect"
       @hover-edge="handleEdgeHover"
       @select-edge="handleEdgeSelect"
+      @background-click="handleBackgroundClick"
     />
+
+    <!-- Physics settings (Obsidian-style graph controls) -->
+    <button
+      v-if="societyGraphStore.nodeCount > 0"
+      class="physics-toggle"
+      :class="{ active: showPhysicsPanel }"
+      title="グラフ物理設定"
+      data-testid="physics-toggle"
+      @click="showPhysicsPanel = !showPhysicsPanel"
+    >⚙</button>
+    <div v-if="showPhysicsPanel" class="physics-panel">
+      <GraphSettingsPanel
+        :physics="graphPhysics"
+        @update:physics="graphPhysics = $event"
+      />
+    </div>
 
     <!-- Empty state (before selection) -->
     <div
@@ -584,6 +612,42 @@ onUnmounted(() => {
   display: flex;
   gap: 0.2rem;
   z-index: 5;
+}
+
+.physics-toggle {
+  position: absolute;
+  top: 2.15rem;
+  right: 0.75rem;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  background: rgba(16, 16, 30, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: rgba(200, 200, 220, 0.4);
+  cursor: pointer;
+  transition: all 0.2s;
+  z-index: 6;
+}
+.physics-toggle:hover {
+  background: rgba(30, 30, 50, 0.9);
+  color: rgba(230, 230, 245, 0.7);
+}
+.physics-toggle.active {
+  border-color: rgba(139, 124, 246, 0.45);
+  color: rgba(139, 124, 246, 0.95);
+  background: rgba(139, 124, 246, 0.12);
+}
+
+.physics-panel {
+  position: absolute;
+  top: 3.9rem;
+  right: 0.75rem;
+  z-index: 10;
+  pointer-events: auto;
 }
 .layer-btn {
   width: 24px;

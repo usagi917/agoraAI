@@ -356,3 +356,43 @@ class TestNetworkAwareSelection:
         # Empty
         centrality_empty = compute_degree_centrality(agents, [])
         assert all(v == 0.0 for v in centrality_empty.values())
+
+
+class TestSeededSelection:
+    """seed 指定でエージェント選抜が再現可能になることを検証する。"""
+
+    @pytest.fixture
+    def sample_agents(self):
+        agents = []
+        for i in range(200):
+            agents.append({
+                "id": f"agent-{i}",
+                "demographics": {
+                    "region": ["北海道", "東北", "関東（都市部）", "関西（都市部）", "九州"][i % 5],
+                    "age": 20 + (i % 60),
+                    "gender": ["male", "female"][i % 2],
+                },
+                "shock_sensitivity": {
+                    "economy": (i % 10) / 10.0,
+                    "technology": ((i + 3) % 10) / 10.0,
+                },
+            })
+        return agents
+
+    @pytest.mark.asyncio
+    async def test_same_seed_same_result(self, sample_agents):
+        a = await select_agents(sample_agents, "経済問題", target_count=50, seed=42)
+        b = await select_agents(sample_agents, "経済問題", target_count=50, seed=42)
+        assert [x["id"] for x in a] == [x["id"] for x in b]
+
+    @pytest.mark.asyncio
+    async def test_different_seed_different_result(self, sample_agents):
+        a = await select_agents(sample_agents, "経済問題", target_count=50, seed=1)
+        b = await select_agents(sample_agents, "経済問題", target_count=50, seed=2)
+        # 層化抽出にランダム性があるため、異なる seed では（ほぼ確実に）順序か構成が変わる
+        assert [x["id"] for x in a] != [x["id"] for x in b]
+
+    @pytest.mark.asyncio
+    async def test_no_seed_backward_compatible(self, sample_agents):
+        selected = await select_agents(sample_agents, "経済問題", target_count=50)
+        assert 50 <= len(selected) <= 60

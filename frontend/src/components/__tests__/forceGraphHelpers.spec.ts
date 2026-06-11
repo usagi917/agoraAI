@@ -4,6 +4,8 @@ import {
   TYPE_COLORS,
   buildAdjacency,
   clamp01,
+  computeDegrees,
+  labelAlpha,
   linkColor,
   linkWidth,
   mergeGraphData,
@@ -99,19 +101,19 @@ describe('linkColor', () => {
     const normal = linkColor('friend', 0.5, false)
     const dimmed = linkColor('friend', 0.5, true)
     expect(normal).toMatch(/^rgba\(/)
-    expect(dimmed).toContain('0.14')
+    expect(dimmed).toContain('0.06')
     // normal should have higher alpha than dimmed
     const normalAlpha = Number(normal.match(/, (0\.\d+)\)/)?.[1])
-    expect(normalAlpha).toBeGreaterThan(0.14)
+    expect(normalAlpha).toBeGreaterThan(0.06)
   })
 
-  it('keeps alpha within [0.24, 0.72] band for any weight', () => {
+  it('keeps a quiet Obsidian-like alpha band [0.14, 0.42] for any weight', () => {
     const lo = linkColor('friend', 0, false)
     const hi = linkColor('friend', 1, false)
-    expect(lo).toContain('0.24')
+    expect(lo).toContain('0.14')
     const hiAlpha = Number(hi.match(/, (0\.\d+)\)/)?.[1])
-    expect(hiAlpha).toBeGreaterThan(0.5)
-    expect(hiAlpha).toBeLessThanOrEqual(0.72)
+    expect(hiAlpha).toBeGreaterThan(0.3)
+    expect(hiAlpha).toBeLessThanOrEqual(0.42)
   })
 })
 
@@ -245,5 +247,77 @@ describe('toEdgeProp', () => {
 
   it('returns null for null input', () => {
     expect(toEdgeProp(null)).toBeNull()
+  })
+})
+
+describe('computeDegrees', () => {
+  it('counts distinct neighbors per node', () => {
+    const edges: EdgeProp[] = [
+      { source: 'a', target: 'b', relation_type: 'friend', weight: 0.5 },
+      { source: 'a', target: 'c', relation_type: 'friend', weight: 0.5 },
+      { source: 'b', target: 'c', relation_type: 'friend', weight: 0.5 },
+    ]
+    const degrees = computeDegrees(edges)
+    expect(degrees.get('a')).toBe(2)
+    expect(degrees.get('b')).toBe(2)
+    expect(degrees.get('c')).toBe(2)
+  })
+
+  it('handles hub topology and missing nodes', () => {
+    const edges: EdgeProp[] = [
+      { source: 'hub', target: 'l1', relation_type: 'friend', weight: 1 },
+      { source: 'hub', target: 'l2', relation_type: 'friend', weight: 1 },
+      { source: 'hub', target: 'l3', relation_type: 'friend', weight: 1 },
+    ]
+    const degrees = computeDegrees(edges)
+    expect(degrees.get('hub')).toBe(3)
+    expect(degrees.get('l1')).toBe(1)
+    expect(degrees.get('unknown')).toBeUndefined()
+  })
+
+  it('returns empty map for no edges', () => {
+    expect(computeDegrees([]).size).toBe(0)
+  })
+})
+
+describe('nodeRadius with degree', () => {
+  it('keeps backward-compatible values when degree omitted', () => {
+    expect(nodeRadius({ importance_score: 0, activity_score: 0 })).toBe(5)
+    expect(nodeRadius({ importance_score: 1, activity_score: 0 })).toBe(13)
+  })
+
+  it('grows with degree (sqrt scale, Obsidian-like hubs)', () => {
+    const base = nodeRadius({ importance_score: 0.5, activity_score: 0 }, 0)
+    const d4 = nodeRadius({ importance_score: 0.5, activity_score: 0 }, 4)
+    const d16 = nodeRadius({ importance_score: 0.5, activity_score: 0 }, 16)
+    expect(d4).toBeGreaterThan(base)
+    expect(d16).toBeGreaterThan(d4)
+    // sqrt scaling: degree 16 boost is 2x degree 4 boost
+    expect(d16 - base).toBeCloseTo((d4 - base) * 2, 5)
+  })
+
+  it('caps degree boost so giant hubs do not dominate', () => {
+    const d100 = nodeRadius({ importance_score: 0.5, activity_score: 0 }, 100)
+    const d10000 = nodeRadius({ importance_score: 0.5, activity_score: 0 }, 10000)
+    expect(d10000 - d100).toBeLessThanOrEqual(8)
+  })
+})
+
+describe('labelAlpha', () => {
+  it('hides labels when zoomed far out', () => {
+    expect(labelAlpha(0.2)).toBe(0)
+    expect(labelAlpha(0.45)).toBe(0)
+  })
+
+  it('fades in continuously between 0.45 and 0.9', () => {
+    const mid = labelAlpha(0.675)
+    expect(mid).toBeGreaterThan(0)
+    expect(mid).toBeLessThan(1)
+    expect(labelAlpha(0.5)).toBeLessThan(labelAlpha(0.8))
+  })
+
+  it('is fully visible at close zoom', () => {
+    expect(labelAlpha(0.9)).toBe(1)
+    expect(labelAlpha(3)).toBe(1)
   })
 })

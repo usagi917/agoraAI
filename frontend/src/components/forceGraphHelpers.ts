@@ -90,10 +90,32 @@ export function nodeDisplayColor(node: Pick<NodeProp, 'type' | 'stance'>): strin
   return typeColor
 }
 
-export function nodeRadius(node: Pick<NodeProp, 'importance_score' | 'activity_score' | 'status'>): number {
+export function nodeRadius(
+  node: Pick<NodeProp, 'importance_score' | 'activity_score' | 'status'>,
+  degree = 0,
+): number {
   const importance = clamp01(node.importance_score ?? 0.4)
   const activityBoost = (node.activity_score ?? 0) > 0 || node.status === 'speaking' ? 3 : 0
-  return 5 + importance * 8 + activityBoost
+  // Obsidian 同様、接続数の多いハブほど大きく（sqrt スケール、上限付き）
+  const degreeBoost = Math.min(8, Math.sqrt(Math.max(0, degree)) * 0.9)
+  return 5 + importance * 8 + activityBoost + degreeBoost
+}
+
+export function computeDegrees(edges: ReadonlyArray<EdgeProp | SimLink>): Map<string, number> {
+  const degrees = new Map<string, number>()
+  for (const [id, neighbors] of buildAdjacency(edges)) {
+    degrees.set(id, neighbors.size)
+  }
+  return degrees
+}
+
+/** ズームレベルに応じたラベル不透明度。0.45 未満で非表示、0.45-0.9 で連続フェード、以降フル表示。 */
+export function labelAlpha(globalScale: number): number {
+  const FADE_START = 0.45
+  const FADE_END = 0.9
+  if (globalScale <= FADE_START) return 0
+  if (globalScale >= FADE_END) return 1
+  return (globalScale - FADE_START) / (FADE_END - FADE_START)
 }
 
 export function linkWidth(weight: number | null | undefined): number {
@@ -123,8 +145,27 @@ export function withAlpha(color: string, alpha: number): string {
 
 export function linkColor(relation_type: string, weight: number | null | undefined, dimmed: boolean): string {
   const base = nodeColor(relation_type)
-  const alpha = dimmed ? 0.14 : Math.min(0.72, 0.24 + clamp01(weight) * 0.38)
+  // Obsidian 風: エッジは細く半透明で静かに。フォーカス外は強くフェード。
+  const alpha = dimmed ? 0.06 : Math.min(0.42, 0.14 + clamp01(weight) * 0.28)
   return withAlpha(base, alpha)
+}
+
+export interface GraphPhysics {
+  /** 反発力（負値）。Obsidian の「反発力」スライダー相当 */
+  chargeStrength: number
+  /** リンク基本距離。weight が低いほど距離が伸びる */
+  linkDistance: number
+  /** 中心引力 */
+  centerStrength: number
+  /** 衝突回避の余白 */
+  collidePadding: number
+}
+
+export const DEFAULT_PHYSICS: GraphPhysics = {
+  chargeStrength: -220,
+  linkDistance: 60,
+  centerStrength: 0.04,
+  collidePadding: 4,
 }
 
 function endpointId(end: string | { id?: string | number } | undefined): string {

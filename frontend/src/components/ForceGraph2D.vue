@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import ForceGraph from 'force-graph'
+import { forceCollide } from 'd3-force'
 
 import {
+  DEFAULT_PHYSICS,
   buildAdjacency,
   clamp01,
+  computeDegrees,
+  labelAlpha,
   linkColor as computeLinkColor,
   linkWidth as computeLinkWidth,
   mergeGraphData,
@@ -15,6 +19,7 @@ import {
   toNodeProp,
   withAlpha,
   type EdgeProp,
+  type GraphPhysics,
   type NodeProp,
   type SimLink,
   type SimNode,
@@ -25,15 +30,18 @@ const props = withDefaults(defineProps<{
   edges: EdgeProp[]
   selectedNodeId?: string | null
   highlightedNodeIds?: string[]
+  physics?: Partial<GraphPhysics>
 }>(), {
   selectedNodeId: null,
   highlightedNodeIds: () => [],
+  physics: () => ({}),
 })
 
 const emit = defineEmits<{
   (e: 'select-node', node: NodeProp): void
   (e: 'select-edge', edge: EdgeProp): void
   (e: 'hover-edge', edge: EdgeProp | null): void
+  (e: 'background-click'): void
 }>()
 
 const host = ref<HTMLElement | null>(null)
@@ -48,6 +56,8 @@ const LAYOUT_COOLDOWN_TICKS = 160
 const LAYOUT_COOLDOWN_TIME_MS = 5000
 
 const adjacency = computed(() => buildAdjacency(currentLinks.value))
+const degrees = computed(() => computeDegrees(currentLinks.value))
+const effectivePhysics = computed<GraphPhysics>(() => ({ ...DEFAULT_PHYSICS, ...props.physics }))
 
 const highlightedSet = computed(() => {
   if (!props.highlightedNodeIds?.length) return null
@@ -96,13 +106,29 @@ function createGraph(element: HTMLElement) {
   return new FG(element)
 }
 
+const HIGH_DEGREE_LABEL_THRESHOLD = 8
+
 function paintNode(node: SimNode, ctx: CanvasRenderingContext2D, globalScale: number) {
   if (typeof node.x !== 'number' || typeof node.y !== 'number') return
-  const r = nodeRadius(node)
+  const degree = degrees.value.get(node.id) ?? 0
+  const r = nodeRadius(node, degree)
   const baseColor = nodeDisplayColor(node)
   const dimmed = isNodeDimmed(node.id)
   const selected = props.selectedNodeId === node.id
-  const alpha = dimmed ? 0.18 : selected ? 1 : 0.88
+  const hovered = hoveredNodeId.value === node.id
+  const alpha = dimmed ? 0.15 : selected ? 1 : 0.92
+
+  // Obsidian 風の発光ハロー（フォーカス時は強め）
+  if (!dimmed) {
+    const glowRadius = r * 2.4
+    const glow = ctx.createRadialGradient(node.x, node.y, r * 0.3, node.x, node.y, glowRadius)
+    glow.addColorStop(0, withAlpha(baseColor, selected || hovered ? 0.45 : 0.22))
+    glow.addColorStop(1, withAlpha(baseColor, 0))
+    ctx.beginPath()
+    ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2)
+    ctx.fillStyle = glow
+    ctx.fill()
+  }
 
   ctx.beginPath()
   ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
@@ -115,17 +141,20 @@ function paintNode(node: SimNode, ctx: CanvasRenderingContext2D, globalScale: nu
     ctx.stroke()
   }
 
-  if (globalScale > 0.6 && !dimmed) {
+  // ラベル: ズームに応じて連続フェード。選択/ホバー/ハブは常時表示。
+  const forceLabel = selected || hovered || degree >= HIGH_DEGREE_LABEL_THRESHOLD
+  const fade = forceLabel ? Math.max(labelAlpha(globalScale), 0.95) : labelAlpha(globalScale)
+  if (fade > 0.02 && !dimmed) {
     const fontSize = 10 / globalScale
     ctx.font = `${fontSize}px sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
     ctx.lineWidth = 3 / globalScale
-    ctx.strokeStyle = 'rgba(8, 9, 18, 0.88)'
+    ctx.strokeStyle = `rgba(8, 9, 18, ${0.88 * fade})`
     ctx.lineJoin = 'round'
     const labelY = node.y + r + 3
     ctx.strokeText(node.label, node.x, labelY)
-    ctx.fillStyle = 'rgba(226, 232, 240, 0.85)'
+    ctx.fillStyle = `rgba(226, 232, 240, ${0.85 * fade})`
     ctx.fillText(node.label, node.x, labelY)
   }
 }
@@ -134,24 +163,31 @@ function paintNodePointerArea(node: SimNode, color: string, ctx: CanvasRendering
   if (typeof node.x !== 'number' || typeof node.y !== 'number') return
   ctx.fillStyle = color
   ctx.beginPath()
-  ctx.arc(node.x, node.y, nodeRadius(node) + 2, 0, Math.PI * 2)
+  ctx.arc(node.x, node.y, nodeRadius(node, degrees.value.get(node.id) ?? 0) + 2, 0, Math.PI * 2)
   ctx.fill()
 }
 
 function configureForces(g: ReturnType<typeof createGraph>) {
+  const p = effectivePhysics.value
+
   // Adjust the default forces force-graph already wires up.
   const charge = g.d3Force('charge') as { strength?: (v: number) => unknown; distanceMax?: (v: number) => unknown } | undefined
-  charge?.strength?.(-220)
+  charge?.strength?.(p.chargeStrength)
   charge?.distanceMax?.(420)
 
   const link = g.d3Force('link') as
     | { distance?: (fn: (l: SimLink) => number) => unknown; strength?: (fn: (l: SimLink) => number) => unknown }
     | undefined
-  link?.distance?.((l: SimLink) => 60 + (1 - clamp01(l.weight)) * 80)
+  link?.distance?.((l: SimLink) => p.linkDistance + (1 - clamp01(l.weight)) * 80)
   link?.strength?.((l: SimLink) => 0.3 + clamp01(l.weight) * 0.5)
 
   const center = g.d3Force('center') as { strength?: (v: number) => unknown } | undefined
-  center?.strength?.(0.04)
+  center?.strength?.(p.centerStrength)
+
+  // ノード重なり防止（次数ベースの半径 + 余白）
+  g.d3Force('collide', forceCollide<SimNode>(
+    (n) => nodeRadius(n, degrees.value.get(n.id) ?? 0) + p.collidePadding,
+  ).iterations(2))
 }
 
 function syncSize() {
@@ -192,9 +228,9 @@ onMounted(() => {
     .nodePointerAreaPaint(paintNodePointerArea as never)
     .linkColor(((l: SimLink) => computeLinkColor(l.relation_type, l.weight, isLinkDimmed(l))) as never)
     .linkWidth(((l: SimLink) => computeLinkWidth(l.weight)) as never)
-    .linkDirectionalParticles(((l: SimLink) => (clamp01(l.weight) > 0.6 ? 2 : 0)) as never)
-    .linkDirectionalParticleWidth(2)
-    .linkDirectionalParticleColor(((l: SimLink) => withAlpha(nodeColor(l.relation_type), 0.85)) as never)
+    .linkDirectionalParticles(((l: SimLink) => (clamp01(l.weight) > 0.75 ? 1 : 0)) as never)
+    .linkDirectionalParticleWidth(1.6)
+    .linkDirectionalParticleColor(((l: SimLink) => withAlpha(nodeColor(l.relation_type), 0.7)) as never)
     .warmupTicks(0)
     .cooldownTicks(LAYOUT_COOLDOWN_TICKS)
     .cooldownTime(LAYOUT_COOLDOWN_TIME_MS)
@@ -233,6 +269,9 @@ onMounted(() => {
       const ep = link ? toEdgeProp(link) : null
       emit('hover-edge', ep)
       refreshCanvas()
+    })
+    .onBackgroundClick(() => {
+      emit('background-click')
     })
     .onEngineStop(() => {
       if (!didFitOnce && currentNodes.value.length > 0) {
@@ -285,6 +324,16 @@ watch(
 watch(
   () => props.highlightedNodeIds,
   () => refreshCanvas(),
+  { deep: true },
+)
+
+watch(
+  () => props.physics,
+  () => {
+    if (!graph) return
+    configureForces(graph)
+    graph.d3ReheatSimulation()
+  },
   { deep: true },
 )
 </script>

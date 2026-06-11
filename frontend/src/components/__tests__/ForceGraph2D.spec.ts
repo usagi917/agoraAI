@@ -8,6 +8,8 @@ class MockForceGraph {
   setterCalls: Record<string, unknown[]> = {}
   graphDataValue: { nodes: unknown[]; links: unknown[] } = { nodes: [], links: [] }
   graphDataCalls = 0
+  d3ForceCalls = 0
+  reheatCalls = 0
   destructorCalled = false
 
   constructor(_el: HTMLElement) {
@@ -30,14 +32,26 @@ class MockForceGraph {
             return proxy
           }
         }
+        if (prop === 'd3ForceCalls') return self.d3ForceCalls
+        if (prop === 'reheatCalls') return self.reheatCalls
         if (prop === 'd3Force') {
-          return () => ({
-            strength: () => undefined,
-            distance: () => undefined,
-            distanceMax: () => undefined,
-          })
+          return (..._args: unknown[]) => {
+            self.d3ForceCalls += 1
+            return {
+              strength: () => undefined,
+              distance: () => undefined,
+              distanceMax: () => undefined,
+              radius: () => undefined,
+              iterations: () => undefined,
+            }
+          }
         }
-        if (prop === 'd3ReheatSimulation') return () => proxy
+        if (prop === 'd3ReheatSimulation') {
+          return () => {
+            self.reheatCalls += 1
+            return proxy
+          }
+        }
         if (prop === 'zoomToFit') return () => proxy
         if (prop === 'centerAt') return () => proxy
         if (prop === 'width' || prop === 'height') return () => proxy
@@ -261,6 +275,27 @@ describe('ForceGraph2D', () => {
     const emitted = wrapper.emitted('select-edge')
     expect(emitted).toBeTruthy()
     expect((emitted![0][0] as { relation_type: string }).relation_type).toBe('friend')
+  })
+
+  it('reconfigures forces and reheats when the physics prop changes', async () => {
+    const wrapper = await mountComponent({
+      nodes: [
+        { id: 'n1', label: 'A', type: 'person', importance_score: 0.5, activity_score: 0 },
+      ],
+      edges: [],
+      physics: { chargeStrength: -220 },
+    })
+    await flushPromises()
+
+    const inst = MockForceGraph.lastInstance!
+    const forceCallsBefore = inst.d3ForceCalls
+    const reheatBefore = inst.reheatCalls
+
+    await wrapper.setProps({ physics: { chargeStrength: -500 } })
+    await flushPromises()
+
+    expect(inst.d3ForceCalls).toBeGreaterThan(forceCallsBefore)
+    expect(inst.reheatCalls).toBeGreaterThan(reheatBefore)
   })
 
   it('calls _destructor on unmount', async () => {
