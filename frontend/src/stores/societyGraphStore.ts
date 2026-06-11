@@ -65,6 +65,25 @@ interface StanceShiftEvent {
   reason: string
 }
 
+/** GET /society/simulations/{id}/population-network のレスポンス */
+export interface PopulationNetworkPayload {
+  population_id: string
+  node_count: number
+  edge_count: number
+  nodes: Array<{ id: string; agent_index: number }>
+  /** [source_index, target_index, strength] */
+  edges: Array<[number, number, number]>
+}
+
+/** SSE population_propagation_round の changes 要素（i=agent_index, s=stance） */
+export interface PropagationChange {
+  i: number
+  s: string
+}
+
+/** Canvas 描画コスト保護のための人口エッジ表示上限（強い順に残す） */
+export const POPULATION_EDGE_DISPLAY_CAP = 12000
+
 export const useSocietyGraphStore = defineStore('societyGraph', () => {
   const liveAgents = ref<Map<string, LiveAgentNode>>(new Map())
   const liveEdges = ref<LiveEdge[]>([])
@@ -79,12 +98,19 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
   const socialEdgesVisible = ref(true)
   const agentEntityLinksVisible = ref(true)
 
+  // --- 人口レイヤー（全人口伝播の波及描画） ---
+  const populationNodes = ref<Array<{ id: string; agentIndex: number }>>([])
+  /** エッジは不変なので GraphEdge 変換をキャッシュしておく（30k 件規模） */
+  const populationGraphEdges = ref<GraphEdge[]>([])
+  const populationStances = ref<Map<number, string>>(new Map())
+  const populationVisible = ref(true)
+
   // === Computed: 2D graph 用の GraphNode/GraphEdge 変換 ===
 
   const agentList = computed(() => Array.from(liveAgents.value.values()))
 
   const graphNodes = computed<GraphNode[]>(() => {
-    const agentNodes = agentList.value.map((a) => ({
+    const nodes: GraphNode[] = agentList.value.map((a) => ({
       id: a.id,
       label: a.displayName || a.label,
       type: 'agent',
@@ -96,10 +122,30 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
       group: a.stance || '不明',
     }))
 
-    const kgStore = useKGEvolutionStore()
-    if (!kgStore.layerVisible) return agentNodes
+    if (populationVisible.value && populationNodes.value.length) {
+      const stances = populationStances.value
+      for (const p of populationNodes.value) {
+        // 選抜済みエージェントは liveAgents 側のリッチなノードを優先
+        if (liveAgents.value.has(p.id)) continue
+        nodes.push({
+          id: p.id,
+          label: '',
+          type: 'agent',
+          importance_score: 0.1,
+          stance: stances.get(p.agentIndex) || '',
+          activity_score: 0,
+          sentiment_score: 0,
+          status: 'idle',
+          group: 'population',
+          tier: 'population',
+        })
+      }
+    }
 
-    return [...agentNodes, ...kgStore.graphNodes]
+    const kgStore = useKGEvolutionStore()
+    if (!kgStore.layerVisible) return nodes
+
+    return [...nodes, ...kgStore.graphNodes]
   })
 
   const graphEdges = computed<GraphEdge[]>(() => {
@@ -121,6 +167,10 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
       }
     }
 
+    if (populationVisible.value && populationGraphEdges.value.length) {
+      edges.push(...populationGraphEdges.value)
+    }
+
     const kgStore = useKGEvolutionStore()
     if (kgStore.layerVisible) {
       edges.push(...kgStore.graphEdges)
@@ -133,6 +183,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
   })
 
   const nodeCount = computed(() => liveAgents.value.size)
+  const populationNodeCount = computed(() => populationNodes.value.length)
   const edgeCount = computed(() => graphEdges.value.length)
 
   const speakingAgents = computed(() =>
@@ -538,6 +589,67 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     }
   }
 
+  function setPopulationNetwork(payload: PopulationNetworkPayload) {
+    const idByIndex = new Map<number, string>()
+    populationNodes.value = payload.nodes.map((n) => {
+      idByIndex.set(n.agent_index, n.id)
+      return { id: n.id, agentIndex: n.agent_index }
+    })
+
+    let rawEdges = payload.edges
+    if (rawEdges.length > POPULATION_EDGE_DISPLAY_CAP) {
+      rawEdges = [...rawEdges]
+        .sort((a, b) => b[2] - a[2])
+        .slice(0, POPULATION_EDGE_DISPLAY_CAP)
+    }
+
+    const edges: GraphEdge[] = []
+    rawEdges.forEach(([si, ti, strength], i) => {
+      const source = idByIndex.get(si)
+      const target = idByIndex.get(ti)
+      if (!source || !target) return
+      edges.push({
+        id: `pop-edge-${i}`,
+        source,
+        target,
+        relation_type: 'acquaintance',
+        weight: strength,
+        direction: 'undirected',
+        status: 'active',
+      })
+    })
+    populationGraphEdges.value = edges
+    populationStances.value = new Map()
+  }
+
+  /** 伝播ラウンドのスタンス変化を反映する（人口レイヤー + 選抜エージェント両対応） */
+  function applyPropagationRound(changes: PropagationChange[]) {
+    if (!changes.length) return
+
+    const liveByIndex = new Map<number, LiveAgentNode>()
+    for (const agent of liveAgents.value.values()) {
+      liveByIndex.set(agent.agentIndex, agent)
+    }
+
+    const next = new Map(populationStances.value)
+    let liveChanged = false
+    for (const c of changes) {
+      const live = liveByIndex.get(c.i)
+      if (live) {
+        if (live.stance !== c.s) {
+          live.stance = c.s
+          liveChanged = true
+        }
+      } else {
+        next.set(c.i, c.s)
+      }
+    }
+    populationStances.value = next
+    if (liveChanged) {
+      liveAgents.value = new Map(liveAgents.value)
+    }
+  }
+
   function setHoveredEdge(edge: typeof hoveredEdge.value) {
     hoveredEdge.value = edge
   }
@@ -559,6 +671,10 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     selectedEdge.value = null
     socialEdgesVisible.value = true
     agentEntityLinksVisible.value = true
+    populationNodes.value = []
+    populationGraphEdges.value = []
+    populationStances.value = new Map()
+    populationVisible.value = true
   }
 
   return {
@@ -575,12 +691,14 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     selectedEdge,
     socialEdgesVisible,
     agentEntityLinksVisible,
+    populationVisible,
     // Computed
     agentList,
     graphNodes,
     graphEdges,
     nodeCount,
     edgeCount,
+    populationNodeCount,
     speakingAgents,
     interactionMatrix,
     // Actions
@@ -596,6 +714,8 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     addStanceShifts,
     clearStanceShifts,
     updateStancesFromPropagation,
+    setPopulationNetwork,
+    applyPropagationRound,
     setHoveredEdge,
     setSelectedEdge,
     reset,

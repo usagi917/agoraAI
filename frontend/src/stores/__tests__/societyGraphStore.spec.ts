@@ -173,3 +173,91 @@ describe('societyGraphStore', () => {
     ])
   })
 })
+
+describe('societyGraphStore: 人口レイヤー（全人口伝播）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  function seedPopulation(store: ReturnType<typeof useSocietyGraphStore>) {
+    store.setSelectedAgents([
+      { id: 'sel-0', agent_index: 0, name: 'A0', occupation: '会社員', age: 30, region: '関東' },
+    ])
+    store.setPopulationNetwork({
+      population_id: 'pop-1',
+      node_count: 4,
+      edge_count: 2,
+      nodes: [
+        { id: 'sel-0', agent_index: 0 },
+        { id: 'pop-1-a', agent_index: 1 },
+        { id: 'pop-2-a', agent_index: 2 },
+        { id: 'pop-3-a', agent_index: 3 },
+      ],
+      edges: [
+        [0, 1, 0.8],
+        [2, 3, 0.4],
+      ],
+    })
+  }
+
+  it('setPopulationNetwork が人口ノード/エッジを graphNodes/graphEdges に合流させる', () => {
+    const store = useSocietyGraphStore()
+    seedPopulation(store)
+
+    expect(store.populationNodeCount).toBe(4)
+
+    const ids = store.graphNodes.map((n) => n.id)
+    // 選抜済み sel-0 は重複しない（liveAgents 側が優先）
+    expect(ids.filter((id) => id === 'sel-0')).toHaveLength(1)
+    expect(ids).toContain('pop-1-a')
+    expect(ids).toContain('pop-3-a')
+
+    const popNode = store.graphNodes.find((n) => n.id === 'pop-1-a')
+    expect(popNode?.tier).toBe('population')
+
+    const popEdges = store.graphEdges.filter((e) => e.id?.startsWith('pop-edge-'))
+    expect(popEdges).toHaveLength(2)
+    expect(popEdges[0].source).toBe('sel-0')
+    expect(popEdges[0].target).toBe('pop-1-a')
+    expect(popEdges[0].weight).toBe(0.8)
+  })
+
+  it('applyPropagationRound がスタンスの波をノード色に反映する', () => {
+    const store = useSocietyGraphStore()
+    seedPopulation(store)
+
+    store.applyPropagationRound([
+      { i: 1, s: '条件付き賛成' },
+      { i: 0, s: '賛成' },
+    ])
+
+    const popNode = store.graphNodes.find((n) => n.id === 'pop-1-a')
+    expect(popNode?.stance).toBe('条件付き賛成')
+    // 未変化ノードは中立のまま
+    const untouched = store.graphNodes.find((n) => n.id === 'pop-2-a')
+    expect(untouched?.stance ?? '').toBe('')
+    // 選抜済みエージェントは liveAgents 側のスタンスが更新される
+    expect(store.liveAgents.get('sel-0')?.stance).toBe('賛成')
+  })
+
+  it('populationVisible=false で人口レイヤーが消える', () => {
+    const store = useSocietyGraphStore()
+    seedPopulation(store)
+
+    store.populationVisible = false
+
+    expect(store.graphNodes.some((n) => n.tier === 'population')).toBe(false)
+    expect(store.graphEdges.some((e) => e.id?.startsWith('pop-edge-'))).toBe(false)
+  })
+
+  it('reset が人口レイヤーを初期化する', () => {
+    const store = useSocietyGraphStore()
+    seedPopulation(store)
+    store.applyPropagationRound([{ i: 1, s: '賛成' }])
+
+    store.reset()
+
+    expect(store.populationNodeCount).toBe(0)
+    expect(store.graphNodes).toHaveLength(0)
+  })
+})

@@ -874,6 +874,20 @@ export async function getSocialGraph(simId: string): Promise<SocialGraphResponse
   return data
 }
 
+export interface PopulationNetworkResponse {
+  population_id: string
+  node_count: number
+  edge_count: number
+  nodes: Array<{ id: string; agent_index: number }>
+  /** [source_index, target_index, strength] の圧縮形式 */
+  edges: Array<[number, number, number]>
+}
+
+export async function getPopulationNetwork(simId: string): Promise<PopulationNetworkResponse> {
+  const { data } = await api.get(`/society/simulations/${simId}/population-network`)
+  return data
+}
+
 export async function getAgentDetail(
   simId: string,
   agentId: string,

@@ -8,6 +8,8 @@ export interface NodeProp {
   activity_score: number
   stance?: string
   status?: string
+  /** 'population' = 全人口レイヤーの極小ドット（グロー/ラベル/collide 無し） */
+  tier?: string
 }
 
 export interface EdgeProp {
@@ -66,6 +68,7 @@ const NODE_PROP_KEYS = [
   'activity_score',
   'stance',
   'status',
+  'tier',
 ] as const
 
 const EDGE_PROP_KEYS = ['id', 'source', 'target', 'relation_type', 'weight', 'label'] as const
@@ -90,10 +93,14 @@ export function nodeDisplayColor(node: Pick<NodeProp, 'type' | 'stance'>): strin
   return typeColor
 }
 
+/** 人口レイヤーノードの固定半径。10k ノードを軽量描画するため極小に保つ。 */
+export const POPULATION_NODE_RADIUS = 2.2
+
 export function nodeRadius(
-  node: Pick<NodeProp, 'importance_score' | 'activity_score' | 'status'>,
+  node: Pick<NodeProp, 'importance_score' | 'activity_score' | 'status' | 'tier'>,
   degree = 0,
 ): number {
+  if (node.tier === 'population') return POPULATION_NODE_RADIUS
   const importance = clamp01(node.importance_score ?? 0.4)
   const activityBoost = (node.activity_score ?? 0) > 0 || node.status === 'speaking' ? 3 : 0
   // Obsidian 同様、接続数の多いハブほど大きく（sqrt スケール、上限付き）
@@ -206,6 +213,7 @@ export function mergeGraphData(
       existing.activity_score = n.activity_score
       existing.stance = n.stance
       existing.status = n.status
+      existing.tier = n.tier
       return existing
     }
     return { ...n }

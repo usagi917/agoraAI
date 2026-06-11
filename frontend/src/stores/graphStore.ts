@@ -11,6 +11,8 @@ export interface GraphNode {
   sentiment_score: number
   status: string
   group: string
+  /** 'population' = 全人口レイヤーの極小ドット */
+  tier?: string
 }
 
 export interface GraphEdge {

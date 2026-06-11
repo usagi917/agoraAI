@@ -519,6 +519,50 @@ async def get_social_graph(
     }
 
 
+@router.get("/simulations/{sim_id}/population-network")
+async def get_population_network(
+    sim_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """全人口ネットワークをコンパクト形式で返す。
+
+    10,000 ノード規模の描画用にペイロードを圧縮する:
+    - nodes: agent_index 順の [{id, agent_index}]
+    - edges: [source_index, target_index, strength] の配列
+    """
+    pop_id = await _resolve_population_id(sim_id, session)
+
+    agents_result = await session.execute(
+        select(AgentProfile.id, AgentProfile.agent_index)
+        .where(AgentProfile.population_id == pop_id)
+        .order_by(AgentProfile.agent_index)
+    )
+    agent_rows = agents_result.all()
+
+    id_to_index = {row.id: row.agent_index for row in agent_rows}
+    nodes = [{"id": row.id, "agent_index": row.agent_index} for row in agent_rows]
+
+    edges_result = await session.execute(
+        select(SocialEdge.agent_id, SocialEdge.target_id, SocialEdge.strength)
+        .where(SocialEdge.population_id == pop_id)
+    )
+    edges = []
+    for agent_id, target_id, strength in edges_result.all():
+        si = id_to_index.get(agent_id)
+        ti = id_to_index.get(target_id)
+        if si is None or ti is None:
+            continue
+        edges.append([si, ti, round(float(strength), 3)])
+
+    return {
+        "population_id": pop_id,
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
 @router.get("/simulations/{sim_id}/agents")
 async def get_agents(
     sim_id: str,

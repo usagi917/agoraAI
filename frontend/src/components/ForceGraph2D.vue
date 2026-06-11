@@ -108,8 +108,28 @@ function createGraph(element: HTMLElement) {
 
 const HIGH_DEGREE_LABEL_THRESHOLD = 8
 
+/** これを超えるノード数では物理・衝突計算を軽量化する（人口レイヤー想定） */
+const LARGE_GRAPH_THRESHOLD = 1500
+
+const isLargeGraph = computed(() => currentNodes.value.length > LARGE_GRAPH_THRESHOLD)
+
+/** スタンス未確定の人口ノードの色（感化されるとスタンス色に変わる） */
+const POPULATION_UNDECIDED_COLOR = '#475569'
+
 function paintNode(node: SimNode, ctx: CanvasRenderingContext2D, globalScale: number) {
   if (typeof node.x !== 'number' || typeof node.y !== 'number') return
+
+  // 人口レイヤー: グロー/ラベル無しの極小ドットを最小コストで描く
+  if (node.tier === 'population') {
+    const popDimmed = isNodeDimmed(node.id)
+    const color = node.stance ? nodeDisplayColor(node) : POPULATION_UNDECIDED_COLOR
+    ctx.beginPath()
+    ctx.arc(node.x, node.y, nodeRadius(node), 0, Math.PI * 2)
+    ctx.fillStyle = withAlpha(color, popDimmed ? 0.08 : node.stance ? 0.75 : 0.45)
+    ctx.fill()
+    return
+  }
+
   const degree = degrees.value.get(node.id) ?? 0
   const r = nodeRadius(node, degree)
   const baseColor = nodeDisplayColor(node)
@@ -184,10 +204,16 @@ function configureForces(g: ReturnType<typeof createGraph>) {
   const center = g.d3Force('center') as { strength?: (v: number) => unknown } | undefined
   center?.strength?.(p.centerStrength)
 
-  // ノード重なり防止（次数ベースの半径 + 余白）
+  // ノード重なり防止（次数ベースの半径 + 余白）。
+  // 大規模グラフでは iterations を下げ、人口ドットは余白なしにして計算量を抑える。
+  const collideIterations = isLargeGraph.value ? 1 : 2
   g.d3Force('collide', forceCollide<SimNode>(
-    (n) => nodeRadius(n, degrees.value.get(n.id) ?? 0) + p.collidePadding,
-  ).iterations(2))
+    (n) => n.tier === 'population'
+      ? nodeRadius(n)
+      : nodeRadius(n, degrees.value.get(n.id) ?? 0) + p.collidePadding,
+  ).iterations(collideIterations))
+
+  g.d3VelocityDecay(isLargeGraph.value ? 0.55 : 0.4)
 }
 
 function syncSize() {
@@ -198,12 +224,19 @@ function syncSize() {
   graph.width(w).height(h)
 }
 
+let wasLargeGraph = false
+
 function applyData() {
   if (!graph) return
   const merged = mergeGraphData(currentNodes.value, props.nodes, props.edges)
   currentNodes.value = merged.nodes
   currentLinks.value = merged.links
   graph.graphData({ nodes: merged.nodes, links: merged.links })
+  // 人口レイヤーの出入りで規模クラスが変わったら物理設定を引き直す
+  if (isLargeGraph.value !== wasLargeGraph) {
+    wasLargeGraph = isLargeGraph.value
+    configureForces(graph)
+  }
 }
 
 function refreshCanvas() {
@@ -226,9 +259,19 @@ onMounted(() => {
     .nodeCanvasObjectMode(() => 'replace')
     .nodeCanvasObject(paintNode as never)
     .nodePointerAreaPaint(paintNodePointerArea as never)
-    .linkColor(((l: SimLink) => computeLinkColor(l.relation_type, l.weight, isLinkDimmed(l))) as never)
-    .linkWidth(((l: SimLink) => computeLinkWidth(l.weight)) as never)
-    .linkDirectionalParticles(((l: SimLink) => (clamp01(l.weight) > 0.75 ? 1 : 0)) as never)
+    .linkColor(((l: SimLink) => (
+      // 人口エッジは1万本規模で重なるため、ごく薄く描いて Obsidian 的な霞にする
+      l.id?.startsWith('pop-edge-')
+        ? withAlpha('#7dd3fc', isLinkDimmed(l) ? 0.015 : 0.05)
+        : computeLinkColor(l.relation_type, l.weight, isLinkDimmed(l))
+    )) as never)
+    .linkWidth(((l: SimLink) => (
+      l.id?.startsWith('pop-edge-') ? 0.4 : computeLinkWidth(l.weight)
+    )) as never)
+    .linkDirectionalParticles(((l: SimLink) => (
+      // 人口エッジ（数万本規模）はパーティクル無し
+      l.id?.startsWith('pop-edge-') ? 0 : clamp01(l.weight) > 0.75 ? 1 : 0
+    )) as never)
     .linkDirectionalParticleWidth(1.6)
     .linkDirectionalParticleColor(((l: SimLink) => withAlpha(nodeColor(l.relation_type), 0.7)) as never)
     .warmupTicks(0)

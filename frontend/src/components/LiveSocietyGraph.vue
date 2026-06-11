@@ -382,7 +382,15 @@ onUnmounted(() => {
     </div>
 
     <!-- Layer toggles -->
-    <div v-if="kgStore.entityCount > 0" class="layer-toggles">
+    <div v-if="kgStore.entityCount > 0 || societyGraphStore.populationNodeCount > 0" class="layer-toggles">
+      <button
+        v-if="societyGraphStore.populationNodeCount > 0"
+        class="layer-btn"
+        :class="{ active: societyGraphStore.populationVisible }"
+        title="全人口レイヤー"
+        data-testid="population-toggle"
+        @click="societyGraphStore.populationVisible = !societyGraphStore.populationVisible"
+      >P</button>
       <button
         class="layer-btn"
         :class="{ active: societyGraphStore.socialEdgesVisible }"
@@ -419,6 +427,16 @@ onUnmounted(() => {
       <span class="kg-badge-label">KG</span>
       <span class="kg-badge-count">{{ kgStore.entityCount }} entities</span>
       <span class="kg-badge-count">{{ kgStore.relationCount }} relations</span>
+    </div>
+
+    <!-- Population stats badge -->
+    <div
+      v-if="societyGraphStore.populationVisible && societyGraphStore.populationNodeCount > 0"
+      class="kg-stats-badge population-stats-badge"
+      data-testid="population-stats"
+    >
+      <span class="kg-badge-label">人口</span>
+      <span class="kg-badge-count">{{ societyGraphStore.populationNodeCount.toLocaleString() }} 人</span>
     </div>
 
     <!-- Conversation toast -->
@@ -701,6 +719,12 @@ onUnmounted(() => {
   font-size: 0.65rem;
   color: rgba(200, 200, 255, 0.6);
 }
+
+.population-stats-badge {
+  bottom: 2.9rem;
+  border-color: rgba(79, 195, 247, 0.25);
+}
+
 .kg-badge-label {
   color: rgba(186, 104, 200, 0.9);
   font-weight: 700;

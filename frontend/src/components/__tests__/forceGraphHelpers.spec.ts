@@ -303,6 +303,18 @@ describe('nodeRadius with degree', () => {
   })
 })
 
+describe('nodeRadius for population tier', () => {
+  it('population tier は次数や重要度に関わらず極小ドット', () => {
+    const r = nodeRadius({ importance_score: 0.9, activity_score: 1, tier: 'population' }, 50)
+    expect(r).toBeLessThan(3)
+    expect(r).toBeGreaterThan(0)
+  })
+
+  it('tier 未指定は従来どおり', () => {
+    expect(nodeRadius({ importance_score: 0, activity_score: 0 })).toBe(5)
+  })
+})
+
 describe('labelAlpha', () => {
   it('hides labels when zoomed far out', () => {
     expect(labelAlpha(0.2)).toBe(0)

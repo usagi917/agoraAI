@@ -22,6 +22,7 @@ from src.app.services.society.evaluation import evaluate_society_simulation
 from src.app.services.society.persona_generator import (
     generate_persona_narratives_post_activation,
 )
+from src.app.services.society.population_propagation import run_population_propagation
 from src.app.services.society.representative_selector import select_representatives
 from src.app.services.society.demographic_analyzer import analyze_demographics
 from src.app.services.society.kg_enricher import enrich_agents_from_kg
@@ -59,6 +60,32 @@ def _phase_limits(cognitive_config: dict | None = None) -> dict[str, int]:
         if isinstance(value, (int, float)) and not isinstance(value, bool) and int(value) > 0:
             limits[key] = int(value)
     return limits
+
+
+def _propagation_config(cognitive_config: dict | None = None) -> dict:
+    """全人口意見伝播の設定を cognitive config (opinion_propagation) から導出する。
+
+    値が欠損・不正な場合はデフォルトにフォールバックする。
+    """
+    defaults: dict = {"enabled": True, "max_timesteps": 8, "confidence_threshold": 0.5}
+    try:
+        config = cognitive_config if cognitive_config is not None else settings.load_cognitive_config()
+        section = config.get("opinion_propagation") or {}
+    except Exception:
+        logger.warning("Failed to load cognitive config; using default propagation config")
+        return defaults
+
+    result = dict(defaults)
+    enabled = section.get("enabled")
+    if isinstance(enabled, bool):
+        result["enabled"] = enabled
+    timesteps = section.get("max_timesteps")
+    if isinstance(timesteps, (int, float)) and not isinstance(timesteps, bool) and int(timesteps) > 0:
+        result["max_timesteps"] = int(timesteps)
+    threshold = section.get("confidence_threshold")
+    if isinstance(threshold, (int, float)) and not isinstance(threshold, bool) and 0 < float(threshold) <= 1:
+        result["confidence_threshold"] = float(threshold)
+    return result
 
 
 @dataclass
@@ -244,6 +271,66 @@ async def run_society_pulse(
         "selected_agent_ids": selected_agent_ids,
         "usage": activation_result["usage"],
     })
+
+    # === Population Propagation: 全人口への意見伝播 ===
+    propagation_cfg = _propagation_config()
+    if propagation_cfg["enabled"] and len(agents) > len(selected_agents):
+        try:
+            await sse_manager.publish(simulation_id, "population_propagation_started", {
+                "population_count": len(agents),
+                "edge_count": len(all_edges),
+                "max_timesteps": propagation_cfg["max_timesteps"],
+            })
+
+            async def on_propagation_round(delta):
+                await sse_manager.publish(simulation_id, "population_propagation_round", {
+                    "round": delta.round,
+                    "changes": [
+                        {"i": c["agent_index"], "s": c["stance"]}
+                        for c in delta.changes
+                    ],
+                    "changed_count": delta.changed_count,
+                    "distribution": delta.distribution,
+                })
+
+            propagation_result = await run_population_propagation(
+                agents,
+                individual_responses,
+                all_edges,
+                seed=sim.seed,
+                max_timesteps=propagation_cfg["max_timesteps"],
+                confidence_threshold=propagation_cfg["confidence_threshold"],
+                on_round=on_propagation_round,
+            )
+
+            activation_result["aggregation"]["population_stance_distribution"] = (
+                propagation_result.distribution
+            )
+
+            session.add(SocietyResult(
+                id=str(uuid.uuid4()),
+                simulation_id=simulation_id,
+                population_id=pop_id,
+                layer="population_propagation",
+                phase_data={
+                    "population_count": len(agents),
+                    "distribution": propagation_result.distribution,
+                    "total_rounds": propagation_result.total_rounds,
+                    "converged": propagation_result.converged,
+                    "changed_per_round": [d.changed_count for d in propagation_result.rounds],
+                },
+                usage={},
+            ))
+            await session.commit()
+
+            await sse_manager.publish(simulation_id, "population_propagation_completed", {
+                "distribution": propagation_result.distribution,
+                "converged": propagation_result.converged,
+                "total_rounds": propagation_result.total_rounds,
+                "changed_total": sum(d.changed_count for d in propagation_result.rounds),
+            })
+        except Exception as e:
+            logger.warning("Population propagation failed, continuing: %s", e)
 
     # === Post-Activation Persona Narrative Generation ===
     await sse_manager.publish(simulation_id, "persona_generation_started", {

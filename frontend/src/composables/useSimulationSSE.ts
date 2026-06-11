@@ -4,6 +4,7 @@ import { useGraphStore } from '../stores/graphStore'
 import { useActivityStore } from '../stores/activityStore'
 import { useSocietyStore } from '../stores/societyStore'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
+import { getPopulationNetwork } from '../api/client'
 import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
 import { useAgentVisualizationStore } from '../stores/agentVisualizationStore'
 import { useCognitiveSSE } from './useCognitiveSSE'
@@ -113,6 +114,10 @@ export function useSimulationSSE(simulationId: string) {
       'network_propagation_started',
       'propagation_timestep',
       'network_propagation_completed',
+      // Population Propagation (全人口への意見伝播)
+      'population_propagation_started',
+      'population_propagation_round',
+      'population_propagation_completed',
       // Society ソーシャルグラフ
       'society_social_graph_ready',
       // Unified モード イベント
@@ -740,6 +745,35 @@ export function useSimulationSSE(simulationId: string) {
         }
         activity.addEntry('event', '◎', `伝播完了 (${payload.total_timesteps}ステップ, ${payload.converged ? '収束' : '未収束'})`, {
           detail: `${payload.cluster_count}クラスタ, ${payload.stance_updates?.length || 0}件のスタンス変化`,
+          track: 'phase',
+          status: 'completed',
+        })
+        break
+
+      case 'population_propagation_started':
+        // 全人口ネットワークを取得して人口レイヤーを表示
+        getPopulationNetwork(simulationId)
+          .then((network) => societyGraphStore.setPopulationNetwork(network))
+          .catch((err) => console.warn('population-network の取得に失敗:', err))
+        vizStore.addSystemEvent('◎', '全人口伝播開始', `${payload.population_count}人へ意見が波及中`)
+        activity.addEntry('phase', '◎', `全人口伝播開始 (${payload.population_count}人, ${payload.edge_count}辺)`, {
+          track: 'phase',
+          status: 'running',
+        })
+        break
+
+      case 'population_propagation_round':
+        if (payload.changes?.length) {
+          societyGraphStore.applyPropagationRound(payload.changes)
+        }
+        break
+
+      case 'population_propagation_completed':
+        if (payload.distribution) {
+          store.setOpinionDistribution(payload.distribution)
+        }
+        activity.addEntry('event', '◎', `全人口伝播完了 (${payload.total_rounds}ラウンド, ${payload.converged ? '収束' : '未収束'})`, {
+          detail: `${payload.changed_total || 0}件のスタンス変化`,
           track: 'phase',
           status: 'completed',
         })
