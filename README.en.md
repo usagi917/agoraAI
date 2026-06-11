@@ -6,224 +6,314 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](backend/pyproject.toml)
 [![Node.js 20+](https://img.shields.io/badge/node-20%2B-339933.svg)](frontend/package.json)
 
-> A multi-agent analysis app that turns one question into synthetic population reactions, council debate, and a final Decision Brief.
+> A multi-agent analysis app that turns one question into synthetic population reactions, expert and representative debate, and a final Decision Brief.
 
-## What It Is
+Agent AI helps you explore business decisions, policy impact, market entry, and future scenarios from multiple viewpoints. You enter a question in the browser, the backend runs AI agents, progress streams live, and the final screen summarizes the decision material.
 
-- Start from one of five guided question templates or a free-form prompt on the LaunchPad.
-- Switch between five presets: `quick`, `standard`, `deep`, `research`, and `baseline`.
-- Attach `.txt`, `.md`, and `.pdf` files to a project and run evidence-aware analysis on top of them.
-- Follow progress live over SSE with activity feed, social response views, conversations, and graph updates.
-- Review Decision Briefs, scenario comparison, propagation analysis, transcripts, reruns, and Codex Review Agent questions on the results page.
-- Generate, inspect, and fork synthetic populations from `/populations`.
-- Start Decision Lab from `/compare`, then run two scenarios against the same population side by side to compare opinion shifts, coalition changes, and audit trails.
-- Theater UI shows debate cards, live dialogue streams, and real-time stance shifts during simulation.
-- `config/` and `templates/` centralize providers, cognitive settings, population mix, and LaunchPad templates.
+## Start Here
 
-## 30-Second Big Picture
+If this is your first time using the project, follow only this order.
 
-Agent AI takes a question and optional evidence documents, runs them through synthetic population reactions, representative and expert deliberation, and quality checks, then turns the result into a decision-ready Decision Brief.
+1. Install the required tools
+   - Python 3.11+
+   - uv
+   - Node.js 20+
+   - pnpm
+   - Docker Desktop or Docker Compose, only if you want Docker startup
+2. Create `.env`
+3. Add `OPENAI_API_KEY`
+4. Start the app
+5. Open `http://localhost:5173` or `http://localhost:3000`
+
+Basic terms:
+
+| Term | Meaning in this project |
+| --- | --- |
+| backend | Python service that runs AI work, DB storage, API, and SSE streaming |
+| frontend | Vue browser UI |
+| `.env` | Settings file for API keys and DB URLs |
+| API key | Secret string used to call AI services such as OpenAI |
+| SSE | The mechanism that streams progress to the browser while a run is active |
+| SQLite | Lightweight local DB. Good enough for first local runs |
+| PostgreSQL / Redis | Production-style DB / cache used by Docker Compose |
+
+## Easiest Startup
+
+### Option A: Local Development
+
+This is the simplest path for day-to-day development and local checks. On the first run, the helper script installs missing dependencies.
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and replace at least this value with your OpenAI API key.
+
+```bash
+OPENAI_API_KEY=sk-your-key-here
+```
+
+Start the app.
+
+```bash
+./scripts/dev.sh
+```
+
+Then open:
+
+- UI: `http://localhost:5173`
+- API docs: `http://localhost:8000/docs`
+- Health check: `http://localhost:8000/health`
+
+Press `Ctrl+C` in the terminal to stop both servers.
+
+Custom ports:
+
+```bash
+./scripts/dev.sh --backend-port 8001 --frontend-port 5174
+```
+
+### Option B: Docker Compose
+
+Use this when you want PostgreSQL and Redis started together with the app.
+
+```bash
+cp .env.example .env
+```
+
+Set `OPENAI_API_KEY` in `.env`, then run:
+
+```bash
+docker compose up --build
+```
+
+Then open:
+
+- UI: `http://localhost:3000`
+- API docs: `http://localhost:8000/docs`
+- Health check: `http://localhost:8000/health`
+
+In Docker, the frontend is served by nginx on `:3000`, and `/api` is forwarded to the backend.
+
+## How To Use The UI
+
+1. Open `http://localhost:5173`.
+2. On the LaunchPad, choose a question template or write a free-form question.
+3. Attach `.txt`, `.md`, or `.pdf` files if needed.
+4. Choose an execution preset. If unsure, use `standard`.
+5. Start the run. The app opens `/sim/:id` and shows live progress, dialogue, social reactions, and graphs.
+6. After completion, open `/sim/:id/results` for the Decision Brief, Transcript, Propagation, rerun, and Codex Review.
+7. To compare two options, start Decision Lab from `/compare`.
+
+## Reading The Graphic View
+
+On `/sim/:id`, the Live Simulation graphic view shows synthetic population members, representatives, experts, and knowledge-graph entities. As the run advances, the view adds nodes, edges, dialogue, and stance changes.
+
+| Item | How to read it |
+| --- | --- |
+| Nodes | Agents, population samples, or knowledge-graph entities. Larger or labeled nodes are often central to the debate or graph structure. |
+| Colors | Stances or entity types. Use the in-view legend to read support, opposition, neutral, undecided, and related states. |
+| Edges | Social ties, conversations, or agent-to-entity links. Thicker lines mean stronger relationships. |
+| Phase badge | Shows the current stage, such as `Society Pulse`, `Council`, or `Synthesis`. |
+| agents / edges | Current visible node and connection counts. These can grow while a run is active. |
+
+Basic operations:
+
+- Click a node to open details for that agent or entity.
+- Hover an edge to see relation type, endpoints, and strength.
+- Click an edge to inspect linked conversations and interactions.
+- Click the background to clear the current selection.
+- Use the mouse wheel or trackpad to zoom, and drag to pan.
+
+Use the `⚙` control to tune graph physics. If nodes overlap, increase repulsion or node spacing. If the graph spreads too far, reduce link distance. Use reset to return to defaults.
+
+When layer buttons appear, they toggle what is visible.
+
+| Button | Meaning |
+| --- | --- |
+| `P` | Full population layer. Shows the wider population distribution as dots, not only selected representatives. |
+| `S` | Social edges. Shows social connections between agents. |
+| `K` | Knowledge graph. Shows entities and relations extracted from documents and analysis. |
+| `L` | Agent-to-entity links. Shows how agents connect to knowledge-graph items. |
+
+Suggested reading flow:
+
+- Start with the color distribution to see the broad support, opposition, and neutral balance.
+- Then click large or highly connected nodes to see which viewpoints are shaping the debate.
+- Click edges to inspect conversations inside aligned or conflicting groups.
+- Enable `K` and `L` when you want to trace which people, issues, companies, or policies are influencing agent judgments.
+
+## What It Can Do
+
+- Start from five LaunchPad templates:
+  - `business_analysis`
+  - `market_entry`
+  - `policy_impact`
+  - `policy_simulation`
+  - `scenario_exploration`
+- Choose `quick`, `standard`, `deep`, `research`, or `baseline` presets.
+- Save attached documents to a project and use them as evidence.
+- Inspect synthetic population reactions, representative and expert debate, opinion distributions, and social graphs.
+- Compare option A and option B against the same population in Decision Lab.
+- Generate, inspect, and fork populations from `/populations`.
+- Enable Codex CLI integration to ask review questions against completed reports.
+
+## Big Picture
 
 ```mermaid
 flowchart LR
-    Q["Question / Template / Documents"] --> L["LaunchPad<br/>Vue UI"]
-    L --> A["FastAPI<br/>Simulation API"]
+    Q["Question / Template / Documents"] --> F["Frontend<br/>Vue + Vite"]
+    F --> A["Backend<br/>FastAPI"]
     A --> P["Project / Document<br/>storage + GraphRAG"]
     A --> D["Dispatcher<br/>preset normalization"]
     D --> S["Society Pulse<br/>synthetic population reactions"]
     S --> C["Council<br/>representatives + experts"]
-    C --> Y["Synthesis<br/>Decision Brief generation"]
-    Y --> R["Results<br/>evidence, rationale, next actions"]
-    Y --> X["Decision Lab<br/>scenario comparison"]
-    S -. SSE .-> V["Live Simulation<br/>progress, dialogue, social graph"]
-    C -. SSE .-> V
-    Y -. SSE .-> V
+    C --> B["Synthesis<br/>Decision Brief"]
+    B --> R["Results<br/>evidence, rationale, next actions"]
+    B --> L["Decision Lab<br/>scenario comparison"]
+    S -. SSE .-> F
+    C -. SSE .-> F
+    B -. SSE .-> F
 ```
 
-How to read it:
+The execution flow has three main stages.
 
-- Users choose a question, template, file attachments, and execution preset on the LaunchPad.
-- The backend normalizes the request to `quick`, `standard`, `deep`, `research`, or `baseline`, then runs only the required phases.
-- Runtime state is streamed over SSE, and frontend Pinia stores reflect it in the Activity Feed, social graph, dialogue views, and Theater UI.
-- Results can be reused as Decision Briefs, scenario comparisons, propagation analysis, transcripts, and follow-up questions.
-
-## Screens And Workflow
-
-| Route | Purpose | Main contents |
-| --- | --- | --- |
-| `/` | LaunchPad | question templates, free-form prompt, file upload, preset selection, run history |
-| `/sim/:id` | Live Simulation | SSE progress, activity feed, social response views, conversations, live graph, Theater UI (debate cards, dialogue stream) |
-| `/sim/:id/results` | Results | Decision Brief, scenario comparison, propagation, transcript, Codex Review |
-| `/populations` | Populations | generation, listing, detail view, forking |
-| `/compare` | Compare Setup | configure two scenarios, execution presets, and population settings for comparison |
-| `/scenario/:id` | Decision Lab | scenario pair comparison, opinion shift table, coalition map, audit timeline |
-
-The main execution flow has three stages:
-
-1. `Society Pulse`
-Build a large synthetic population from config and aggregate reactions from selected agents.
-2. `Council`
-Pick citizen representatives and experts, then run a structured multi-round debate.
-3. `Synthesis`
-Combine social signals, debate output, and quality metadata into a Decision Brief and comparable scenarios.
-
-### Presets
-
-| Preset | Main phases | When to use it |
-| --- | --- | --- |
-| `quick` | `society_pulse -> synthesis` | Fast first-pass judgment |
-| `standard` | `society_pulse -> council -> synthesis` | Default analysis flow |
-| `deep` | `society_pulse -> multi_perspective -> council -> pm_analysis -> synthesis` | Deeper analysis including PM review |
-| `research` | `society_pulse -> issue_mining -> multi_perspective -> intervention -> synthesis` | Issue mining and intervention comparison |
-| `baseline` | single-LLM baseline execution | Comparison and validation |
-
-Legacy mode names are normalized internally. For example, `unified -> standard`, `society_first -> research`, and `single -> quick`.
-
-## Code Reading Map
-
-| What you want to understand | Main files |
+| Stage | What happens |
 | --- | --- |
-| App startup, CORS, template seeding, health check | `backend/src/app/main.py` |
-| Environment variables and config YAML loading | `backend/src/app/config.py` |
-| DB connection, table creation, SQLite/PostgreSQL switching | `backend/src/app/database.py` |
-| API router registration | `backend/src/app/api/routes/__init__.py` |
-| Simulation creation, SSE, reports, reruns | `backend/src/app/api/routes/simulations.py` |
-| Execution preset definitions and legacy mode mapping | `backend/src/app/models/simulation.py` |
-| Dispatch between `baseline` and unified execution | `backend/src/app/services/simulation_dispatcher.py` |
-| `Society Pulse -> Council -> Synthesis` orchestration | `backend/src/app/services/unified_orchestrator.py` |
-| Synthetic populations, social networks, reactions, propagation, evaluation | `backend/src/app/services/society/` |
-| LLM task routing, provider adapters, fallback | `backend/src/app/llm/` |
-| Frontend route definitions | `frontend/src/router.ts` |
-| REST API client and TypeScript types | `frontend/src/api/client.ts` |
-| SSE subscription and live state updates | `frontend/src/composables/useSimulationSSE.ts` |
-| Stores for execution state, graphs, society data, and Decision Lab | `frontend/src/stores/` |
-| Main screens | `frontend/src/pages/` |
-| Visualization and result components | `frontend/src/components/` |
+| Society Pulse | Build a synthetic population from config and aggregate representative reactions. |
+| Council | Citizen representatives and experts debate across multiple rounds. |
+| Synthesis | Combine reactions, debate, and quality metadata into a Decision Brief. |
 
-## Architecture
+## Screens
 
-### System Overview
+| URL | Purpose |
+| --- | --- |
+| `/` | LaunchPad. Choose the question, template, files, and preset |
+| `/sim/:id` | Live Simulation. Progress, dialogue, social reactions, and graphs |
+| `/sim/:id/results` | Results. Decision Brief, Transcript, Propagation, rerun, Codex Review |
+| `/populations` | Populations. Generate, list, inspect, and fork populations |
+| `/compare` | Compare Setup. Start a two-scenario comparison |
+| `/scenario/:id` | Decision Lab. Comparison output, opinion shifts, coalition map, audit timeline |
 
-```mermaid
-flowchart LR
-    User["User"] --> Frontend
+## Presets
 
-    subgraph Frontend["Frontend"]
-        LaunchPad["LaunchPad / Compare / Populations"]
-        LiveUI["Live Simulation / Results"]
-    end
+| Preset | Main phases | Use when |
+| --- | --- | --- |
+| `quick` | `society_pulse -> synthesis` | You need a fast first read |
+| `standard` | `society_pulse -> council -> synthesis` | You are unsure which preset to choose |
+| `deep` | `society_pulse -> multi_perspective -> council -> pm_analysis -> synthesis` | You want deeper multi-perspective and PM analysis |
+| `research` | `society_pulse -> issue_mining -> multi_perspective -> intervention -> synthesis` | You care most about issue mining and intervention comparison |
+| `baseline` | single-LLM baseline | You want to compare against the multi-agent flow |
 
-    subgraph Backend["Backend"]
-        API["FastAPI REST API + SSE"]
-        Dispatcher["Simulation Dispatcher"]
-        Unified["Unified Orchestrator"]
-        Baseline["Baseline Orchestrator"]
-    end
+Legacy mode names are normalized internally. Examples: `unified -> standard`, `society_first -> research`, `single -> quick`.
 
-    subgraph Runtime["Data / Runtime"]
-        DB["SQLite local / PostgreSQL compose"]
-        Redis["Redis compose<br/>optional in local dev"]
-        Config["config/*.yaml"]
-        Templates["templates/ja/*.yaml"]
-        LLM["LiteLLM + provider adapters"]
-    end
+## Configuration
 
-    Frontend --> API
-    LaunchPad --> API
-    LiveUI --> API
-    API --> Dispatcher
-    Dispatcher --> Unified
-    Dispatcher --> Baseline
-    Backend --> DB
-    Backend --> Redis
-    Backend --> Config
-    Backend --> Templates
-    Unified --> LLM
-    Baseline --> LLM
-```
+For first use, you usually only need `.env`. Look at `config/` and `templates/` only when you want detailed behavior changes.
 
-### Analysis Pipeline
+| Goal | File or folder |
+| --- | --- |
+| Add API keys | `.env` |
+| Use SQLite for local DB | `DATABASE_URL` in `.env` |
+| Use PostgreSQL | `DATABASE_URL` in `.env` and `docker compose up -d postgres redis` |
+| Change default provider / model | `config/models.yaml` |
+| Change OpenAI / Gemini / Anthropic fallback | `config/llm_providers.yaml` |
+| Tune execution profiles | `config/swarm_profiles.yaml` |
+| Tune population and network settings | `config/population_mix.yaml` |
+| Tune cognitive, communication, and scheduling settings | `config/cognitive.yaml` |
+| Tune GraphRAG / grounding | `config/graphrag.yaml`, `config/grounding/` |
+| Change LaunchPad templates | `templates/ja/*.yaml` |
 
-```mermaid
-flowchart TB
-    Input["1. Question + file attachments"] --> Create["2. POST /simulations"]
-    Create --> Dispatch["3. Dispatcher selects the mode"]
-
-    Dispatch -->|quick / standard / deep / research| Pulse["4. Society Pulse<br/>population -> selection -> activation -> evaluation"]
-    Pulse --> Council["5. Council<br/>representatives -> devil's advocate -> 3-round debate"]
-    Council --> Synthesis["6. Synthesis<br/>Decision Brief / report generation"]
-
-    Dispatch -->|baseline| BaselinePath["4b. Single-LLM baseline analysis"]
-
-    Pulse --> Stream["SSE / graph / timeline updates"]
-    Council --> Stream
-    Synthesis --> Stream
-    BaselinePath --> Stream
-
-    Synthesis --> Results["7. Results / follow-up / rerun"]
-    BaselinePath --> Results
-```
-
-- `baseline` skips the multi-agent debate flow and produces a comparison brief from a single LLM call.
-- `scenario-pairs` runs two simulations from the same population snapshot and then builds a side-by-side comparison.
-
-## How It Works
-
-1. Enter a question on the LaunchPad.
-2. Attach files if needed.
-3. Start a simulation and watch progress in the live view over SSE.
-4. Review the final report, then ask follow-up questions or rerun the simulation.
-5. Use `scenario-pairs` when you want to compare scenarios side by side.
-
-## Prerequisites
-
-- Python 3.11+
-- uv
-- Node.js 20+
-- pnpm
-- Docker / Docker Compose if you want PostgreSQL, Redis, or full container startup
-
-## Quick Start
-
-### Docker Compose
+The `.env.example` default DB is SQLite.
 
 ```bash
-cp .env.example .env
-docker compose up --build
+DATABASE_URL=sqlite+aiosqlite:///./data/db.sqlite3
 ```
 
-- App: `http://localhost:3000`
-- API docs: `http://localhost:8000/docs`
-- Health check: `http://localhost:8000/health`
-
-Notes:
-
-- The default provider is `openai`.
-- Running new simulations usually requires `OPENAI_API_KEY`.
-- The app can still boot without API keys, but live execution will be disabled.
-
-### One-command local startup
-
-After installing dependencies, you can start the backend and frontend together.
+To use PostgreSQL and Redis locally:
 
 ```bash
-cp .env.example .env
+docker compose up -d postgres redis
+```
 
+Then set `.env`:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://agentai:agentai@localhost:5432/agentai
+REDIS_URL=redis://localhost:6379/0
+```
+
+## Codex Review
+
+Codex Review is an optional feature that asks Codex CLI to perform read-only checks against completed reports. It is not required for normal simulations.
+
+Install and log in to Codex CLI, then set:
+
+```bash
+CODEX_REVIEW_ENABLED=true
+CODEX_BIN=codex
+CODEX_REVIEW_TRANSPORT=stdio
+CODEX_REVIEW_TIMEOUT_SECONDS=60
+CODEX_REVIEW_WORKDIR=/tmp/agora_codex_review_empty
+```
+
+v1 uses only the stdio transport via `codex app-server --listen stdio://`. Some legacy `AGORAAI_CODEX_*` variables are still accepted as compatibility aliases.
+
+## Development Commands
+
+This repository uses `pnpm` for Node.js work and `uv` for Python work. Do not use `npm`, `yarn`, or `pip`.
+
+### Backend
+
+```bash
 cd backend
 uv sync --extra dev
-
-cd ../frontend
-pnpm install
-
-cd ..
-./scripts/dev.sh
+uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-- Backend: `http://localhost:8000`
-- Frontend: `http://localhost:5173`
-- Custom ports: `./scripts/dev.sh --backend-port 8001 --frontend-port 5174`
+Tests:
 
-### Minimal API Example
+```bash
+cd backend
+uv run pytest -q
+```
+
+Optional quality checks:
+
+```bash
+cd backend
+uv run ruff check src
+uv run deptry .
+```
+
+### Frontend
+
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
+
+Build and tests:
+
+```bash
+cd frontend
+pnpm build
+pnpm test:unit
+pnpm exec playwright install --with-deps chromium
+pnpm test:e2e
+```
+
+Dead-file and dependency check:
+
+```bash
+cd frontend
+pnpm check:dead
+```
+
+## Minimal API Example
+
+Start the backend first.
 
 ```bash
 curl -X POST http://localhost:8000/simulations \
@@ -237,141 +327,115 @@ curl -X POST http://localhost:8000/simulations \
   }'
 ```
 
+Use the returned `id` as `SIM_ID` to watch progress.
+
 ```bash
 curl -N http://localhost:8000/simulations/SIM_ID/stream
 ```
+
+Final report:
 
 ```bash
 curl http://localhost:8000/simulations/SIM_ID/report
 ```
 
-## Local Development
-
-### Backend
-
-```bash
-cp .env.example .env
-
-cd backend
-uv sync --extra dev
-uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-The local default `DATABASE_URL` uses SQLite, so the backend can start without extra infrastructure.
-
-### Frontend
-
-```bash
-cd frontend
-pnpm install
-pnpm dev
-```
-
-- Frontend dev server: `http://localhost:5173`
-- When `VITE_API_BASE_URL` is unset, the app uses `/api`
-- Vite proxies `/api` to `http://localhost:8000`
-- The Docker frontend serves nginx on `:3000` and forwards `/api` to the backend
-- nginx disables buffering for the SSE endpoint `/api/simulations/:id/stream`
-
-### With PostgreSQL / Redis
-
-```bash
-docker compose up -d postgres redis
-```
-
-If needed, switch `.env` to:
-
-```bash
-DATABASE_URL=postgresql+asyncpg://agentai:agentai@localhost:5432/agentai
-REDIS_URL=redis://localhost:6379/0
-```
-
-## Configuration
-
-| Item | Location |
-| --- | --- |
-| API keys and DB connection | `.env` |
-| Default provider and model | `config/models.yaml` |
-| Provider definitions and fallback | `config/llm_providers.yaml` |
-| Cognitive and scheduling settings | `config/cognitive.yaml` |
-| Execution profiles | `config/swarm_profiles.yaml` |
-| Population mix | `config/population_mix.yaml` |
-| GraphRAG / grounding | `config/graphrag.yaml`, `config/grounding/` |
-| LaunchPad templates | `templates/ja/*.yaml` |
-| Codex Review settings | `.env` variables `CODEX_REVIEW_ENABLED`, `CODEX_BIN`, `CODEX_REVIEW_TRANSPORT`, `CODEX_REVIEW_TIMEOUT_SECONDS`, `CODEX_REVIEW_MOCK`, `CODEX_REVIEW_MAX_CONTEXT_CHARS`, `CODEX_REVIEW_WORKDIR` |
-
-To use the AI check feature, install the Codex CLI, log in, start the backend with `CODEX_REVIEW_ENABLED=true`, and let the backend launch `codex app-server --listen stdio://` over stdio. v1 uses stdio only and limits Codex to read-only checks against completed reports. The legacy `AGORAAI_CODEX_*` variables are still read as compatibility aliases.
-
 ## Main API
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `GET` | `/health` | service status |
-| `GET` | `/templates` | list templates |
-| `POST` | `/projects` | create a project for attachments |
-| `POST` | `/projects/{project_id}/documents` | add documents |
-| `GET` | `/projects/{project_id}/documents` | list attached documents |
-| `POST` | `/simulations` | create a simulation |
-| `GET` | `/simulations` | list simulations |
-| `GET` | `/simulations/{sim_id}` | get status |
-| `GET` | `/simulations/{sim_id}/stream` | SSE progress |
-| `GET` | `/simulations/{sim_id}/timeline` | timeline data |
-| `GET` | `/simulations/{sim_id}/graph` | latest graph |
-| `GET` | `/simulations/{sim_id}/graph/history` | graph history by round |
-| `GET` | `/simulations/{sim_id}/report` | final report |
-| `GET` | `/simulations/{sim_id}/colonies` | colony-level execution state |
-| `GET/POST` | `/simulations/{sim_id}/backtest` | read or run backtests |
-| `GET` | `/simulations/{sim_id}/audit-trail` | audit trail for scenario comparison |
+| `GET` | `/health` | Service status and live execution availability |
+| `GET` | `/templates` | List templates |
+| `POST` | `/projects` | Create a project for attachments |
+| `POST` | `/projects/{project_id}/documents` | Upload `.txt`, `.md`, or `.pdf` documents |
+| `GET` | `/projects/{project_id}/documents` | List attached documents |
+| `POST` | `/simulations` | Create a simulation |
+| `GET` | `/simulations` | List simulations |
+| `GET` | `/simulations/{sim_id}` | Get status and metadata |
+| `GET` | `/simulations/{sim_id}/stream` | SSE progress stream |
+| `GET` | `/simulations/{sim_id}/timeline` | Timeline data |
+| `GET` | `/simulations/{sim_id}/graph` | Latest graph |
+| `GET` | `/simulations/{sim_id}/graph/history` | Graph history by round |
+| `GET` | `/simulations/{sim_id}/report` | Final report |
+| `GET` | `/simulations/{sim_id}/colonies` | Colony-level execution state |
+| `GET/POST` | `/simulations/{sim_id}/backtest` | Read or run backtests |
+| `GET` | `/simulations/{sim_id}/audit-trail` | Audit trail for scenario comparison |
+| `POST` | `/simulations/{sim_id}/rerun` | Rerun with the same conditions |
 | `GET` | `/codex/health` | Codex App Server connection status |
-| `POST` | `/simulations/{sim_id}/codex-review` | ask Codex review questions against a completed report |
-| `POST` | `/simulations/{sim_id}/rerun` | rerun with the same conditions |
-| `POST` | `/scenario-pairs` | start a scenario comparison |
-| `GET` | `/scenario-pairs/{scenario_pair_id}` | get scenario comparison status |
-| `GET` | `/scenario-pairs/{scenario_pair_id}/comparison` | get comparison output |
-| `POST` | `/populations/{population_id}/snapshot` | create a population snapshot for scenario comparison |
+| `POST` | `/simulations/{sim_id}/codex-review` | Ask Codex review questions against a completed report |
+| `POST` | `/scenario-pairs` | Start scenario comparison |
+| `GET` | `/scenario-pairs/{scenario_pair_id}` | Get scenario comparison status |
+| `GET` | `/scenario-pairs/{scenario_pair_id}/comparison` | Get comparison output |
+| `POST` | `/populations/{population_id}/snapshot` | Create a population snapshot for scenario comparison |
 
-### Runs / legacy compatibility
+The `/runs` API is still available for legacy compatibility.
 
-| Method | Endpoint | Purpose |
+## Repository Layout
+
+```text
+.
+├── backend/        # FastAPI API, SSE, DB, simulation runtime, tests
+├── frontend/       # Vue 3 + Vite UI, Pinia stores, visualization, E2E tests
+├── config/         # LLM, cognitive, population, GraphRAG, grounding config
+├── templates/      # LaunchPad templates, experts, PM personas
+├── scripts/        # Local development helpers, mainly scripts/dev.sh
+├── data/           # Local runtime data such as SQLite DBs
+├── docs/           # Implementation notes and generated schema
+├── experiments/    # Validation experiments such as single vs swarm
+├── evaluation/     # Evaluation baselines
+├── plans/          # Development plans and work logs
+├── amplifier/      # Separate Amplifier checkout, not required by Agent AI runtime
+└── docker-compose.yml
+```
+
+### Folder Notes
+
+| Folder | Contents | Beginner note |
 | --- | --- | --- |
-| `GET` | `/runs` | list runs |
-| `POST` | `/runs` | create a run |
-| `GET` | `/runs/{run_id}` | get run status |
-| `GET` | `/runs/{run_id}/report` | get run report |
-| `GET` | `/runs/{run_id}/timeline` | get run timeline |
-| `GET` | `/runs/{run_id}/events` | get run events |
-| `GET` | `/runs/{run_id}/graph` | get run graph |
-| `POST` | `/runs/{run_id}/rerun` | rerun a run |
+| `backend/` | Python/FastAPI API, SSE, DB, simulation, evaluation, Codex Review | Start with `uv sync --extra dev` and `uv run uvicorn ...`. |
+| `frontend/` | Vue 3 + Vite LaunchPad, Live Simulation, Results, Populations, Decision Lab | Local dev uses `pnpm dev`. When `VITE_API_BASE_URL` is unset, it uses `/api`. |
+| `config/` | Provider, model, cognitive, population, GraphRAG, grounding data | You usually do not need to touch it unless changing model or population behavior. |
+| `templates/` | Templates such as `business_analysis`, experts, PM personas | Template edits affect UI choices and backend seed data. |
+| `scripts/` | Development scripts | `./scripts/dev.sh` starts backend and frontend together. |
+| `data/` | SQLite DB and local runtime data | Deleting files here can remove local history and DB data. |
+| `docs/` | Implementation notes and Codex app-server schema | `docs/codex-app-server-schema/` is generated and should not be edited by hand. |
+| `experiments/` | Swarm validation experiments and aggregation scripts | Run the experiment runner after the backend is running. |
+| `evaluation/` | Evaluation baselines | Used for release and quality checks. |
+| `plans/` | Past and active implementation plans | Prefer code and tests as the final source of truth. |
+| `amplifier/` | Separate Amplifier package | Not required to start Agent AI. It has its own license. |
 
-### Society and operational endpoints
+## Experiments
 
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| `GET` | `/society/populations` | list populations |
-| `POST` | `/society/populations/generate` | generate a population |
-| `GET` | `/society/populations/{pop_id}` | population details |
-| `POST` | `/society/populations/{pop_id}/fork` | fork a population |
-| `GET` | `/society/simulations/{sim_id}/activation` | activation output |
-| `GET` | `/society/simulations/{sim_id}/meeting` | meeting output |
-| `GET` | `/society/simulations/{sim_id}/evaluation` | evaluation metrics |
-| `GET` | `/society/simulations/{sim_id}/evaluation/summary` | evaluation summary |
-| `GET` | `/society/simulations/{sim_id}/narrative` | narrative output |
-| `GET` | `/society/simulations/{sim_id}/demographics` | demographic summary |
-| `GET` | `/society/simulations/{sim_id}/propagation` | propagation data |
-| `GET` | `/society/simulations/{sim_id}/social-graph` | society graph |
-| `GET` | `/society/simulations/{sim_id}/agents` | list agents |
-| `GET` | `/society/simulations/{sim_id}/agents/{agent_id}` | agent details |
-| `GET` | `/society/simulations/{sim_id}/transcript` | transcript data |
-| `GET` | `/society/simulations/{sim_id}/conversations` | conversation data |
-| `GET` | `/society/simulations/{sim_id}/time-axis` | time-axis analysis |
-| `GET` | `/society/simulations/{sim_id}/ensemble` | ensemble output |
-| `GET` | `/society/simulations/{sim_id}/report` | society report |
-| `GET` | `/admin/costs` | token and cost aggregation |
-| `GET` | `/admin/quality-metrics` | quality and fallback aggregation |
+Start the backend first.
 
-## Testing
+```bash
+cd backend
+uv run python ../experiments/swarm_validation/run_experiment.py
+```
 
-CI runs the following:
+Run one test case:
+
+```bash
+cd backend
+uv run python ../experiments/swarm_validation/run_experiment.py --test-case tc01
+```
+
+Change backend URL:
+
+```bash
+cd backend
+uv run python ../experiments/swarm_validation/run_experiment.py --base-url http://localhost:8000
+```
+
+Aggregate results:
+
+```bash
+cd backend
+uv run python ../experiments/swarm_validation/aggregate_results.py
+```
+
+## CI
+
+GitHub Actions runs these checks on push and pull request.
 
 ```bash
 cd backend
@@ -388,48 +452,40 @@ pnpm exec playwright install --with-deps chromium
 pnpm test:e2e
 ```
 
-### Optional quality checks
+The nightly benchmark runs around 03:00 JST and creates a backend retrodiction baseline.
 
-```bash
-cd backend
-uv run ruff check src
-uv run deptry .
-```
+## Troubleshooting
 
-```bash
-cd frontend
-pnpm check:dead
-```
-
-## Repository Layout
-
-```text
-.
-├── backend/        # FastAPI API, SSE, orchestration, society services, tests
-├── frontend/       # Vue 3 + Vite UI, Pinia stores, charts, E2E tests
-├── config/         # provider / model / cognitive / profile / grounding settings
-├── templates/      # seeded LaunchPad templates and expert / PM personas
-├── experiments/    # validation experiments and aggregation scripts
-├── evaluation/     # baseline snapshots
-├── docs/           # focused implementation notes
-├── amplifier/      # separate Amplifier package checkout; not part of Agent AI runtime
-├── data/           # local runtime data
-├── scripts/dev.sh  # local backend + frontend launcher
-├── DESIGN.md       # extra design notes
-└── CONTRIBUTING.md
-```
-
-### Folder Notes
-
-| Folder | Integrated into this README |
+| Symptom | Check |
 | --- | --- |
-| `backend/` | FastAPI startup, DB initialization, template seeding, SSE, simulation/runs/projects/society/admin APIs, SQLite/PostgreSQL switching |
-| `frontend/` | LaunchPad, Live Simulation, Results, Populations, Compare Setup, Decision Lab, `/api` proxy, Vitest, Playwright |
-| `config/` | provider/model settings, fallback, GraphRAG, population mix, cognitive/communication/scheduling, grounding data |
-| `templates/` | `business_analysis`, `market_entry`, `policy_impact`, `policy_simulation`, `scenario_exploration`, expert/PM personas |
-| `experiments/` | `swarm_validation` runner, aggregation, and HTML report |
-| `docs/` | focused implementation and bug-fix notes |
-| `amplifier/` | standalone Microsoft Amplifier uv package. It is not required by Agent AI's Docker Compose or FastAPI/Vue runtime |
+| UI opens but simulations cannot start | `.env` `OPENAI_API_KEY` and `http://localhost:8000/health` |
+| `http://localhost:5173` does not open | `./scripts/dev.sh` frontend logs, or `cd frontend && pnpm dev` |
+| `http://localhost:8000/docs` does not open | backend logs, or `cd backend && uv run uvicorn ...` |
+| DB error | `.env` `DATABASE_URL`. SQLite is easiest for first local use. |
+| Docker UI opens but API fails | `docker compose ps` and backend healthcheck |
+| SSE stream stops | nginx `/api/simulations/:id/stream` config, or Vite proxy |
+| E2E fails | Check whether `pnpm exec playwright install --with-deps chromium` has been run |
+
+## Code Reading Map
+
+| What you want to understand | Main files |
+| --- | --- |
+| App startup, CORS, template seeding, health check | `backend/src/app/main.py` |
+| Environment variables and config YAML loading | `backend/src/app/config.py` |
+| DB connection, table creation, SQLite/PostgreSQL switching | `backend/src/app/database.py` |
+| API router registration | `backend/src/app/api/routes/__init__.py` |
+| Simulation creation, SSE, reports, reruns | `backend/src/app/api/routes/simulations.py` |
+| Execution preset definitions and legacy mode mapping | `backend/src/app/models/simulation.py` |
+| Dispatch between `baseline` and unified execution | `backend/src/app/services/simulation_dispatcher.py` |
+| `Society Pulse -> Council -> Synthesis` orchestration | `backend/src/app/services/unified_orchestrator.py` |
+| Synthetic populations, social networks, reactions, propagation, evaluation | `backend/src/app/services/society/` |
+| LLM task routing, provider adapters, fallback | `backend/src/app/llm/` |
+| Frontend routes | `frontend/src/router.ts` |
+| REST API client and TypeScript types | `frontend/src/api/client.ts` |
+| SSE subscription and live state updates | `frontend/src/composables/useSimulationSSE.ts` |
+| Stores for execution state, graphs, society data, and Decision Lab | `frontend/src/stores/` |
+| Main pages | `frontend/src/pages/` |
+| Visualization and result components | `frontend/src/components/` |
 
 ## More Docs
 
