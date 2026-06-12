@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Full-population opinion propagation: the opinions of selected agents now spread across the entire synthetic population (up to 10k), rendered live as a graph "wave" and streamed round-by-round over SSE. A new population-network endpoint returns a compact node/edge payload sized for 10k-node rendering.
 - Obsidian-style social graph: degree-based node sizing, glow halos, continuous zoom-based label fading, persistent selection highlighting, node-overlap avoidance, and a physics panel to tune repulsion, link distance, and center strength.
-- Seed-controlled agent selection so the same seed reproduces the same run.
+- Seed-controlled agent selection so the same seed reproduces the same agent lineup. (Propagation dynamics are not yet seed-pinned — see TODOS RT5.)
 - Decision Brief normalization that fills defaults, coerces types, and clamps the agreement score, so a malformed model response still renders a clean brief.
 
 ### Changed
