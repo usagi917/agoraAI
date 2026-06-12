@@ -90,6 +90,28 @@ class TestSusceptibleMass:
             assert s["opinion"] > 0.55, f"{s['agent_id']} が感化されていない: {s['opinion']}"
             assert s["stance"] in ("条件付き賛成", "賛成")
 
+    @pytest.mark.asyncio
+    async def test_single_directed_edge_influences_target_endpoint(self):
+        """無向タイは片方向で保存されても両端が相互に感化される（エッジミラー回帰）。
+
+        本番の network_generator は無向タイを agent_id->target_id の一方向で1本だけ
+        保存する。ミラーリングがないと target 側（ここでは agent-1）はエンジンの
+        片方向隣接で誰の隣人にもならず、中立のまま固定されてしまう。
+        """
+        agents = [_agent(0), _agent(1)]
+        # 無向タイを 1 本だけ、アンカー(agent-0)を source として保存
+        edges = [_edge(0, 1)]
+        responses = [_response(0, "賛成", confidence=1.0)]
+
+        result = await run_population_propagation(
+            agents, responses, edges, max_timesteps=8,
+        )
+
+        stances = {s["agent_id"]: s for s in result.final_stances}
+        # ミラーがなければ 0.5 のまま。あれば賛成アンカーへ引き寄せられる。
+        assert stances["agent-1"]["opinion"] > 0.55, stances["agent-1"]
+        assert stances["agent-1"]["stance"] in ("条件付き賛成", "賛成")
+
     def test_susceptibility_dampening_applied(self):
         """未活性化エージェントの頑固さは減衰され、活性化済みは素の値を使う。"""
         big_five = {"C": 0.8, "A": 0.4}

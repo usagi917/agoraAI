@@ -58,6 +58,28 @@ class PopulationPropagationResult:
     rounds: list[PropagationRoundDelta] = field(default_factory=list)
 
 
+def _mirror_edges(edges: list[dict]) -> list[dict]:
+    """無向ソーシャルタイを双方向エッジへ展開する（(src, tgt) で重複排除）。
+
+    SocialEdge は無向関係を ``agent_id -> target_id`` の一方向で1回だけ保存する
+    （network_generator は (min, max) で正規化）。一方 OpinionDynamicsEngine は
+    ``adj[src].append((tgt, w))`` と片方向隣接しか張らないため、ミラーしないと
+    意見が index 順（高→低）にしか流れず伝播が大きく偏る。ここで逆向きを補い、
+    既に逆向きが存在する場合は二重計上を避けるため1本に畳む。
+    """
+    seen: set[tuple[str, str]] = set()
+    result: list[dict] = []
+    for e in edges:
+        a, b = e["agent_id"], e["target_id"]
+        strength = e.get("strength", 1.0)
+        for src, tgt in ((a, b), (b, a)):
+            if src == tgt or (src, tgt) in seen:
+                continue
+            seen.add((src, tgt))
+            result.append({"agent_id": src, "target_id": tgt, "strength": strength})
+    return result
+
+
 def _stance_distribution(stances: list[str]) -> dict[str, float]:
     counts: dict[str, int] = {}
     for s in stances:
@@ -128,9 +150,13 @@ async def run_population_propagation(
     response_map = {r["agent_id"]: r for r in activation_responses}
     engine_agents = build_engine_agents(agents, response_map)
 
+    # ソーシャルタイは無向だが一方向で保存されているため、双方向化してから
+    # エンジンへ渡す（さもなくば伝播が index 順に偏る）。
+    undirected_edges = _mirror_edges(edges)
+
     engine = OpinionDynamicsEngine(
         agents=engine_agents,
-        edges=edges,
+        edges=undirected_edges,
         confidence_threshold=confidence_threshold,
         seed=seed,
     )
