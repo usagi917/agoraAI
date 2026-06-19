@@ -12,12 +12,26 @@ const apiMocks = vi.hoisted(() => ({
   getSimulationGraph: vi.fn(),
   getSimulationGraphHistory: vi.fn(),
   getSimulationColonies: vi.fn(),
+  getSocialGraph: vi.fn(),
+  getPopulationNetwork: vi.fn(),
   submitCodexReview: vi.fn(),
   getCodexHealth: vi.fn(),
   getTranscript: vi.fn(),
   getPropagation: vi.fn(),
   rerunSimulation: vi.fn(),
 }))
+
+// 重い canvas コンポーネントは結果ページのグラフパネル検証では軽量スタブで代替する。
+const graphStubs = {
+  ForceGraph2D: {
+    props: ['nodes', 'edges'],
+    template: '<div data-testid="stub-force-graph">{{ nodes.length }}n/{{ edges.length }}e</div>',
+  },
+  LiveSocietyGraph: {
+    props: ['simulationId', 'spotlightAgentId'],
+    template: '<div data-testid="stub-society-graph" />',
+  },
+}
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { id: 'sim-unsupported' } }),
@@ -29,6 +43,7 @@ vi.mock('../../api/client', () => apiMocks)
 describe('ResultsPage', () => {
   beforeEach(() => {
     push.mockReset()
+    window.sessionStorage.clear()
     apiMocks.getSimulation.mockResolvedValue({
       id: 'sim-unsupported',
       project_id: null,
@@ -81,8 +96,16 @@ describe('ResultsPage', () => {
       },
     })
     apiMocks.getSimulationGraphHistory.mockResolvedValue([])
-    apiMocks.getSimulationGraph.mockResolvedValue({ nodes: [], edges: [] })
+    apiMocks.getSimulationGraph.mockResolvedValue({ nodes: [], edges: [], round: 0 })
     apiMocks.getSimulationColonies.mockResolvedValue([])
+    apiMocks.getSocialGraph.mockResolvedValue({ population_id: 'pop-1', nodes: [], edges: [] })
+    apiMocks.getPopulationNetwork.mockResolvedValue({
+      population_id: 'pop-1',
+      node_count: 0,
+      edge_count: 0,
+      nodes: [],
+      edges: [],
+    })
     apiMocks.getCodexHealth.mockResolvedValue({
       enabled: false,
       available: false,
@@ -300,5 +323,161 @@ describe('ResultsPage', () => {
     expect(wrapper.text()).toContain('Backtest')
     expect(wrapper.text()).toContain('2025 関西ローンチ')
     expect(wrapper.text()).toContain('Hit')
+  })
+
+  it('renders the knowledge graph panel from backend graph state (graph mode)', async () => {
+    apiMocks.getSimulationGraph.mockResolvedValueOnce({
+      round: 2,
+      nodes: [
+        { id: 'n1', label: '論点A', type: 'issue', importance_score: 0.8, stance: '', activity_score: 0, sentiment_score: 0, status: 'active', group: 'g1' },
+        { id: 'n2', label: '論点B', type: 'issue', importance_score: 0.6, stance: '', activity_score: 0, sentiment_score: 0, status: 'active', group: 'g1' },
+      ],
+      edges: [
+        { id: 'e1', source: 'n1', target: 'n2', relation_type: 'related', weight: 0.5, direction: 'undirected', status: 'active' },
+      ],
+    })
+
+    const wrapper = mount(ResultsPage, {
+      global: {
+        plugins: [createPinia()],
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+          ProbabilityChart: true,
+          ScenarioCompare: true,
+          AgreementHeatmap: true,
+          PropagationDashboard: true,
+          ...graphStubs,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const panel = wrapper.get('[data-testid="results-graph-panel"]')
+    const stub = panel.get('[data-testid="stub-force-graph"]')
+    expect(stub.text()).toBe('2n/1e')
+    expect(wrapper.find('[data-testid="stub-society-graph"]').exists()).toBe(false)
+  })
+
+  it('hydrates and renders the social graph panel (society mode)', async () => {
+    apiMocks.getSimulation.mockResolvedValueOnce({
+      id: 'sim-society',
+      project_id: null,
+      mode: 'society',
+      prompt_text: '社会反応',
+      template_name: 'society',
+      execution_profile: 'standard',
+      colony_count: 1,
+      deep_colony_count: 0,
+      status: 'completed',
+      error_message: '',
+      pipeline_stage: 'completed',
+      stage_progress: {},
+      run_id: 'run-soc',
+      swarm_id: null,
+      metadata: {},
+      created_at: '2026-03-21T00:00:00Z',
+      started_at: null,
+      completed_at: '2026-03-21T00:01:00Z',
+    })
+    apiMocks.getSocialGraph.mockResolvedValueOnce({
+      population_id: 'pop-1',
+      nodes: [
+        { id: 'agent-0', agent_index: 0, demographics: { occupation: '教師', age: 40, region: '関西' }, big_five: {}, values: {}, speech_style: '', stance: '賛成', confidence: 0.7, reason: '', concern: '', priority: '' },
+        { id: 'agent-1', agent_index: 1, demographics: { occupation: '会社員', age: 33, region: '関東' }, big_five: {}, values: {}, speech_style: '', stance: '反対', confidence: 0.6, reason: '', concern: '', priority: '' },
+      ],
+      edges: [
+        { id: 'se1', source: 'agent-0', target: 'agent-1', relation_type: 'friend', strength: 0.8 },
+      ],
+    })
+    apiMocks.getPopulationNetwork.mockResolvedValueOnce({
+      population_id: 'pop-1',
+      node_count: 2,
+      edge_count: 1,
+      nodes: [{ id: 'agent-0', agent_index: 0 }, { id: 'agent-1', agent_index: 1 }],
+      edges: [[0, 1, 0.5]],
+    })
+
+    const wrapper = mount(ResultsPage, {
+      global: {
+        plugins: [createPinia()],
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+          ProbabilityChart: true,
+          ScenarioCompare: true,
+          AgreementHeatmap: true,
+          PropagationDashboard: true,
+          ...graphStubs,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const panel = wrapper.get('[data-testid="results-graph-panel"]')
+    expect(panel.find('[data-testid="stub-society-graph"]').exists()).toBe(true)
+    expect(panel.find('[data-testid="stub-force-graph"]').exists()).toBe(false)
+    expect(apiMocks.getSocialGraph).toHaveBeenCalled()
+    expect(apiMocks.getPopulationNetwork).toHaveBeenCalled()
+  })
+
+  it('toggles the graph body via v-show without unmounting (no reset)', async () => {
+    apiMocks.getSimulationGraph.mockResolvedValueOnce({
+      round: 1,
+      nodes: [
+        { id: 'n1', label: 'A', type: 'issue', importance_score: 0.5, stance: '', activity_score: 0, sentiment_score: 0, status: 'active', group: 'g1' },
+      ],
+      edges: [],
+    })
+
+    const wrapper = mount(ResultsPage, {
+      global: {
+        plugins: [createPinia()],
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+          ProbabilityChart: true,
+          ScenarioCompare: true,
+          AgreementHeatmap: true,
+          PropagationDashboard: true,
+          ...graphStubs,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const body = wrapper.get('[data-testid="results-graph-body"]')
+    // 初期は開いている
+    expect(body.attributes('style') || '').not.toContain('display: none')
+    expect(wrapper.find('[data-testid="stub-force-graph"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="results-graph-toggle"]').trigger('click')
+
+    // 折りたたんでも v-show なので DOM には残る（unmount されない）
+    expect(wrapper.get('[data-testid="results-graph-body"]').attributes('style') || '').toContain('display: none')
+    expect(wrapper.find('[data-testid="stub-force-graph"]').exists()).toBe(true)
+  })
+
+  it('shows an empty state when there is no graph data', async () => {
+    const wrapper = mount(ResultsPage, {
+      global: {
+        plugins: [createPinia()],
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+          ProbabilityChart: true,
+          ScenarioCompare: true,
+          AgreementHeatmap: true,
+          PropagationDashboard: true,
+          ...graphStubs,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const panel = wrapper.get('[data-testid="results-graph-panel"]')
+    expect(panel.find('[data-testid="results-graph-empty"]').exists()).toBe(true)
+    expect(panel.find('[data-testid="stub-force-graph"]').exists()).toBe(false)
+    expect(panel.find('[data-testid="stub-society-graph"]').exists()).toBe(false)
   })
 })

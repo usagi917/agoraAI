@@ -30,7 +30,14 @@ import {
   getPropagation,
   type PropagationData,
   type CodexHealthResponse,
+  getSimulationGraph,
+  getSocialGraph,
+  getPopulationNetwork,
 } from '../api/client'
+import { useGraphStore } from '../stores/graphStore'
+import { useSocietyGraphStore } from '../stores/societyGraphStore'
+import LiveSocietyGraph from '../components/LiveSocietyGraph.vue'
+import ForceGraph2D from '../components/ForceGraph2D.vue'
 import DecisionBriefComponent from '../components/DecisionBrief.vue'
 import ProbabilityChart from '../components/ProbabilityChart.vue'
 import ScenarioCompare from '../components/ScenarioCompare.vue'
@@ -42,6 +49,8 @@ import {
   getDefaultResultsSecondaryTab,
   getResultsPrimaryView,
   getResultsSecondaryTabs,
+  getLivePrimaryView,
+  type LivePrimaryView,
   type ResultsPrimaryView,
   type ResultsSecondaryTab,
 } from './layoutRules'
@@ -61,6 +70,53 @@ const transcriptLoading = ref(false)
 const transcriptPhaseFilter = ref<string>('')
 const activeSecondaryTab = ref<ResultsSecondaryTab>('society')
 let playbackFrame: number | null = null
+
+// === Graph view（結果ページに常設するグラフパネル） ===
+const graphStore = useGraphStore()
+const societyGraphStore = useSocietyGraphStore()
+
+// society 系モードは社会グラフ、それ以外はナレッジグラフを描く（ライブ画面と同じ判定）。
+const graphView = computed<LivePrimaryView>(() =>
+  getLivePrimaryView({ mode: sim.value?.mode, hasColonies: false, hasActivity: false }),
+)
+const isSocietyGraph = computed(() => graphView.value === 'society')
+const hasGraphData = computed(() =>
+  isSocietyGraph.value ? societyGraphStore.nodeCount > 0 : graphStore.nodes.length > 0,
+)
+const graphNodeCount = computed(() =>
+  isSocietyGraph.value ? societyGraphStore.nodeCount : graphStore.nodes.length,
+)
+const graphEdgeCount = computed(() =>
+  isSocietyGraph.value ? societyGraphStore.edgeCount : graphStore.edges.length,
+)
+
+const graphPanelOpenKey = `results-graph-open:${simId}`
+const graphPanelOpen = ref(window.sessionStorage.getItem(graphPanelOpenKey) !== 'closed')
+function toggleGraphPanel() {
+  graphPanelOpen.value = !graphPanelOpen.value
+  window.sessionStorage.setItem(graphPanelOpenKey, graphPanelOpen.value ? 'open' : 'closed')
+}
+
+// 完了後でもバックエンドからグラフ状態を取得してストアへ hydrate する。
+// ライブを経由せず結果ページへ直アクセス／リロードした場合でも一貫して描ける。
+async function hydrateGraph() {
+  try {
+    if (isSocietyGraph.value) {
+      societyGraphStore.reset()
+      const social = await getSocialGraph(simId)
+      societyGraphStore.hydrateWithSocialGraph(social.nodes, social.edges)
+      const network = await getPopulationNetwork(simId).catch(() => null)
+      if (network && network.nodes.length > 0) {
+        societyGraphStore.setPopulationNetwork(network)
+      }
+    } else {
+      const graph = await getSimulationGraph(simId)
+      graphStore.setFullState(graph?.nodes ?? [], graph?.edges ?? [])
+    }
+  } catch {
+    /* グラフは補助表示なので、取得失敗時は空状態に委ねる */
+  }
+}
 
 // Time-axis (t0..t5) prediction view — lazily attached if backend produced it.
 const { report: timeAxisReport, loading: timeAxisLoading, error: timeAxisError, fetch: fetchTimeAxis } = useTimeAxis()
@@ -393,6 +449,8 @@ function stopPlaybackLoop() {
 onMounted(async () => {
   try {
     sim.value = await getSimulation(simId)
+    // グラフ状態をバックエンドから再構築（非ブロッキング）。
+    void hydrateGraph()
     getCodexHealth()
       .then((health) => {
         codexHealth.value = health
@@ -459,6 +517,9 @@ onUnmounted(() => {
   if (copyStateTimer !== null) {
     window.clearTimeout(copyStateTimer)
   }
+  // hydrate したグラフ状態が次画面に残らないよう片付ける。
+  graphStore.reset()
+  societyGraphStore.reset()
 })
 
 async function handleCodexReview(questionOverride?: string) {
@@ -720,6 +781,40 @@ function renderMarkdown(content: string): string {
         <div class="stat-card">
           <span class="stat-label">Colony</span>
           <span class="stat-value">{{ colonies.length }}</span>
+        </div>
+      </div>
+
+      <!-- Graph View: ライブ画面と同じ Obsidian 風グラフを結果ページでも常設（折りたたみ可） -->
+      <div class="results-graph-panel" data-testid="results-graph-panel">
+        <div class="results-graph-header">
+          <button
+            class="results-graph-toggle"
+            data-testid="results-graph-toggle"
+            :aria-expanded="graphPanelOpen"
+            @click="toggleGraphPanel"
+          >
+            <span class="results-graph-caret" :class="{ open: graphPanelOpen }">▾</span>
+            <span class="results-graph-title">{{ isSocietyGraph ? 'Social Graph' : 'Knowledge Graph' }}</span>
+          </button>
+          <div class="results-graph-metrics">
+            <span class="metric"><span class="metric-val">{{ graphNodeCount }}</span> {{ isSocietyGraph ? 'agents' : 'nodes' }}</span>
+            <span class="metric"><span class="metric-val">{{ graphEdgeCount }}</span> edges</span>
+          </div>
+        </div>
+        <div v-show="graphPanelOpen" class="results-graph-body" data-testid="results-graph-body">
+          <LiveSocietyGraph
+            v-if="isSocietyGraph && hasGraphData"
+            :simulation-id="simId"
+          />
+          <ForceGraph2D
+            v-else-if="!isSocietyGraph && hasGraphData"
+            :nodes="graphStore.nodes"
+            :edges="graphStore.edges"
+            :selected-node-id="null"
+          />
+          <div v-else class="results-graph-empty" data-testid="results-graph-empty">
+            グラフデータがありません
+          </div>
         </div>
       </div>
 
@@ -1356,6 +1451,72 @@ function renderMarkdown(content: string): string {
 .stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--panel-padding); display: flex; flex-direction: column; gap: 0.25rem; }
 .stat-label { font-size: 0.7rem; color: var(--text-muted); font-weight: 500; }
 .stat-value { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+
+.results-graph-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.results-graph-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+}
+
+.results-graph-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.results-graph-caret {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  transform: rotate(-90deg);
+  opacity: 0.7;
+}
+
+.results-graph-caret.open {
+  transform: rotate(0deg);
+}
+
+.results-graph-metrics {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.results-graph-metrics .metric-val {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.results-graph-body {
+  position: relative;
+  height: clamp(20rem, 42vh, 30rem);
+  border-top: 1px solid var(--border);
+}
+
+.results-graph-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
 
 .results-layout {
   display: grid;
