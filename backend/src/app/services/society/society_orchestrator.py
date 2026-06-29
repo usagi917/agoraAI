@@ -532,6 +532,7 @@ class SocietyRunContext:
     eval_metrics: list = field(default_factory=list)
     eval_data: dict = field(default_factory=dict)
     demographic_analysis: dict = field(default_factory=dict)
+    dqi_overall_score: float | None = None
 
 
 async def _phase_evaluation(ctx: "SocietyRunContext", session) -> None:
@@ -584,6 +585,30 @@ def _phase_demographics(ctx: "SocietyRunContext", session) -> None:
     )
     session.add(demo_record)
     ctx.demographic_analysis = demographic_analysis
+
+
+def _phase_deliberation_quality(ctx: "SocietyRunContext", session, meeting_result: dict) -> None:
+    """Phase 5.1: 熟議品質指標(DQI)を計算・永続化し ctx.dqi_overall_score に保存する。"""
+    ctx.dqi_overall_score = None
+    try:
+        meeting_rounds = meeting_result.get("rounds", [])
+        dqi_result = compute_dqi(meeting_rounds)
+        opinion_change = measure_opinion_change(meeting_rounds)
+        dqi_data = {
+            "dqi": dqi_result,
+            "opinion_change": opinion_change,
+        }
+        dqi_society_result = _make_layer_record(
+            simulation_id=ctx.simulation_id,
+            population_id=ctx.pop_id,
+            layer="deliberation_quality",
+            phase_data=dqi_data,
+            usage={},
+        )
+        session.add(dqi_society_result)
+        ctx.dqi_overall_score = dqi_result.get("overall_dqi")
+    except Exception as exc:
+        logger.warning("DQI evaluation failed: %s", exc)
 
 
 async def run_society(simulation_id: str) -> None:
@@ -1216,26 +1241,8 @@ async def run_society(simulation_id: str) -> None:
                     logger.warning("Prediction market resolution failed: %s", exc)
 
             # === Phase 5.1: Deliberation Quality Assessment ===
-            dqi_overall_score = None
-            try:
-                meeting_rounds = meeting_result.get("rounds", [])
-                dqi_result = compute_dqi(meeting_rounds)
-                opinion_change = measure_opinion_change(meeting_rounds)
-                dqi_data = {
-                    "dqi": dqi_result,
-                    "opinion_change": opinion_change,
-                }
-                dqi_society_result = _make_layer_record(
-                    simulation_id=simulation_id,
-                    population_id=pop_id,
-                    layer="deliberation_quality",
-                    phase_data=dqi_data,
-                    usage={},
-                )
-                session.add(dqi_society_result)
-                dqi_overall_score = dqi_result.get("overall_dqi")
-            except Exception as exc:
-                logger.warning("DQI evaluation failed: %s", exc)
+            _phase_deliberation_quality(ctx, session, meeting_result)
+            dqi_overall_score = ctx.dqi_overall_score
 
             # === Phase 5.5: Provenance 構築 ===
             quality_metrics = {m["metric_name"]: m["score"] for m in eval_metrics}
