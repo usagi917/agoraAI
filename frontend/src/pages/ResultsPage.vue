@@ -38,6 +38,7 @@ import AgreementHeatmap from '../components/AgreementHeatmap.vue'
 import PropagationDashboard from '../components/PropagationDashboard.vue'
 import IntegratedReport from '../components/IntegratedReport.vue'
 import { useTimeAxis } from '../composables/useTimeAxis'
+import { formatPercent } from '../utils/format'
 import {
   getDefaultResultsSecondaryTab,
   getResultsPrimaryView,
@@ -276,7 +277,7 @@ const predictionAccuracyCards = computed(() => {
   if (intervention?.count) {
     cards.push({
       label: '介入効果',
-      value: typeof intervention.direction_accuracy === 'number' ? `${(intervention.direction_accuracy * 100).toFixed(0)}%` : 'pending',
+      value: typeof intervention.direction_accuracy === 'number' ? formatPercent(intervention.direction_accuracy, 0) : 'pending',
       detail: typeof intervention.mae === 'number' ? `MAE ${intervention.mae.toFixed(3)}` : `${intervention.validated_count}/${intervention.count} validated`,
     })
   }
@@ -311,7 +312,7 @@ const validationLabel = computed(() => {
   if (!summary) return ''
   const anchor = summary.survey_anchor_status || '未検証'
   const scenario = summary.scenario_backtest_status === '過去ケース検証あり'
-    ? `過去ケース Hit ${(Number(summary.hit_rate || 0) * 100).toFixed(0)}%`
+    ? `過去ケース Hit ${formatPercent(Number(summary.hit_rate || 0), 0)}`
     : '過去ケース未検証'
   return `${anchor} · ${scenario}`
 })
@@ -671,7 +672,7 @@ function renderMarkdown(content: string): string {
         <span>{{ reportQualityMessage }}</span>
         <span v-if="evidenceSummary" class="quality-meta">{{ evidenceSummary }}</span>
         <span v-if="verification" class="quality-meta">
-          verification={{ verification.status }} ({{ (verification.score * 100).toFixed(0) }}%)
+          verification={{ verification.status }} ({{ formatPercent(verification.score, 0) }})
         </span>
       </div>
 
@@ -707,7 +708,7 @@ function renderMarkdown(content: string): string {
       <div v-if="hasScenarios && report" class="stats-row">
         <div class="stat-card">
           <span class="stat-label">多様性スコア</span>
-          <span class="stat-value">{{ ((report.diversity_score || 0) * 100).toFixed(0) }}%</span>
+          <span class="stat-value">{{ formatPercent(report.diversity_score || 0, 0) }}</span>
         </div>
         <div class="stat-card">
           <span class="stat-label">エントロピー</span>
@@ -734,7 +735,7 @@ function renderMarkdown(content: string): string {
             <div class="workspace-highlights">
               <div v-if="primaryViewKind === 'scenarios' && primaryScenarioSummary" class="workspace-highlight-card">
                 <span class="workspace-highlight-label">Top Scenario</span>
-                <strong class="workspace-highlight-value">{{ (primaryScenarioSummary.scenarioScore * 100).toFixed(1) }}%</strong>
+                <strong class="workspace-highlight-value">{{ formatPercent(primaryScenarioSummary.scenarioScore, 1) }}</strong>
                 <p>{{ primaryScenarioSummary.description }}</p>
               </div>
               <div v-else-if="primaryViewKind === 'decision_brief' && decisionBriefData" class="workspace-highlight-card">
@@ -858,7 +859,7 @@ function renderMarkdown(content: string): string {
                 </div>
                 <div class="stat-card">
                   <span class="stat-label">最良スコア</span>
-                  <span class="stat-value">{{ ((metaReport.final_state?.best_objective_score || 0) * 100).toFixed(0) }}%</span>
+                  <span class="stat-value">{{ formatPercent(metaReport.final_state?.best_objective_score || 0, 0) }}</span>
                 </div>
                 <div class="stat-card">
                   <span class="stat-label">停止理由</span>
@@ -932,7 +933,7 @@ function renderMarkdown(content: string): string {
                 </span>
                 <span class="society-stat">
                   <span class="society-stat-label">平均信頼度</span>
-                  <span class="society-stat-value">{{ ((societyResult.aggregation?.average_confidence || 0) * 100).toFixed(1) }}%</span>
+                  <span class="society-stat-value">{{ formatPercent(societyResult.aggregation?.average_confidence || 0, 1) }}</span>
                 </span>
               </div>
               <div v-if="societyResult.aggregation?.top_concerns?.length" class="society-section">
@@ -987,7 +988,7 @@ function renderMarkdown(content: string): string {
                       class="society-intervention-metrics"
                     >
                       <span v-if="intervention.directionAccuracy !== null && intervention.directionAccuracy !== undefined">
-                        方向一致 {{ (intervention.directionAccuracy * 100).toFixed(0) }}%
+                        方向一致 {{ formatPercent(intervention.directionAccuracy, 0) }}
                       </span>
                       <span v-if="intervention.effectMae !== null && intervention.effectMae !== undefined">
                         MAE {{ intervention.effectMae.toFixed(3) }}
@@ -1005,11 +1006,11 @@ function renderMarkdown(content: string): string {
                   </div>
                   <div class="society-metric-card">
                     <span class="society-metric-label">hit rate</span>
-                    <span class="society-metric-score">{{ (societyBacktest.summary.hit_rate * 100).toFixed(0) }}%</span>
+                    <span class="society-metric-score">{{ formatPercent(societyBacktest.summary.hit_rate, 0) }}</span>
                   </div>
                   <div class="society-metric-card">
                     <span class="society-metric-label">issue hit rate</span>
-                    <span class="society-metric-score">{{ (societyBacktest.summary.issue_hit_rate * 100).toFixed(0) }}%</span>
+                    <span class="society-metric-score">{{ formatPercent(societyBacktest.summary.issue_hit_rate, 0) }}</span>
                   </div>
                   <div v-if="societyBacktest.summary.scenario_probability_brier !== null && societyBacktest.summary.scenario_probability_brier !== undefined" class="society-metric-card">
                     <span class="society-metric-label">scenario brier</span>
@@ -1108,7 +1109,7 @@ function renderMarkdown(content: string): string {
                 <div v-for="(a, i) in pmBoardData.sections.assumptions.slice(0, 3)" :key="i" class="pm-card">
                   <div class="pm-card-header">
                     <span class="pm-card-label">{{ a.assumption }}</span>
-                    <span class="pm-confidence">{{ (a.confidence * 100).toFixed(0) }}%</span>
+                    <span class="pm-confidence">{{ formatPercent(a.confidence, 0) }}</span>
                   </div>
                   <p v-if="a.evidence" class="pm-card-detail">根拠: {{ a.evidence }}</p>
                 </div>

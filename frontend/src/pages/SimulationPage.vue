@@ -36,7 +36,7 @@ import ForceGraph2D from '../components/ForceGraph2D.vue'
 import AgentStoryDrawer from '../components/AgentStoryDrawer.vue'
 import ConversationsTab from '../components/ConversationsTab.vue'
 import { useTheaterStore } from '../stores/theaterStore'
-import { parseServerDate } from '../utils/format'
+import { formatPercent, parseServerDate } from '../utils/format'
 import {
   getDefaultLiveSecondaryTab,
   getLivePrimaryView,
@@ -759,7 +759,7 @@ function goToResults() {
                 :style="{ width: `${(share as number) * 100}%` }"
               />
             </div>
-            <span class="stance-bar-value">{{ ((share as number) * 100).toFixed(0) }}%</span>
+            <span class="stance-bar-value">{{ formatPercent(share as number, 0) }}</span>
           </div>
         </div>
       </div>
@@ -894,7 +894,7 @@ function goToResults() {
             <div class="entity-name">{{ selectedEntity.label }}</div>
             <div class="entity-meta">
               <span class="entity-type-badge">{{ selectedEntity.type }}</span>
-              <span class="entity-score">重要度 {{ ((selectedEntity.importance_score || 0) * 100).toFixed(0) }}%</span>
+              <span class="entity-score">重要度 {{ formatPercent(selectedEntity.importance_score || 0, 0) }}</span>
             </div>
             <div class="detail-grid">
               <div v-if="selectedEntity.stance" class="detail-item">

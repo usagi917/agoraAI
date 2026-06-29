@@ -8,6 +8,7 @@ import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
 import { useAgentVisualizationStore } from '../stores/agentVisualizationStore'
 import { useCognitiveSSE } from './useCognitiveSSE'
 import { useTheaterSSE } from './useTheaterSSE'
+import { formatPercent } from '../utils/format'
 
 function getSimulationStreamUrl(simulationId: string) {
   const base = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '')
@@ -190,7 +191,7 @@ export function useSimulationSSE(simulationId: string) {
         store.setMetaPhase('world_building')
         store.setPhase('meta_world_building')
         activity.addEntry('phase', '⬢', 'Meta Simulation 開始', {
-          detail: payload.target_score ? `target ${(Number(payload.target_score) * 100).toFixed(0)}%` : undefined,
+          detail: payload.target_score ? `target ${formatPercent(Number(payload.target_score), 0)}` : undefined,
           track: 'phase',
           status: 'running',
         })
@@ -248,7 +249,7 @@ export function useSimulationSSE(simulationId: string) {
         store.setMetaStopReason(payload.stop_evaluation?.reason || '')
         store.setMetaPhase('scoring')
         store.setPhase('meta_scoring')
-        activity.addEntry('event', '◎', `Meta Score ${(Number(payload.objective_score || 0) * 100).toFixed(0)}%`, {
+        activity.addEntry('event', '◎', `Meta Score ${formatPercent(Number(payload.objective_score || 0), 0)}`, {
           detail: payload.stop_evaluation?.reason || undefined,
           track: 'phase',
           status: 'completed',
@@ -257,7 +258,7 @@ export function useSimulationSSE(simulationId: string) {
 
       case 'meta_cycle_completed':
         activity.addEntry('event', '✓', `Meta Cycle ${payload.cycle_index} 完了`, {
-          detail: `${(Number(payload.objective_score || 0) * 100).toFixed(0)}% / ${payload.stop_reason || 'continue'}`,
+          detail: `${formatPercent(Number(payload.objective_score || 0), 0)} / ${payload.stop_reason || 'continue'}`,
           track: 'phase',
           status: 'completed',
         })
@@ -266,7 +267,7 @@ export function useSimulationSSE(simulationId: string) {
       case 'meta_converged':
         store.setMetaBestScore(Number(payload.best_score || 0))
         store.setMetaStopReason(payload.stop_reason || '')
-        activity.addEntry('phase', '✓', `Meta 収束: ${(Number(payload.best_score || 0) * 100).toFixed(0)}%`, {
+        activity.addEntry('phase', '✓', `Meta 収束: ${formatPercent(Number(payload.best_score || 0), 0)}`, {
           detail: payload.stop_reason || undefined,
           track: 'phase',
           status: 'completed',
@@ -414,7 +415,7 @@ export function useSimulationSSE(simulationId: string) {
         }
         activity.addEntry('event', '▣', 'レポート生成完了', {
           detail: payload.agreement_score != null
-            ? `合意度: ${(payload.agreement_score * 100).toFixed(0)}%`
+            ? `合意度: ${formatPercent(payload.agreement_score, 0)}`
             : undefined,
           track: 'report',
           status: 'completed',
@@ -446,7 +447,7 @@ export function useSimulationSSE(simulationId: string) {
           payload.status === 'passed' ? '✓' : '✗',
           `検証完了: ${payload.target || 'output'}`,
           {
-            detail: payload.status ? `${payload.status} / ${(Number(payload.score || 0) * 100).toFixed(0)}%` : undefined,
+            detail: payload.status ? `${payload.status} / ${formatPercent(Number(payload.score || 0), 0)}` : undefined,
             track: 'report',
             status: payload.status === 'passed' ? 'completed' : 'failed',
           },
@@ -690,7 +691,7 @@ export function useSimulationSSE(simulationId: string) {
         }
         {
           const avgConf = payload.aggregation?.average_confidence
-          const avgConfStr = avgConf != null ? `${(avgConf * 100).toFixed(1)}%` : '?'
+          const avgConfStr = avgConf != null ? formatPercent(avgConf, 1) : '?'
           vizStore.addSystemEvent('✓', '活性化完了', `平均信頼度: ${avgConfStr}`)
           activity.addEntry('event', '◎', '活性化完了', {
             detail: `平均信頼度: ${avgConfStr}`,

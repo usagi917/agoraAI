@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { getStanceColor, getStanceSortIndex } from '../constants/stances'
+import { formatPercent } from '../utils/format'
 
 const props = defineProps<{
   distribution: Record<string, number>
@@ -24,14 +25,14 @@ const sortedEntries = computed(() => {
           width: (ratio * 100) + '%',
           backgroundColor: getStanceColor(stance),
         }"
-        :title="`${stance}: ${(ratio * 100).toFixed(1)}%`"
+        :title="`${stance}: ${formatPercent(ratio, 1)}`"
       />
     </div>
     <div class="legend">
       <div v-for="[stance, ratio] in sortedEntries" :key="stance" class="legend-item">
         <span class="legend-dot" :style="{ backgroundColor: getStanceColor(stance) }" />
         <span class="legend-label">{{ stance }}</span>
-        <span class="legend-value">{{ (ratio * 100).toFixed(1) }}%</span>
+        <span class="legend-value">{{ formatPercent(ratio, 1) }}</span>
       </div>
     </div>
   </div>

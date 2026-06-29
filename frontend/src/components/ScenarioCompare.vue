@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { formatPercent } from '../utils/format'
+
 interface Scenario {
   description: string
   scenarioScore: number
@@ -35,16 +37,16 @@ const props = defineProps<{
             {{ s.description }}
           </td>
           <td class="number-cell highlight">
-            {{ (s.scenarioScore * 100).toFixed(1) }}%
+            {{ formatPercent(s.scenarioScore, 1) }}
           </td>
           <td class="number-cell">
-            {{ (s.ci[0] * 100).toFixed(0) }}-{{ (s.ci[1] * 100).toFixed(0) }}%
+            {{ (s.ci[0] * 100).toFixed(0) }}-{{ formatPercent(s.ci[1], 0) }}
           </td>
           <td class="number-cell">
-            {{ (s.supportRatio * 100).toFixed(0) }}%
+            {{ formatPercent(s.supportRatio, 0) }}
           </td>
           <td class="number-cell">
-            {{ (s.modelConfidenceMean * 100).toFixed(0) }}%
+            {{ formatPercent(s.modelConfidenceMean, 0) }}
           </td>
           <td class="number-cell">
             {{ s.supportingColonies }}/{{ s.totalColonies }}
@@ -57,21 +59,21 @@ const props = defineProps<{
       <article v-for="(s, i) in scenarios" :key="`card-${i}`" class="scenario-card">
         <div class="scenario-card-header">
           <span class="scenario-idx">S{{ i + 1 }}</span>
-          <span class="scenario-card-probability">{{ (s.scenarioScore * 100).toFixed(1) }}%</span>
+          <span class="scenario-card-probability">{{ formatPercent(s.scenarioScore, 1) }}</span>
         </div>
         <p class="scenario-card-description">{{ s.description }}</p>
         <dl class="scenario-card-metrics">
           <div class="metric-row">
             <dt>95% CI</dt>
-            <dd>{{ (s.ci[0] * 100).toFixed(0) }}-{{ (s.ci[1] * 100).toFixed(0) }}%</dd>
+            <dd>{{ (s.ci[0] * 100).toFixed(0) }}-{{ formatPercent(s.ci[1], 0) }}</dd>
           </div>
           <div class="metric-row">
             <dt>支持率</dt>
-            <dd>{{ (s.supportRatio * 100).toFixed(0) }}%</dd>
+            <dd>{{ formatPercent(s.supportRatio, 0) }}</dd>
           </div>
           <div class="metric-row">
             <dt>モデル信頼度</dt>
-            <dd>{{ (s.modelConfidenceMean * 100).toFixed(0) }}%</dd>
+            <dd>{{ formatPercent(s.modelConfidenceMean, 0) }}</dd>
           </div>
           <div class="metric-row">
             <dt>Colony</dt>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseServerDate } from '../format'
+import { formatPercent, parseServerDate } from '../format'
 
 describe('parseServerDate', () => {
   it('interprets naive server timestamps as UTC', () => {
@@ -15,4 +15,12 @@ describe('parseServerDate', () => {
   it('returns null for invalid values', () => {
     expect(parseServerDate('invalid-date')).toBeNull()
   })
+})
+
+describe("formatPercent", () => {
+  it("digits=0", () => expect(formatPercent(0.1234)).toBe("12%"))
+  it("digits=1", () => expect(formatPercent(0.1234, 1)).toBe("12.3%"))
+  it("null", () => expect(formatPercent(null)).toBe("n/a"))
+  it("NaN", () => expect(formatPercent(NaN)).toBe("n/a"))
+  it("zero", () => expect(formatPercent(0)).toBe("0%"))
 })
