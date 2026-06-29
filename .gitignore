@@ -8,7 +8,6 @@ build/
 
 # Node
 node_modules/
-dist/
 .pnpm-store/
 playwright-report/
 frontend/test-results/
@@ -35,10 +34,19 @@ Thumbs.db
 
 # Docker
 docker-compose.override.yml
+
+# Local working files / agent tooling
 plan.md
 plans/
 .claude/
+.context/
 TODOS.md
 .amplifier/
 .gstack/
-spec.md
+
+# Vendored generated artifacts (re-generate via `codex app-server`; see spec.md)
+docs/codex-app-server-schema/
+
+# Generated reports / stray lockfiles
+experiments/**/evaluation.html
+package-lock.json
