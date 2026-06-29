@@ -6,10 +6,12 @@ from unittest.mock import AsyncMock, patch
 from src.app.sse.manager import sse_manager
 from src.app.services.society import meeting_layer
 from src.app.services.society.meeting_layer import (
-    _build_participant_context,
-    _build_meeting_system_prompt,
     _serialize_argument_for_stream,
     run_meeting,
+)
+from src.app.services.society.meeting_prompts import (
+    _build_participant_context,
+    _build_meeting_system_prompt,
 )
 from src.app.services.society.meeting_report import (
     generate_meeting_report,
@@ -367,7 +369,7 @@ class TestMeetingStreamPayloads:
 
 class TestBalancedBriefing:
     def test_balanced_briefing_contains_pro_and_con(self):
-        from src.app.services.society.meeting_layer import _build_balanced_briefing
+        from src.app.services.society.meeting_prompts import _build_balanced_briefing
 
         result = _build_balanced_briefing(
             "少子化対策",
@@ -381,7 +383,7 @@ class TestBalancedBriefing:
         assert "少子化対策" in result
 
     def test_balanced_briefing_without_facts(self):
-        from src.app.services.society.meeting_layer import _build_balanced_briefing
+        from src.app.services.society.meeting_prompts import _build_balanced_briefing
 
         result = _build_balanced_briefing("AI規制")
         assert "賛成" in result
@@ -391,7 +393,7 @@ class TestBalancedBriefing:
         assert "関連データ" not in result
 
     def test_balanced_briefing_includes_grounding_facts(self):
-        from src.app.services.society.meeting_layer import _build_balanced_briefing
+        from src.app.services.society.meeting_prompts import _build_balanced_briefing
 
         facts = [
             {"fact": "出生率1.2", "source": "厚生労働省"},
