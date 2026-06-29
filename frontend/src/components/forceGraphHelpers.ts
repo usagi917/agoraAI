@@ -97,7 +97,7 @@ export function nodeRadius(node: Pick<NodeProp, 'importance_score' | 'activity_s
 }
 
 export function linkWidth(weight: number | null | undefined): number {
-  return 0.7 + clamp01(weight) * 2.4
+  return 0.9 + clamp01(weight) * 2.8
 }
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
@@ -123,8 +123,18 @@ export function withAlpha(color: string, alpha: number): string {
 
 export function linkColor(relation_type: string, weight: number | null | undefined, dimmed: boolean): string {
   const base = nodeColor(relation_type)
-  const alpha = dimmed ? 0.14 : Math.min(0.72, 0.24 + clamp01(weight) * 0.38)
+  const alpha = dimmed ? 0.12 : Math.min(0.82, 0.32 + clamp01(weight) * 0.46)
   return withAlpha(base, alpha)
+}
+
+export function nodeDegree(nodeId: string, edges: ReadonlyArray<EdgeProp | SimLink>): number {
+  let degree = 0
+  for (const edge of edges) {
+    const source = endpointId(edge.source as string | { id?: string | number })
+    const target = endpointId(edge.target as string | { id?: string | number })
+    if (source === nodeId || target === nodeId) degree += 1
+  }
+  return degree
 }
 
 function endpointId(end: string | { id?: string | number } | undefined): string {

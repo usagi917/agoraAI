@@ -124,6 +124,30 @@ describe('ForceGraph2D', () => {
     void wrapper
   })
 
+  it('configures Obsidian-style canvas layers without hiding the CSS graph backdrop', async () => {
+    const wrapper = await mountComponent({
+      nodes: [
+        { id: 'n1', label: 'Alice', type: 'organization', importance_score: 0.8, activity_score: 0 },
+        { id: 'n2', label: 'Bob', type: 'person', importance_score: 0.5, activity_score: 0 },
+      ],
+      edges: [
+        { source: 'n1', target: 'n2', relation_type: 'friend', weight: 0.8 },
+      ],
+    })
+    await flushPromises()
+
+    const inst = MockForceGraph.lastInstance!
+    expect(inst.setterCalls.backgroundColor?.[0]).toBe('rgba(0, 0, 0, 0)')
+    expect(inst.setterCalls.nodeCanvasObjectMode?.[0]).toBeTypeOf('function')
+    expect(inst.setterCalls.linkCurvature?.[0]).toBeTypeOf('function')
+    expect(inst.setterCalls.linkDirectionalParticleSpeed?.[0]).toBeTypeOf('function')
+
+    const link = inst.graphDataValue.links[0]
+    expect((inst.setterCalls.linkDirectionalParticles?.[0] as (link: unknown) => number)(link)).toBeGreaterThan(0)
+    expect((inst.setterCalls.linkCurvature?.[0] as (link: unknown) => number)(link)).toBeGreaterThan(0)
+    void wrapper
+  })
+
   it('refreshes graphData when graph arrays are mutated in place', async () => {
     const ForceGraph2D = (await import('../ForceGraph2D.vue')).default
     const Parent = defineComponent({

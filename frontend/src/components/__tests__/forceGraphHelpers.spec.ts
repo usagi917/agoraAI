@@ -87,10 +87,10 @@ describe('nodeRadius', () => {
 })
 
 describe('linkWidth', () => {
-  it('floor at 0.7 and grows with weight', () => {
-    expect(linkWidth(0)).toBe(0.7)
-    expect(linkWidth(1)).toBeCloseTo(3.1, 5)
-    expect(linkWidth(undefined)).toBe(0.7)
+  it('floor at 0.9 and grows with weight', () => {
+    expect(linkWidth(0)).toBe(0.9)
+    expect(linkWidth(1)).toBeCloseTo(3.7, 5)
+    expect(linkWidth(undefined)).toBe(0.9)
   })
 })
 
@@ -99,19 +99,19 @@ describe('linkColor', () => {
     const normal = linkColor('friend', 0.5, false)
     const dimmed = linkColor('friend', 0.5, true)
     expect(normal).toMatch(/^rgba\(/)
-    expect(dimmed).toContain('0.14')
+    expect(dimmed).toContain('0.12')
     // normal should have higher alpha than dimmed
     const normalAlpha = Number(normal.match(/, (0\.\d+)\)/)?.[1])
-    expect(normalAlpha).toBeGreaterThan(0.14)
+    expect(normalAlpha).toBeGreaterThan(0.12)
   })
 
-  it('keeps alpha within [0.24, 0.72] band for any weight', () => {
+  it('keeps alpha within [0.32, 0.82] band for any weight', () => {
     const lo = linkColor('friend', 0, false)
     const hi = linkColor('friend', 1, false)
-    expect(lo).toContain('0.24')
+    expect(lo).toContain('0.32')
     const hiAlpha = Number(hi.match(/, (0\.\d+)\)/)?.[1])
     expect(hiAlpha).toBeGreaterThan(0.5)
-    expect(hiAlpha).toBeLessThanOrEqual(0.72)
+    expect(hiAlpha).toBeLessThanOrEqual(0.82)
   })
 })
 

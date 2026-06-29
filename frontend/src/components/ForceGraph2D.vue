@@ -9,6 +9,7 @@ import {
   linkWidth as computeLinkWidth,
   mergeGraphData,
   nodeColor,
+  nodeDegree,
   nodeDisplayColor,
   nodeRadius,
   toEdgeProp,
@@ -46,8 +47,16 @@ const currentLinks = ref<SimLink[]>([])
 let didFitOnce = false
 const LAYOUT_COOLDOWN_TICKS = 160
 const LAYOUT_COOLDOWN_TIME_MS = 5000
+const MIN_HUB_DEGREE = 3
 
 const adjacency = computed(() => buildAdjacency(currentLinks.value))
+const degreeByNodeId = computed(() => {
+  const map = new Map<string, number>()
+  for (const node of currentNodes.value) {
+    map.set(node.id, nodeDegree(node.id, currentLinks.value))
+  }
+  return map
+})
 
 const highlightedSet = computed(() => {
   if (!props.highlightedNodeIds?.length) return null
@@ -66,6 +75,11 @@ function isNodeDimmed(nodeId: string): boolean {
   if (!focus) return false
   if (focus === nodeId) return false
   return !(adjacency.value.get(focus)?.has(nodeId) ?? false)
+}
+
+function isNodeFocused(nodeId: string): boolean {
+  const focus = activeFocusId()
+  return focus === nodeId || (focus != null && (adjacency.value.get(focus)?.has(nodeId) ?? false))
 }
 
 function endpointId(end: unknown): string {
@@ -100,22 +114,58 @@ function paintNode(node: SimNode, ctx: CanvasRenderingContext2D, globalScale: nu
   if (typeof node.x !== 'number' || typeof node.y !== 'number') return
   const r = nodeRadius(node)
   const baseColor = nodeDisplayColor(node)
+  const degree = degreeByNodeId.value.get(node.id) ?? 0
+  const hubRatio = Math.min(1, degree / 10)
   const dimmed = isNodeDimmed(node.id)
   const selected = props.selectedNodeId === node.id
-  const alpha = dimmed ? 0.18 : selected ? 1 : 0.88
+  const focused = isNodeFocused(node.id)
+  const active = node.status === 'speaking' || node.status === 'activating'
+  const alpha = dimmed ? 0.16 : selected ? 1 : focused ? 0.96 : 0.84
+  const haloRadius = r + 8 + hubRatio * 14 + (active ? 6 : 0)
 
-  ctx.beginPath()
-  ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
-  ctx.fillStyle = withAlpha(baseColor, alpha)
-  ctx.fill()
+  if (!dimmed) {
+    const halo = ctx.createRadialGradient(node.x, node.y, r * 0.5, node.x, node.y, haloRadius)
+    halo.addColorStop(0, withAlpha(baseColor, selected ? 0.34 : active ? 0.3 : 0.2 + hubRatio * 0.12))
+    halo.addColorStop(0.55, withAlpha(baseColor, selected ? 0.14 : 0.08 + hubRatio * 0.08))
+    halo.addColorStop(1, withAlpha(baseColor, 0))
+    ctx.beginPath()
+    ctx.arc(node.x, node.y, haloRadius, 0, Math.PI * 2)
+    ctx.fillStyle = halo
+    ctx.fill()
+  }
 
-  if (selected) {
-    ctx.strokeStyle = '#f8fafc'
-    ctx.lineWidth = 2.5 / globalScale
+  if (degree >= MIN_HUB_DEGREE && !dimmed) {
+    ctx.beginPath()
+    ctx.arc(node.x, node.y, r + 4 + hubRatio * 4, 0, Math.PI * 2)
+    ctx.strokeStyle = withAlpha(baseColor, selected ? 0.72 : 0.34 + hubRatio * 0.18)
+    ctx.lineWidth = Math.max(0.8, 1.4 / globalScale)
     ctx.stroke()
   }
 
-  if (globalScale > 0.6 && !dimmed) {
+  ctx.beginPath()
+  ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
+  const core = ctx.createRadialGradient(node.x - r * 0.35, node.y - r * 0.4, r * 0.2, node.x, node.y, r)
+  core.addColorStop(0, withAlpha('#f8fafc', dimmed ? 0.22 : 0.48))
+  core.addColorStop(0.28, withAlpha(baseColor, alpha))
+  core.addColorStop(1, withAlpha(baseColor, dimmed ? 0.12 : 0.64))
+  ctx.fillStyle = core
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
+  ctx.strokeStyle = selected ? '#f8fafc' : withAlpha(baseColor, dimmed ? 0.12 : 0.56)
+  ctx.lineWidth = selected ? 2.5 / globalScale : 1.15 / globalScale
+  ctx.stroke()
+
+  if (active && !dimmed) {
+    ctx.beginPath()
+    ctx.arc(node.x, node.y, r + 7, 0, Math.PI * 2)
+    ctx.strokeStyle = withAlpha(baseColor, 0.42)
+    ctx.lineWidth = 1 / globalScale
+    ctx.stroke()
+  }
+
+  if (globalScale > 0.62 && !dimmed && (focused || selected || degree >= MIN_HUB_DEGREE || currentNodes.value.length <= 40)) {
     const fontSize = 10 / globalScale
     ctx.font = `${fontSize}px sans-serif`
     ctx.textAlign = 'center'
@@ -141,17 +191,22 @@ function paintNodePointerArea(node: SimNode, color: string, ctx: CanvasRendering
 function configureForces(g: ReturnType<typeof createGraph>) {
   // Adjust the default forces force-graph already wires up.
   const charge = g.d3Force('charge') as { strength?: (v: number) => unknown; distanceMax?: (v: number) => unknown } | undefined
-  charge?.strength?.(-220)
-  charge?.distanceMax?.(420)
+  charge?.strength?.(-260)
+  charge?.distanceMax?.(520)
 
   const link = g.d3Force('link') as
-    | { distance?: (fn: (l: SimLink) => number) => unknown; strength?: (fn: (l: SimLink) => number) => unknown }
+    | {
+      distance?: (fn: (l: SimLink) => number) => unknown
+      strength?: (fn: (l: SimLink) => number) => unknown
+      iterations?: (v: number) => unknown
+    }
     | undefined
-  link?.distance?.((l: SimLink) => 60 + (1 - clamp01(l.weight)) * 80)
-  link?.strength?.((l: SimLink) => 0.3 + clamp01(l.weight) * 0.5)
+  link?.distance?.((l: SimLink) => 44 + (1 - clamp01(l.weight)) * 90)
+  link?.strength?.((l: SimLink) => 0.36 + clamp01(l.weight) * 0.58)
+  link?.iterations?.(2)
 
   const center = g.d3Force('center') as { strength?: (v: number) => unknown } | undefined
-  center?.strength?.(0.04)
+  center?.strength?.(0.055)
 }
 
 function syncSize() {
@@ -184,7 +239,7 @@ onMounted(() => {
     .nodeId('id')
     .linkSource('source')
     .linkTarget('target')
-    .backgroundColor('rgba(8, 9, 18, 1)')
+    .backgroundColor('rgba(0, 0, 0, 0)')
     .nodeRelSize(1)
     .nodeVal(0)
     .nodeCanvasObjectMode(() => 'replace')
@@ -192,9 +247,11 @@ onMounted(() => {
     .nodePointerAreaPaint(paintNodePointerArea as never)
     .linkColor(((l: SimLink) => computeLinkColor(l.relation_type, l.weight, isLinkDimmed(l))) as never)
     .linkWidth(((l: SimLink) => computeLinkWidth(l.weight)) as never)
-    .linkDirectionalParticles(((l: SimLink) => (clamp01(l.weight) > 0.6 ? 2 : 0)) as never)
-    .linkDirectionalParticleWidth(2)
+    .linkCurvature(((l: SimLink) => (clamp01(l.weight) > 0.7 ? 0.05 : 0.015)) as never)
+    .linkDirectionalParticles(((l: SimLink) => (clamp01(l.weight) > 0.72 ? 3 : clamp01(l.weight) > 0.45 ? 1 : 0)) as never)
+    .linkDirectionalParticleWidth(2.2)
     .linkDirectionalParticleColor(((l: SimLink) => withAlpha(nodeColor(l.relation_type), 0.85)) as never)
+    .linkDirectionalParticleSpeed(((l: SimLink) => 0.003 + clamp01(l.weight) * 0.006) as never)
     .warmupTicks(0)
     .cooldownTicks(LAYOUT_COOLDOWN_TICKS)
     .cooldownTime(LAYOUT_COOLDOWN_TIME_MS)
@@ -295,18 +352,45 @@ watch(
 
 <style scoped>
 .force-graph-2d {
+  position: relative;
   width: 100%;
   height: 100%;
   min-height: 300px;
   overflow: hidden;
   border-radius: var(--radius, 8px);
   background:
-    radial-gradient(circle at 25% 20%, rgba(59, 130, 246, 0.08), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
+    linear-gradient(rgba(148, 163, 184, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.03) 1px, transparent 1px),
+    radial-gradient(ellipse at center, rgba(15, 23, 42, 0.18), rgba(3, 6, 18, 0.72) 68%),
     #080912;
+  background-size: 36px 36px, 36px 36px, 100% 100%;
+}
+
+.force-graph-2d::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), transparent 18%),
+    linear-gradient(120deg, rgba(255, 183, 77, 0.055), transparent 32%),
+    linear-gradient(300deg, rgba(79, 195, 247, 0.045), transparent 34%);
+  mix-blend-mode: screen;
+}
+
+.force-graph-2d::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  background:
+    linear-gradient(to right, rgba(8, 9, 18, 0.78), transparent 18%, transparent 82%, rgba(8, 9, 18, 0.78)),
+    linear-gradient(to bottom, rgba(8, 9, 18, 0.62), transparent 24%, transparent 80%, rgba(8, 9, 18, 0.84));
 }
 
 .force-graph-2d :deep(canvas) {
+  position: relative;
+  z-index: 1;
   display: block;
   cursor: grab;
 }

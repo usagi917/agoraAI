@@ -18,9 +18,11 @@ declare module 'force-graph' {
     nodePointerAreaPaint(fn: (node: unknown, color: string, ctx: CanvasRenderingContext2D) => void): this
     linkColor(fn: (link: unknown) => string): this
     linkWidth(fn: (link: unknown) => number): this
+    linkCurvature(value: number | ((link: unknown) => number)): this
     linkDirectionalParticles(fn: (link: unknown) => number): this
     linkDirectionalParticleWidth(value: number): this
     linkDirectionalParticleColor(fn: (link: unknown) => string): this
+    linkDirectionalParticleSpeed(value: number | ((link: unknown) => number)): this
     warmupTicks(value: number): this
     cooldownTicks(value: number): this
     cooldownTime(value: number): this
