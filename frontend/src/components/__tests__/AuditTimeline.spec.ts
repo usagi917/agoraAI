@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
 import AuditTimeline from '../AuditTimeline.vue'
-import type { AuditEvent } from '../AuditTimeline.vue'
+import type { AuditEvent } from '../timelineTypes'
 
 const MOCK_EVENTS: AuditEvent[] = [
   {

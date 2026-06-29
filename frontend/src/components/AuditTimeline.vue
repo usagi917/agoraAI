@@ -1,14 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-
-export interface AuditEvent {
-  id: string
-  agent_id: string
-  agent_name: string
-  event_type: string
-  reasoning: string
-  timestamp: string
-}
+import type { AuditEvent } from './timelineTypes'
 
 const props = defineProps<{
   events: AuditEvent[]
