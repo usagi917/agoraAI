@@ -36,6 +36,7 @@ import ForceGraph2D from '../components/ForceGraph2D.vue'
 import AgentStoryDrawer from '../components/AgentStoryDrawer.vue'
 import ConversationsTab from '../components/ConversationsTab.vue'
 import { useTheaterStore } from '../stores/theaterStore'
+import { unifiedPhaseLabel } from '../constants/phases'
 import { formatPercent, parseServerDate } from '../utils/format'
 import {
   getDefaultLiveSecondaryTab,
@@ -109,13 +110,7 @@ const theaterStore = useTheaterStore()
 const stageLabel = computed(() => {
   if (store.isSocietyMode) {
     if (store.isUnifiedMode) {
-      switch (store.unifiedPhase) {
-        case 'society_pulse': return '社会の脈動を測定中'
-        case 'council': return `評議会 Round ${societyGraphStore.currentRound}`
-        case 'synthesis': return '統合分析中'
-        case 'completed': return '完了'
-        default: return '準備中...'
-      }
+      return unifiedPhaseLabel(store.unifiedPhase, societyGraphStore.currentRound)
     }
     if (store.mode === 'society_first') {
       if (store.phase === 'issue_mining') return '重要論点を抽出中'

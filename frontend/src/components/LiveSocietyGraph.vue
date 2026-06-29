@@ -4,6 +4,7 @@ import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
 import { useSimulationStore } from '../stores/simulationStore'
 import { STANCE_COLORS } from '../constants/stances'
+import { societyPhaseLabel, unifiedPhaseLabel } from '../constants/phases'
 import ConversationToast from './ConversationToast.vue'
 import NodeDetailPanel from './NodeDetailPanel.vue'
 import TemporalSlider from './TemporalSlider.vue'
@@ -47,24 +48,9 @@ const selectedGraphNodeId = computed(() => selectedAgentId.value ?? props.spotli
 const phaseLabel = computed(() => {
   // Unified mode phase labels
   if (store.isUnifiedMode) {
-    switch (store.unifiedPhase) {
-      case 'society_pulse': return '社会の脈動を測定中'
-      case 'council': return `評議会 Round ${societyGraphStore.currentRound}`
-      case 'synthesis': return '分析を統合中'
-      case 'completed': return 'Completed'
-      default: return 'Unified Simulation'
-    }
+    return unifiedPhaseLabel(store.unifiedPhase, societyGraphStore.currentRound)
   }
-  const phase = store.societyPhase
-  switch (phase) {
-    case 'population': return 'Population Generation'
-    case 'selection': return 'Agent Selection'
-    case 'activation': return 'Activation Layer'
-    case 'evaluation': return 'Evaluation'
-    case 'meeting': return `Meeting Round ${societyGraphStore.currentRound}`
-    case 'completed': return 'Completed'
-    default: return 'Society Simulation'
-  }
+  return societyPhaseLabel(store.societyPhase, societyGraphStore.currentRound)
 })
 
 const showConversationToast = computed(() =>
