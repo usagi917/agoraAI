@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
-from typing import Callable
 
 from src.app.models.calibration_profile import CalibrationProfile
 from src.app.services.society.calibration_learner import CalibrationLearner

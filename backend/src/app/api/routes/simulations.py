@@ -10,42 +10,45 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.api.deps import get_session
+from src.app.api.routes.codex import (
+    CodexReviewRequest,
+    create_codex_review,
+    get_codex_review_service,
+)
 from src.app.config import settings
 from src.app.models.graph_state import GraphState
 from src.app.models.report import Report
 from src.app.models.simulation import Simulation, normalize_mode
 from src.app.models.timeline_event import TimelineEvent
-from src.app.models.world_state import WorldState
-from src.app.api.routes.codex import CodexReviewRequest, create_codex_review, get_codex_review_service
+from src.app.services.codex_review_service import CodexReviewService
 from src.app.services.decision_briefing import (
     build_single_decision_brief,
     enrich_decision_brief,
 )
-from src.app.services.codex_review_service import CodexReviewService
+from src.app.services.quality import (
+    build_quality_summary,
+    collect_simulation_evidence_refs,
+    extract_quality,
+    extract_run_config,
+    get_evidence_mode,
+    normalize_evidence_mode,
+    normalize_scenarios,
+    supports_evidence_mode,
+)
+from src.app.services.simulation_dispatcher import spawn_simulation
 from src.app.services.society.backtest import (
     build_empty_backtest_result,
     overlay_observed_intervention_comparison,
     prepare_backtest_payload,
 )
 from src.app.services.society.issue_miner import build_intervention_comparison
-from src.app.services.quality import (
-    build_quality_summary,
-    collect_simulation_evidence_refs,
-    extract_run_config,
-    extract_quality,
-    get_evidence_mode,
-    normalize_scenarios,
-    normalize_evidence_mode,
-    supports_evidence_mode,
-)
-from src.app.services.simulation_dispatcher import spawn_simulation
-from src.app.services.validation_summary import (
-    build_unvalidated_summary,
-    merge_scenario_backtest_status,
-)
 from src.app.services.society.validation_pipeline import (
     register_prediction_evaluation,
     summarize_prediction_evaluations,
+)
+from src.app.services.validation_summary import (
+    build_unvalidated_summary,
+    merge_scenario_backtest_status,
 )
 from src.app.sse.manager import sse_manager
 

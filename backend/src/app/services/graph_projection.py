@@ -4,8 +4,8 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.app.models.graph_state import GraphState
 from src.app.models.graph_diff import GraphDiff
+from src.app.models.graph_state import GraphState
 
 MAX_NODES = 20
 MAX_EDGES = 40

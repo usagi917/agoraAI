@@ -53,6 +53,5 @@ def mock_llm_client():
         mock.call_with_retry = AsyncMock(
             return_value=({"result": "test"}, {"total_tokens": 10})
         )
-        mock.call_batch = AsyncMock(return_value=[])
         mock_cls.return_value = mock
         yield mock

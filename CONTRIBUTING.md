@@ -32,6 +32,25 @@ pnpm build  # ビルドが通ることを確認
 pnpm dev    # 開発サーバー起動
 ```
 
+## CI と同じコマンドでローカル検証
+
+CI（`.github/workflows/ci.yml`）が実行するコマンドと完全に一致させると、ローカル green = CI green になります。
+
+```bash
+# --- backend（作業ディレクトリ: backend/）---
+uv sync --extra dev          # 依存インストール
+uv run pytest -q             # テスト（asyncio_mode=strict / --strict-markers / testpaths=tests）
+
+# --- frontend（作業ディレクトリ: frontend/）---
+pnpm install --frozen-lockfile   # lockfile を尊重してインストール
+pnpm build                       # vue-tsc 型チェック + vite ビルド
+pnpm test:unit                   # vitest 単体テスト
+pnpm exec playwright install --with-deps chromium
+pnpm test:e2e                    # Playwright E2E（内部で build:e2e を実行）
+```
+
+> 補足: dead-code 検査は `frontend` で `pnpm check:dead`（knip）。backend の lint は `uv run ruff check src`。
+
 ## パッケージマネージャー
 
 - **Python**: `uv` のみ使用してください（pip, poetry, pipenv は不可）

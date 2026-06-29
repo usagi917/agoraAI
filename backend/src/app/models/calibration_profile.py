@@ -39,7 +39,7 @@ class CalibrationProfile:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CalibrationProfile":
+    def from_dict(cls, data: dict[str, Any]) -> CalibrationProfile:
         """dict からプロファイルを復元する。"""
         return cls(
             domain=str(data["domain"]),

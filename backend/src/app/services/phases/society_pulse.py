@@ -6,35 +6,35 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.app.config import settings
+from src.app.models.conversation_log import ConversationLog
+from src.app.models.evaluation_result import EvaluationResult
 from src.app.models.simulation import Simulation
 from src.app.models.society_result import SocietyResult
-from src.app.models.evaluation_result import EvaluationResult
-from src.app.services.society.society_orchestrator import (
-    _estimate_theme_category,
-    _get_or_create_population,
-    _save_network,
-    _load_population_edges,
-)
-from src.app.services.society.population_generator import get_default_population_size
-from src.app.services.society.agent_selector import select_agents
+from src.app.services.conversation_log_store import persist_conversation_logs
 from src.app.services.society.activation_layer import run_activation
+from src.app.services.society.agent_selector import select_agents
+from src.app.services.society.demographic_analyzer import analyze_demographics
 from src.app.services.society.evaluation import evaluate_society_simulation
+from src.app.services.society.kg_enricher import enrich_agents_from_kg
+from src.app.services.society.kg_evolution_service import KGEvolutionService
 from src.app.services.society.persona_generator import (
     generate_persona_narratives_post_activation,
 )
+from src.app.services.society.population_generator import get_default_population_size
 from src.app.services.society.representative_selector import select_representatives
-from src.app.services.society.demographic_analyzer import analyze_demographics
-from src.app.services.society.kg_enricher import enrich_agents_from_kg
-from src.app.services.society.kg_evolution_service import KGEvolutionService
-from src.app.models.conversation_log import ConversationLog
-from src.app.services.conversation_log_store import persist_conversation_logs
-from src.app.services.validation_summary import build_validation_summary
+from src.app.services.society.society_orchestrator import (
+    _estimate_theme_category,
+    _get_or_create_population,
+    _load_population_edges,
+    _save_network,
+)
 from src.app.services.society.validation_pipeline import (
     auto_compare,
     build_distribution_prediction_payload,
     register_prediction_evaluation,
     register_result,
 )
+from src.app.services.validation_summary import build_validation_summary
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)

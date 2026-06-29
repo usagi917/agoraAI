@@ -111,13 +111,6 @@ export interface SimulationListItem {
   completed_at: string | null
 }
 
-export interface GraphSnapshot {
-  round: number
-  nodes: any[]
-  edges: any[]
-  focus_entities?: string[]
-}
-
 export interface EvidenceRef {
   source_type: string
   source_id: string
@@ -686,11 +679,6 @@ export async function getSimulationGraph(simId: string) {
   return data
 }
 
-export async function getSimulationGraphHistory(simId: string): Promise<GraphSnapshot[]> {
-  const { data } = await api.get(`/simulations/${simId}/graph/history`)
-  return data
-}
-
 export async function getSimulationReport(simId: string): Promise<SimulationReportResponse> {
   const { data } = await api.get(`/simulations/${simId}/report`)
   return data
@@ -895,59 +883,6 @@ export async function getConversations(
 
 // === Narrative API ===
 
-export interface AgentQuote {
-  agent_id: string
-  agent_index: number
-  occupation: string
-  age: number
-  region: string
-  stance: string
-  confidence: number
-  quote: string
-}
-
-export interface NarrativeFinding {
-  finding: string
-  type: string
-  supporting_evidence?: AgentQuote[]
-  confidence: number
-  probability?: number
-  key_factors?: string[]
-}
-
-export interface NarrativeConsensus {
-  point: string
-  supporting_agents: AgentQuote[]
-}
-
-export interface NarrativeControversy {
-  point: string
-  positions: Array<Record<string, any>>
-  supporting_quotes: AgentQuote[]
-  opposing_quotes: AgentQuote[]
-  demographic_split: Record<string, any>
-}
-
-export interface NarrativeRecommendation {
-  recommendation: string
-  evidence_chain: Array<Record<string, any>>
-  supporting_agents: AgentQuote[]
-}
-
-export interface NarrativeResponse {
-  executive_summary: string
-  key_findings: NarrativeFinding[]
-  consensus_areas: NarrativeConsensus[]
-  controversy_areas: NarrativeControversy[]
-  recommendations: NarrativeRecommendation[]
-  stance_shifts: Array<Record<string, any>>
-}
-
-export async function getNarrative(simId: string): Promise<{ phase_data: NarrativeResponse }> {
-  const { data } = await api.get(`/society/simulations/${simId}/narrative`)
-  return data
-}
-
 export interface PropagationData {
   converged: boolean
   total_timesteps: number
@@ -1035,22 +970,7 @@ export interface TimeAxisReport {
   what_if?: WhatIfEntry[]
 }
 
-export interface EnsembleResponse {
-  bands: { key: string; label: string; distribution: Record<string, number>; credible_intervals?: TimelineEntry['credible_intervals'] }[]
-  horizons: number
-}
-
 export async function getTimeAxis(simId: string): Promise<TimeAxisReport> {
   const { data } = await api.get(`/society/simulations/${simId}/time-axis`)
-  return data
-}
-
-export async function getEnsemble(simId: string): Promise<EnsembleResponse> {
-  const { data } = await api.get(`/society/simulations/${simId}/ensemble`)
-  return data
-}
-
-export async function getTemporalReport(simId: string): Promise<TimeAxisReport> {
-  const { data } = await api.get(`/society/simulations/${simId}/report`)
   return data
 }

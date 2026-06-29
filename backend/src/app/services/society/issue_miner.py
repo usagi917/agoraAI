@@ -13,7 +13,6 @@ from typing import Any
 
 from src.app.services.society.backtest import INTERVENTION_METRICS, METRIC_DEFINITIONS
 
-
 ISSUE_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
     (re.compile(r"価格|値段|コスト|費用|負担"), "価格受容性", 0.92),
     (re.compile(r"規制|法規|行政|コンプライアンス|政策"), "規制対応", 0.9),

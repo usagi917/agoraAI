@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 import random
-from typing import Iterable
+from collections.abc import Iterable
 
 from src.app.services.society.bayesian_belief import BeliefDistribution, update_belief
 

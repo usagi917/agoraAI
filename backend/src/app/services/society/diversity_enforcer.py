@@ -11,8 +11,7 @@ NOT touch the LLM directly — it only emits a recommendation that callers
 
 from __future__ import annotations
 
-from typing import Iterable
-
+from collections.abc import Iterable
 
 __all__ = [
     "gini_coefficient",

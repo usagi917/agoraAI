@@ -7,20 +7,20 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.config import settings
+from src.app.models.message import Message
 from src.app.models.timeline_event import TimelineEvent
 from src.app.models.world_state import WorldState
-from src.app.services.cognition.cognitive_agent import CognitiveAgent
-from src.app.services.game_master.action_resolver import ActionResolver
-from src.app.services.game_master.event_injector import EventInjector
-from src.app.services.game_master.consistency_checker import ConsistencyChecker
-from src.app.services.communication.message_bus import MessageBus, AgentMessage
-from src.app.services.communication.conversation import ConversationManager
-from src.app.services.communication.response_orchestrator import ResponseOrchestrator
-from src.app.services.communication.debate_protocol import DebateProtocol
-from src.app.services.scheduling.agent_scheduler import AgentScheduler, AgentTier
-from src.app.services.cognition.lightweight_cycle import LightweightCognitiveProcessor
 from src.app.services.cognition.causal_reasoning import CausalReasoningEngine
-from src.app.models.message import Message
+from src.app.services.cognition.cognitive_agent import CognitiveAgent
+from src.app.services.cognition.lightweight_cycle import LightweightCognitiveProcessor
+from src.app.services.communication.conversation import ConversationManager
+from src.app.services.communication.debate_protocol import DebateProtocol
+from src.app.services.communication.message_bus import AgentMessage, MessageBus
+from src.app.services.communication.response_orchestrator import ResponseOrchestrator
+from src.app.services.game_master.action_resolver import ActionResolver
+from src.app.services.game_master.consistency_checker import ConsistencyChecker
+from src.app.services.game_master.event_injector import EventInjector
+from src.app.services.scheduling.agent_scheduler import AgentScheduler, AgentTier
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)

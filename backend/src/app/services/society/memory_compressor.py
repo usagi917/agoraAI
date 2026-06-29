@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -84,7 +84,7 @@ def build_episode(
         "confidence": activation_response.get("confidence", 0.5),
         "reason_digest": _truncate(reason, 80),
         "sim_id": sim_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
     if meeting_participation:
         fp = meeting_participation.get("final_position", "")

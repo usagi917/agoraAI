@@ -12,17 +12,17 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import TypedDict
 
-import logging
 import yaml
 
 from src.app.services.society.constants import STANCE_ORDER
 from src.app.utils.distribution_metrics import (
-    kl_divergence_symmetric,
     earth_movers_distance,
+    kl_divergence_symmetric,
 )
 
 logger = logging.getLogger(__name__)

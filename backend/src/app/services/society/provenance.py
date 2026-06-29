@@ -9,8 +9,7 @@
 from __future__ import annotations
 
 import subprocess
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 
 def _get_git_hash() -> str:
@@ -63,13 +62,13 @@ def build_provenance(
     population_size: int,
     selected_count: int,
     effective_sample_size: float,
-    activation_params: Optional[dict] = None,
-    meeting_params: Optional[dict] = None,
-    grounding_sources: Optional[list[dict]] = None,
-    quality_metrics: Optional[dict] = None,
-    seed: Optional[int] = None,
+    activation_params: dict | None = None,
+    meeting_params: dict | None = None,
+    grounding_sources: list[dict] | None = None,
+    quality_metrics: dict | None = None,
+    seed: int | None = None,
     provider_bias_detected: bool = False,
-    survey_comparison: Optional[dict] = None,
+    survey_comparison: dict | None = None,
 ) -> dict:
     """シミュレーション結果のプロベナンス（方法論メタデータ）を構築する。
 
@@ -156,7 +155,7 @@ def build_provenance(
         )
 
     # --- reproducibility ---
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
     reproducibility = {
         "random_seed": seed,
         "code_version": _get_git_hash(),

@@ -498,7 +498,7 @@ async def _step_compose_brief(
     # Step 5: クロスバリデーション
     cv = cross_validation or {}
     if cv.get("divergences"):
-        user_prompt += f"\n\n=== Step 5: クロスバリデーション ===\n"
+        user_prompt += "\n\n=== Step 5: クロスバリデーション ===\n"
         user_prompt += f"整合性スコア: {cv.get('alignment_score', '?')}\n"
         for d in cv.get("divergences", [])[:3]:
             user_prompt += f"- 乖離: {d.get('finding', '')} → 仮説: {d.get('hypothesis', '')}\n"

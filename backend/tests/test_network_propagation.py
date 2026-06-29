@@ -379,9 +379,11 @@ class TestBeliefDecayIntegration:
         # つまり final_op0 > step_op0 (decay で initial 方向, i.e. 上方向へ戻る)
         # これは abs(final_op0 - initial_op0) < abs(step_op0 - initial_op0) と同義
 
-        # まず会話で意見が変化することを確認 (もし変化しなければ decay の効果も 0)
-        if abs(step_op0 - initial_op0) < 1e-6:
-            pytest.skip("会話による意見変化がなく decay 効果を確認できない")
+        # 会話で意見が変化することは本テストの前提。変化が無いと decay 検証が無意味になり
+        # デグレを見逃すため、skip ではなく assert で必須化する（変化ロジックが壊れたら FAIL）。
+        assert abs(step_op0 - initial_op0) >= 1e-6, (
+            "会話による意見変化が起きていない（前提条件の不成立 = 意見変化ロジックのデグレの可能性）"
+        )
 
         # decay が適用されているなら: final は step より initial に近い
         dist_final_to_initial = abs(final_op0 - initial_op0)

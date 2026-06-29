@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,7 +88,7 @@ async def update_report_progress(
         current["scope"] = scope
 
     current["status"] = status
-    current["updated_at"] = datetime.now(timezone.utc).isoformat()
+    current["updated_at"] = datetime.now(UTC).isoformat()
 
     sim.metadata_json = _merge_dict(sim.metadata_json, {"report_progress": current})
     flag_modified(sim, "metadata_json")

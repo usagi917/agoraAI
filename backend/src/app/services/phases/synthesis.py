@@ -8,9 +8,12 @@ from typing import Any
 
 from src.app.llm.multi_client import multi_llm_client
 from src.app.models.simulation import Simulation
-from src.app.services.phases.society_pulse import SocietyPulseResult
+from src.app.services.decision_briefing import (
+    build_conversation_highlights,
+    render_decision_brief_markdown,
+)
 from src.app.services.phases.council_deliberation import CouncilResult
-from src.app.services.decision_briefing import build_conversation_highlights, render_decision_brief_markdown
+from src.app.services.phases.society_pulse import SocietyPulseResult
 from src.app.services.react_reporter import react_generate_decision_brief
 from src.app.services.society.conversation_highlights import extract_conversation_highlights
 from src.app.services.theater_events import emit_decision_from_synthesis
@@ -257,7 +260,7 @@ def _build_fallback_brief(
             top = scenarios_data[0]
             name = top.get("name", "") if isinstance(top, dict) else str(top)
             prob = top.get("probability", 0) if isinstance(top, dict) else 0
-            return f"主要シナリオ「{name}」（確率{prob*100:.0f}%）が想定される" if name else f"スタンス分布に基づく推移を注視"
+            return f"主要シナリオ「{name}」（確率{prob*100:.0f}%）が想定される" if name else "スタンス分布に基づく推移を注視"
         if stance_dist:
             return f"現時点のスタンス（{top_stance} {stance_dist.get(top_stance, 0)*100:.0f}%）が{period}後も維持される可能性が高い"
         return "データ収集中のため予測困難"
@@ -433,7 +436,7 @@ async def _build_narrative_report(
     if turning_point:
         tp = turning_point
         lines.extend([
-            f"### 転機",
+            "### 転機",
             f"ラウンド{tp.get('round', '?')}で、{tp.get('participant', '参加者')}が{tp.get('moment', '')}。"
             f"{tp.get('impact', '')}",
             "",

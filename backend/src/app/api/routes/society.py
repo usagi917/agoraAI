@@ -9,19 +9,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.api.deps import get_session
-from src.app.models.population import Population
 from src.app.models.agent_profile import AgentProfile
-from src.app.models.social_edge import SocialEdge
-from src.app.models.simulation import Simulation
-from src.app.models.society_result import SocietyResult
-from src.app.models.evaluation_result import EvaluationResult
 from src.app.models.conversation_log import ConversationLog
-from src.app.services.society.validation_pipeline import summarize_prediction_evaluations
+from src.app.models.evaluation_result import EvaluationResult
+from src.app.models.population import Population
+from src.app.models.simulation import Simulation
+from src.app.models.social_edge import SocialEdge
+from src.app.models.society_result import SocietyResult
 from src.app.services.society.population_generator import (
     generate_population,
     get_default_population_size,
     validate_population_size,
 )
+from src.app.services.society.validation_pipeline import summarize_prediction_evaluations
 
 logger = logging.getLogger(__name__)
 
@@ -292,8 +292,8 @@ async def get_evaluation_summary(
     validation_records が存在しない場合は inconclusive を返す。
     """
     from src.app.repositories.validation_repo import ValidationRepository
-    from src.app.services.society.validation_pipeline import build_validation_summary
     from src.app.services.society.baseline_comparator import build_evaluation_summary_response
+    from src.app.services.society.validation_pipeline import build_validation_summary
 
     sim = await session.get(Simulation, sim_id)
     if not sim:

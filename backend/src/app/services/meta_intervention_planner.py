@@ -7,7 +7,6 @@ from typing import Any
 
 from src.app.services.society.issue_miner import build_intervention_comparison
 
-
 CHANGE_TYPE_KEYWORDS = {
     "pricing": ("価格", "値段", "割引", "課金"),
     "message": ("訴求", "メッセージ", "ブランド", "認知", "信頼"),

@@ -1,8 +1,8 @@
 """LLM API クライアント: OpenAI / Ollama 対応 + JSON 抽出 + retry"""
 
-import asyncio
 import logging
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 import httpx
 
@@ -291,7 +291,7 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         response_format: dict | None = None,
-        validate_fn: Optional[Callable] = None,
+        validate_fn: Callable | None = None,
     ) -> tuple[Any, dict]:
         """LLM 呼び出し + validation 失敗時に1回 retry。"""
         effective_validate_fn = validate_fn or get_task_validator(task_name)
@@ -371,35 +371,6 @@ class LLMClient:
             json_retries=json_retries,
             last_validation_error=last_validation_error,
         )
-
-    async def call_batch(
-        self,
-        calls: list[dict],
-        max_concurrency: int | None = None,
-    ) -> list[tuple[dict | str, dict]]:
-        """複数LLM呼び出しをSemaphore付きで並列実行する。
-
-        calls: list of {"task_name": str, "system_prompt": str, "user_prompt": str, "response_format": dict | None}
-        """
-        sem = asyncio.Semaphore(max_concurrency or settings.max_concurrent_agents)
-
-        async def _single(call_params):
-            async with sem:
-                return await self.call(**call_params)
-
-        results = await asyncio.gather(
-            *[_single(c) for c in calls],
-            return_exceptions=True,
-        )
-
-        processed = []
-        for r in results:
-            if isinstance(r, Exception):
-                logger.warning(f"Batch call failed: {r}")
-                processed.append(("", {"model": "unknown", "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}))
-            else:
-                processed.append(r)
-        return processed
 
 
 llm_client = LLMClient()

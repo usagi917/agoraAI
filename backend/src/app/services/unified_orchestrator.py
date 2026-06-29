@@ -5,23 +5,23 @@ Decision Brief 付きの統合レポートを生成する。
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
 from src.app.database import async_session
 from src.app.models.agent_profile import AgentProfile
-from src.app.models.kg_node import KGNode
 from src.app.models.kg_edge import KGEdge
+from src.app.models.kg_node import KGNode
 from src.app.models.simulation import Simulation
 from src.app.models.social_edge import SocialEdge
 from src.app.models.society_result import SocietyResult
-from src.app.services.phases.society_pulse import SocietyPulseResult, run_society_pulse
 from src.app.services.phases.council_deliberation import CouncilResult, run_council
+from src.app.services.phases.society_pulse import SocietyPulseResult, run_society_pulse
 from src.app.services.phases.synthesis import SynthesisResult, run_synthesis
 from src.app.services.scenario_pair_status import refresh_scenario_pair_status
-from src.app.services.society.representative_selector import select_representatives
 from src.app.services.society import accuracy_config as _acc_flags
+from src.app.services.society.representative_selector import select_representatives
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -409,7 +409,7 @@ async def run_unified(simulation_id: str) -> None:
             )
 
             sim.status = "completed"
-            sim.completed_at = datetime.now(timezone.utc)
+            sim.completed_at = datetime.now(UTC)
             await refresh_scenario_pair_status(session, scenario_pair_id)
             await session.commit()
 

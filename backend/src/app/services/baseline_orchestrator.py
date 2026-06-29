@@ -6,7 +6,7 @@ unified モードと同じフォーマットで結果を保存する。
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.app.database import async_session
 from src.app.llm.client import LLMClient
@@ -102,7 +102,7 @@ async def run_baseline(simulation_id: str) -> None:
                 },
             }
             sim.status = "completed"
-            sim.completed_at = datetime.now(timezone.utc)
+            sim.completed_at = datetime.now(UTC)
             await refresh_scenario_pair_status(session, scenario_pair_id)
             await session.commit()
 

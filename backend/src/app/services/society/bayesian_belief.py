@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 
 @dataclass
@@ -17,7 +17,7 @@ class BeliefDistribution:
     alpha: dict[str, float] = field(default_factory=dict)
 
     @classmethod
-    def uniform(cls, stances: Iterable[str], pseudo_count: float = 1.0) -> "BeliefDistribution":
+    def uniform(cls, stances: Iterable[str], pseudo_count: float = 1.0) -> BeliefDistribution:
         return cls(alpha={s: pseudo_count for s in stances})
 
     def total(self) -> float:

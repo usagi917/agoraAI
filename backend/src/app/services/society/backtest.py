@@ -13,7 +13,6 @@ import uuid
 from statistics import pstdev
 from typing import Any
 
-
 BACKTEST_SCHEMA_VERSION = 1
 
 METRIC_DEFINITIONS: dict[str, dict[str, str]] = {

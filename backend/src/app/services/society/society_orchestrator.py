@@ -10,61 +10,59 @@ Swarm Intelligence Pipeline:
 
 import logging
 import uuid
-from datetime import datetime, timezone
-
-from src.app.services.society.theme_category import (
-    ThemeCategoryEstimate,
-    MVP_CATEGORIES,
-    ANCHOR_MIN_CONFIDENCE,
-    CONFIDENCE_PER_KEYWORD,
-)
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 
 from src.app.config import settings
 from src.app.database import async_session
-from src.app.models.population import Population
 from src.app.models.agent_profile import AgentProfile
-from src.app.models.social_edge import SocialEdge
-from src.app.models.simulation import Simulation
-from src.app.models.society_result import SocietyResult
 from src.app.models.evaluation_result import EvaluationResult
+from src.app.models.population import Population
+from src.app.models.simulation import Simulation
+from src.app.models.social_edge import SocialEdge
+from src.app.models.society_result import SocietyResult
+from src.app.services.scenario_pair_status import refresh_scenario_pair_status
+from src.app.services.society.activation_layer import _aggregate_opinions, run_activation
+from src.app.services.society.agent_selector import select_agents
+from src.app.services.society.calibration import platt_recalibrate
+from src.app.services.society.data_grounding import distribute_facts_to_agents, load_grounding_facts
+from src.app.services.society.deliberation_quality import compute_dqi, measure_opinion_change
+from src.app.services.society.demographic_analyzer import analyze_demographics
+from src.app.services.society.emergence_tracker import EmergenceTracker
+from src.app.services.society.evaluation import evaluate_society_simulation
+from src.app.services.society.graph_evolution import evolve_social_graph
+from src.app.services.society.meeting_layer import enrich_meeting_with_clusters, run_meeting
+from src.app.services.society.meeting_report import generate_meeting_report
+from src.app.services.society.memory_compressor import update_agent_memories
+from src.app.services.society.narrative_generator import generate_narrative
+from src.app.services.society.network_generator import generate_network
+from src.app.services.society.network_propagation import (
+    _convert_opinion_to_stance,
+    run_network_propagation,
+)
+from src.app.services.society.output_validator import explain_activation_meeting_gap
 from src.app.services.society.population_generator import (
     generate_population,
     get_default_population_size,
     validate_population_size,
 )
-from src.app.services.society.network_generator import generate_network
-from src.app.services.society.agent_selector import select_agents
-from src.app.services.society.activation_layer import run_activation
-from src.app.services.society.data_grounding import load_grounding_facts, distribute_facts_to_agents
-from src.app.services.society.evaluation import evaluate_society_simulation
-from src.app.services.society.representative_selector import select_representatives
-from src.app.services.society.meeting_layer import run_meeting, enrich_meeting_with_clusters
-from src.app.services.society.meeting_report import generate_meeting_report
-from src.app.services.society.memory_compressor import update_agent_memories
-from src.app.services.society.graph_evolution import evolve_social_graph
-from src.app.services.society.demographic_analyzer import analyze_demographics
-from src.app.services.society.narrative_generator import generate_narrative
-from src.app.services.society.deliberation_quality import compute_dqi, measure_opinion_change
-from src.app.services.society.provenance import build_provenance
-from src.app.services.society.network_propagation import (
-    run_network_propagation,
-    _convert_opinion_to_stance,
-)
-from src.app.services.society.stigmergy_service import StigmergyBoard
 from src.app.services.society.prediction_market import PredictionMarket
+from src.app.services.society.provenance import build_provenance
+from src.app.services.society.representative_selector import select_representatives
 from src.app.services.society.statistical_inference import compute_independence_weights
-from src.app.services.society.activation_layer import _aggregate_opinions
-from src.app.services.society.calibration import platt_recalibrate
-from src.app.services.society.emergence_tracker import EmergenceTracker
-from src.app.services.society.output_validator import explain_activation_meeting_gap
+from src.app.services.society.stigmergy_service import StigmergyBoard
 from src.app.services.society.survey_anchor import (
     apply_survey_anchor,
     get_anchor_distribution,
     load_survey_data,
 )
-from src.app.services.scenario_pair_status import refresh_scenario_pair_status
+from src.app.services.society.theme_category import (
+    ANCHOR_MIN_CONFIDENCE,
+    CONFIDENCE_PER_KEYWORD,
+    MVP_CATEGORIES,
+    ThemeCategoryEstimate,
+)
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -1293,7 +1291,7 @@ async def run_society(simulation_id: str) -> None:
 
             # === 完了 ===
             sim.status = "completed"
-            sim.completed_at = datetime.now(timezone.utc)
+            sim.completed_at = datetime.now(UTC)
             sim.metadata_json = {
                 **dict(sim.metadata_json or {}),
                 "society_result": {

@@ -3,7 +3,6 @@
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -14,12 +13,12 @@ class AgentMessage:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     sender_id: str = ""
     recipient_ids: list[str] = field(default_factory=list)  # empty=broadcast
-    channel_id: Optional[str] = None
+    channel_id: str | None = None
     message_type: str = "say"  # say|propose|accept|reject|inform|request|argue|counter_argue
     content: str = ""
     metadata: dict = field(default_factory=dict)  # intent, urgency, topics
     round_number: int = 0
-    in_reply_to: Optional[str] = None
+    in_reply_to: str | None = None
 
 
 class MessageBus:

@@ -6,9 +6,9 @@ from typing import Any
 from src.app.llm.multi_client import multi_llm_client
 from src.app.models.conversation_log import ConversationLog
 from src.app.services.conversation_log_store import persist_conversation_logs
-from src.app.services.theater_events import process_round_theater_events
 from src.app.services.society.activation_layer import _temperature_from_big_five
 from src.app.services.society.activation_prompts import SPEECH_STYLE_DIRECTIVES
+from src.app.services.theater_events import process_round_theater_events
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)

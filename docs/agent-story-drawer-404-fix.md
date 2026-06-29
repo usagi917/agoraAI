@@ -1,5 +1,10 @@
 # Agent Story Drawer 404 修正案
 
+> **【実装済み・履歴ドキュメント】** 本修正案は既にコードへ反映済み
+> (`backend/src/app/services/phases/society_pulse.py` の canonical id 付与、
+> `frontend/src/stores/societyGraphStore.ts` の `a.id` 利用)。
+> 歴史的経緯の記録として残す。現状の実装と差異が出た場合はコードが正。
+
 ## 概要
 
 Society モードでエージェントを選択した際、右側の Agent Story Drawer に `Request failed with status code 404` が表示される不具合がある。

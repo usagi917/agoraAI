@@ -4,8 +4,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.app.database import utcnow_naive
 from src.app.config import settings
+from src.app.database import utcnow_naive
 from src.app.models.codex_review import CodexReview
 from src.app.models.report import Report
 from src.app.models.simulation import Simulation

@@ -8,8 +8,8 @@ from typing import Any
 from src.app.services.society.age_utils import age_bracket_4 as _age_bracket
 
 try:
-    from scipy.stats import chisquare as _scipy_chisquare
     from scipy.stats import chi2_contingency as _scipy_chi2_contingency
+    from scipy.stats import chisquare as _scipy_chisquare
     _SCIPY_AVAILABLE = True
 except ImportError:
     _SCIPY_AVAILABLE = False

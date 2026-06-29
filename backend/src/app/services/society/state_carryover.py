@@ -7,7 +7,8 @@ scenario_pair_factory._clone_population と同じ思想だが、time_axis_orches
 from __future__ import annotations
 
 import copy
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 
 def carry_agents(prev_agents: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:

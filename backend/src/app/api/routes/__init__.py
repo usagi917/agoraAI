@@ -1,17 +1,19 @@
 from fastapi import APIRouter
 
-from src.app.api.routes.projects import router as projects_router
-from src.app.api.routes.templates import router as templates_router
-from src.app.api.routes.runs import router as runs_router
 from src.app.api.routes.admin import router as admin_router
 from src.app.api.routes.codex import router as codex_router
-from src.app.api.routes.simulations import router as simulations_router
-from src.app.api.routes.society import router as society_router
+from src.app.api.routes.projects import router as projects_router
+from src.app.api.routes.runs import router as runs_router
 from src.app.api.routes.scenario_pairs import (
-    router as scenario_pairs_router,
     audit_trail_router,
     populations_router,
 )
+from src.app.api.routes.scenario_pairs import (
+    router as scenario_pairs_router,
+)
+from src.app.api.routes.simulations import router as simulations_router
+from src.app.api.routes.society import router as society_router
+from src.app.api.routes.templates import router as templates_router
 
 api_router = APIRouter()
 api_router.include_router(projects_router, prefix="/projects", tags=["projects"])

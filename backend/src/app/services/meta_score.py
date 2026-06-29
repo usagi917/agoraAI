@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 TARGET_OBJECTIVE_SCORE = 0.78
 PLATEAU_DELTA = 0.02
 PLATEAU_PATIENCE = 2

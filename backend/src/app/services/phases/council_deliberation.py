@@ -8,8 +8,8 @@ from typing import Any
 from src.app.llm.multi_client import multi_llm_client
 from src.app.models.simulation import Simulation
 from src.app.services.phases.society_pulse import SocietyPulseResult
-from src.app.services.society.kg_updater import apply_kg_updates
 from src.app.services.society.kg_evolution_service import KGEvolutionService
+from src.app.services.society.kg_updater import apply_kg_updates
 from src.app.services.society.meeting_layer import run_meeting
 from src.app.sse.manager import sse_manager
 

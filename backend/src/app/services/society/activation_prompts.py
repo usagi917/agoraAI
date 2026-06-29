@@ -160,7 +160,7 @@ def build_theory_of_mind_instruction(agent: dict, theme: str) -> str:
     # ステップ番号付きで結合
     numbered = []
     for i, step in enumerate(steps, 1):
-        numbered.append(f"①②③④⑤"[i - 1] + " " + step)
+        numbered.append("①②③④⑤"[i - 1] + " " + step)
 
     return "\n".join(numbered)
 

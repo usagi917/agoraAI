@@ -25,18 +25,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.models.prediction_evaluation import PredictionEvaluation
 from src.app.models.validation_record import ValidationRecord
 from src.app.repositories.validation_repo import ValidationRepository
+from src.app.services.society.calibration import (
+    extremeness_aversion_correction,
+)
 from src.app.services.society.survey_anchor import (
     ComparisonReport,
     compare_with_surveys,
 )
-from src.app.services.society.calibration import (
-    extremeness_aversion_correction,
-)
+from src.app.services.society.theme_category import ThemeCategoryEstimate
 from src.app.services.society.transfer_calibrator import (
     BiasProfile,
     compute_bias_profile,
 )
-from src.app.services.society.theme_category import ThemeCategoryEstimate
 from src.app.utils.distribution_metrics import (
     earth_movers_distance,
     kl_divergence_symmetric,

@@ -16,7 +16,7 @@ jobs:
           python-version: '3.11'
       - name: Install backend dependencies
         working-directory: backend
-        run: uv sync --extra dev
+        run: uv sync
       - name: Run backend tests
         working-directory: backend
         run: uv run pytest -q
@@ -26,8 +26,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 20

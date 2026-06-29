@@ -1,5 +1,7 @@
 import logging
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
+from typing import cast
 
 import yaml
 from fastapi import FastAPI
@@ -8,9 +10,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
-from src.app.config import settings
-from src.app.database import init_db, async_session
 from src.app.api.routes import api_router
+from src.app.config import settings
+from src.app.database import async_session, init_db
 from src.app.llm.client import validate_task_registry
 from src.app.services.simulation_dispatcher import (
     release_startup_resume_leadership,
@@ -18,21 +20,34 @@ from src.app.services.simulation_dispatcher import (
 )
 
 
+def _text_value(value: object, default: str) -> str:
+    return value if isinstance(value, str) else default
+
+
+def _mapping_value(value: object) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        return {}
+
+    mapping = cast(Mapping[object, object], value)
+    return {str(key): item for key, item in mapping.items()}
+
+
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     validate_task_registry()
     await init_db()
     await seed_templates()
-    await resume_unfinished_simulations()
+    _ = await resume_unfinished_simulations()
     try:
         yield
     finally:
         await release_startup_resume_leadership()
 
 
-async def seed_templates():
-    from src.app.models.template import Template
+async def seed_templates() -> None:
     from sqlalchemy import select
+
+    from src.app.models.template import Template
 
     templates_dir = settings.templates_dir / "ja"
     if not templates_dir.exists():
@@ -41,9 +56,14 @@ async def seed_templates():
     async with async_session() as session:
         for yaml_file in templates_dir.glob("*.yaml"):
             with open(yaml_file) as f:
-                data = yaml.safe_load(f)
+                loaded = cast(object, yaml.safe_load(f))
 
-            name = data.get("name", yaml_file.stem)
+            if not isinstance(loaded, Mapping):
+                continue
+
+            data = cast(Mapping[str, object], loaded)
+
+            name = _text_value(data.get("name"), yaml_file.stem)
             result = await session.execute(
                 select(Template).where(Template.name == name)
             )
@@ -52,10 +72,10 @@ async def seed_templates():
 
             template = Template(
                 name=name,
-                display_name=data.get("display_name", name),
-                description=data.get("description", ""),
-                category=data.get("category", ""),
-                prompts=data.get("prompts", {}),
+                display_name=_text_value(data.get("display_name"), name),
+                description=_text_value(data.get("description"), ""),
+                category=_text_value(data.get("category"), ""),
+                prompts=_mapping_value(data.get("prompts")),
             )
             session.add(template)
 

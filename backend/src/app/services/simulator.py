@@ -5,7 +5,7 @@ run_simulation: 後方互換の単体実行エントリーポイント
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,12 +15,12 @@ from src.app.database import async_session
 from src.app.models.document import Document
 from src.app.models.run import Run
 from src.app.models.template import Template
-from src.app.services.colony_factory import ColonyConfig
-from src.app.services.world_builder import build_world
 from src.app.services.agent_generator import generate_agents
-from src.app.services.round_processor import process_round
-from src.app.services.graph_projection import project_graph, compute_diff, save_graph_state
+from src.app.services.colony_factory import ColonyConfig
+from src.app.services.graph_projection import compute_diff, project_graph, save_graph_state
 from src.app.services.report_generator import generate_report
+from src.app.services.round_processor import process_round
+from src.app.services.world_builder import build_world
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -189,7 +189,7 @@ async def run_simulation(
                 return None
 
             run.status = "running"
-            run.started_at = datetime.now(timezone.utc)
+            run.started_at = datetime.now(UTC)
             await session.commit()
 
             await sse_manager.publish(run_id, "run_started", {
@@ -331,7 +331,7 @@ async def run_simulation(
 
             # 完了
             run.status = "completed"
-            run.completed_at = datetime.now(timezone.utc)
+            run.completed_at = datetime.now(UTC)
             await session.commit()
 
             await sse_manager.publish(run_id, "run_completed", {

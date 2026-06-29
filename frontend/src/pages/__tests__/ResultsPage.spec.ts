@@ -10,7 +10,6 @@ const apiMocks = vi.hoisted(() => ({
   getSimulation: vi.fn(),
   getSimulationReport: vi.fn(),
   getSimulationGraph: vi.fn(),
-  getSimulationGraphHistory: vi.fn(),
   getSimulationColonies: vi.fn(),
   submitCodexReview: vi.fn(),
   getCodexHealth: vi.fn(),
@@ -80,7 +79,6 @@ describe('ResultsPage', () => {
         issues: ['strict_document_evidence_required'],
       },
     })
-    apiMocks.getSimulationGraphHistory.mockResolvedValue([])
     apiMocks.getSimulationGraph.mockResolvedValue({ nodes: [], edges: [] })
     apiMocks.getSimulationColonies.mockResolvedValue([])
     apiMocks.getCodexHealth.mockResolvedValue({

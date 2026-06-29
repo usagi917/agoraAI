@@ -4,12 +4,11 @@ import logging
 import uuid
 from collections import defaultdict
 
-from src.app.services.society.age_utils import age_bracket_4 as _age_bracket
-
 import yaml
 
 from src.app.config import settings
 from src.app.llm.multi_client import multi_llm_client
+from src.app.services.society.age_utils import age_bracket_4 as _age_bracket
 
 logger = logging.getLogger(__name__)
 

@@ -14,10 +14,8 @@ from __future__ import annotations
 import math
 import random
 from collections import defaultdict
-from typing import Optional
 
 from src.app.services.society.age_utils import age_bracket_4 as _age_bracket
-
 
 # 職業→5区分マッピング
 _OCCUPATION_CATEGORY_MAP: dict[str, str] = {
@@ -154,7 +152,7 @@ def bootstrap_confidence_intervals(
     weights: list[float],
     n_bootstrap: int = 1000,
     ci: float = 0.95,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     extra_uncertainty: float = 0.0,
 ) -> dict[str, tuple[float, float]]:
     """ブートストラップ法でスタンス分布の信頼区間を計算する.

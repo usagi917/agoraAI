@@ -96,7 +96,7 @@ def enrich_agents_from_kg(
 
         if context_parts:
             agent["kg_context"] = (
-                f"【関連する背景情報】\n"
+                "【関連する背景情報】\n"
                 + "\n".join(context_parts)
             )
             enriched_count += 1
