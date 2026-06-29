@@ -540,6 +540,10 @@ class SocietyRunContext:
     responses_with_ids: list = field(default_factory=list)
     # Validation フェーズの出力（Provenance 構築で参照）
     survey_comparison: dict | None = None
+    # Meeting Layer フェーズの出力（下流フェーズが参照）
+    meeting_participants: list = field(default_factory=list)
+    meeting_result: dict | None = None
+    meeting_report: dict | None = None
 
 
 async def _phase_evaluation(ctx: "SocietyRunContext", session) -> None:
@@ -922,6 +926,99 @@ async def _phase_validation(
     ctx.survey_comparison = survey_comparison
 
 
+async def _phase_meeting(ctx: "SocietyRunContext", session, total_usage: dict) -> None:
+    """Phase 5: 代表者会議を実行し meeting レイヤを永続化する。
+
+    propagation_result があればクラスタベースの反論で参加者を enrich する。
+    total_usage は run_society 全体の累積 dict を明示引数で受け取り in-place 加算する。
+    ctx.meeting_participants / meeting_result / meeting_report を更新する。
+    """
+    simulation_id = ctx.simulation_id
+    theme = ctx.theme
+    pop_id = ctx.pop_id
+    selected_agents = ctx.selected_agents
+    activation_result = ctx.activation_result
+    propagation_result = ctx.propagation_result
+    responses_with_ids = ctx.responses_with_ids
+
+    meeting_participants = select_representatives(
+        selected_agents,
+        activation_result["responses"],
+        max_citizen_reps=6,
+        max_experts=4,
+    )
+
+    # Enrich meeting participants with cluster-based counter-arguments
+    if propagation_result and propagation_result.clusters:
+        enrich_meeting_with_clusters(
+            meeting_participants,
+            propagation_result.clusters,
+            responses_with_ids,
+        )
+
+    meeting_result = await run_meeting(
+        meeting_participants, theme,
+        simulation_id=simulation_id,
+        num_rounds=3,
+    )
+
+    total_usage["prompt_tokens"] += meeting_result["usage"].get("prompt_tokens", 0)
+    total_usage["completion_tokens"] += meeting_result["usage"].get("completion_tokens", 0)
+    total_usage["total_tokens"] += meeting_result["usage"].get("total_tokens", 0)
+
+    # Meeting レポート生成
+    meeting_report = generate_meeting_report(meeting_result)
+
+    # Meeting 結果保存（ラウンド会話・参加者を含む）
+    # 会話データから usage を除外してサイズ削減
+    clean_rounds = []
+    for round_args in meeting_result.get("rounds", []):
+        clean_round = []
+        for arg in round_args:
+            clean_arg = {k: v for k, v in arg.items() if k != "usage"}
+            clean_round.append(clean_arg)
+        clean_rounds.append(clean_round)
+
+    # 参加者情報を enriched で保存
+    enriched_participants = []
+    for p in meeting_participants:
+        info = {
+            "role": p["role"],
+            "expertise": p.get("expertise", ""),
+            "display_name": p.get("display_name", ""),
+        }
+        if p["role"] == "citizen_representative":
+            agent_profile = p.get("agent_profile", {})
+            demo = agent_profile.get("demographics", {})
+            info["agent_id"] = agent_profile.get("id", "")
+            info["agent_index"] = agent_profile.get("agent_index", 0)
+            info["occupation"] = demo.get("occupation", "")
+            info["region"] = demo.get("region", "")
+            info["age"] = demo.get("age", 0)
+            info["stance"] = p.get("stance", "")
+        enriched_participants.append(info)
+
+    meeting_record = _make_layer_record(
+        simulation_id=simulation_id,
+        population_id=pop_id,
+        layer="meeting",
+        phase_data={
+            "report": meeting_report,
+            "participant_count": len(meeting_participants),
+            "rounds": clean_rounds,
+            "participants": enriched_participants,
+            "synthesis": meeting_result.get("synthesis", {}),
+        },
+        usage=meeting_result["usage"],
+    )
+    session.add(meeting_record)
+    await session.commit()
+
+    ctx.meeting_participants = meeting_participants
+    ctx.meeting_result = meeting_result
+    ctx.meeting_report = meeting_report
+
+
 async def run_society(simulation_id: str) -> None:
     """Society モードのメインオーケストレーション。"""
     logger.info("Starting society simulation %s", simulation_id)
@@ -1115,78 +1212,10 @@ async def run_society(simulation_id: str) -> None:
                 logger.warning("Post-activation persona generation failed, continuing: %s", exc)
 
             # === Phase 5: Meeting Layer ===
-            meeting_participants = select_representatives(
-                selected_agents,
-                activation_result["responses"],
-                max_citizen_reps=6,
-                max_experts=4,
-            )
-
-            # Enrich meeting participants with cluster-based counter-arguments
-            if propagation_result and propagation_result.clusters:
-                enrich_meeting_with_clusters(
-                    meeting_participants,
-                    propagation_result.clusters,
-                    responses_with_ids,
-                )
-
-            meeting_result = await run_meeting(
-                meeting_participants, theme,
-                simulation_id=simulation_id,
-                num_rounds=3,
-            )
-
-            total_usage["prompt_tokens"] += meeting_result["usage"].get("prompt_tokens", 0)
-            total_usage["completion_tokens"] += meeting_result["usage"].get("completion_tokens", 0)
-            total_usage["total_tokens"] += meeting_result["usage"].get("total_tokens", 0)
-
-            # Meeting レポート生成
-            meeting_report = generate_meeting_report(meeting_result)
-
-            # Meeting 結果保存（ラウンド会話・参加者を含む）
-            # 会話データから usage を除外してサイズ削減
-            clean_rounds = []
-            for round_args in meeting_result.get("rounds", []):
-                clean_round = []
-                for arg in round_args:
-                    clean_arg = {k: v for k, v in arg.items() if k != "usage"}
-                    clean_round.append(clean_arg)
-                clean_rounds.append(clean_round)
-
-            # 参加者情報を enriched で保存
-            enriched_participants = []
-            for p in meeting_participants:
-                info = {
-                    "role": p["role"],
-                    "expertise": p.get("expertise", ""),
-                    "display_name": p.get("display_name", ""),
-                }
-                if p["role"] == "citizen_representative":
-                    agent_profile = p.get("agent_profile", {})
-                    demo = agent_profile.get("demographics", {})
-                    info["agent_id"] = agent_profile.get("id", "")
-                    info["agent_index"] = agent_profile.get("agent_index", 0)
-                    info["occupation"] = demo.get("occupation", "")
-                    info["region"] = demo.get("region", "")
-                    info["age"] = demo.get("age", 0)
-                    info["stance"] = p.get("stance", "")
-                enriched_participants.append(info)
-
-            meeting_record = _make_layer_record(
-                simulation_id=simulation_id,
-                population_id=pop_id,
-                layer="meeting",
-                phase_data={
-                    "report": meeting_report,
-                    "participant_count": len(meeting_participants),
-                    "rounds": clean_rounds,
-                    "participants": enriched_participants,
-                    "synthesis": meeting_result.get("synthesis", {}),
-                },
-                usage=meeting_result["usage"],
-            )
-            session.add(meeting_record)
-            await session.commit()
+            await _phase_meeting(ctx, session, total_usage)
+            meeting_participants = ctx.meeting_participants
+            meeting_result = ctx.meeting_result
+            meeting_report = ctx.meeting_report
 
             # === Phase 5.025: Meeting Feedback Propagation ===
             feedback_result = None
