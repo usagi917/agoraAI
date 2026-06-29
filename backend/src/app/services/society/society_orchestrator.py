@@ -533,6 +533,11 @@ class SocietyRunContext:
     eval_data: dict = field(default_factory=dict)
     demographic_analysis: dict = field(default_factory=dict)
     dqi_overall_score: float | None = None
+    # Network Propagation フェーズの出力（下流フェーズが参照）
+    propagation_result: object | None = None
+    prediction_market: object | None = None
+    edges: list = field(default_factory=list)
+    responses_with_ids: list = field(default_factory=list)
 
 
 async def _phase_evaluation(ctx: "SocietyRunContext", session) -> None:
@@ -609,6 +614,231 @@ def _phase_deliberation_quality(ctx: "SocietyRunContext", session, meeting_resul
         ctx.dqi_overall_score = dqi_result.get("overall_dqi")
     except Exception as exc:
         logger.warning("DQI evaluation failed: %s", exc)
+
+
+async def _phase_network_propagation(
+    ctx: "SocietyRunContext",
+    session,
+    activation_record,
+    individual_responses: list,
+) -> None:
+    """Phase 3.5: ネットワーク伝播(群知能)を実行し ctx に結果を保存する。
+
+    エッジを読み込んで意見伝播・スティグマジー・予測市場・創発検知を実行し、
+    network_propagation レイヤを永続化する。失敗時は握り潰して伝播なしで継続。
+    ctx.propagation_result / prediction_market / edges / responses_with_ids を更新する。
+    """
+    simulation_id = ctx.simulation_id
+    theme = ctx.theme
+    pop_id = ctx.pop_id
+    selected_agents = ctx.selected_agents
+    activation_result = ctx.activation_result
+    selected_agent_ids = [a["id"] for a in selected_agents]
+
+    propagation_result = None
+    stigmergy_board = StigmergyBoard()
+    prediction_market = None
+    emergence_tracker = EmergenceTracker()
+    edges: list = []
+    responses_with_ids: list = []
+
+    try:
+        # Load edges for selected agents
+        edge_result = await session.execute(
+            select(SocialEdge).where(SocialEdge.population_id == pop_id)
+        )
+        edges_db = edge_result.scalars().all()
+        edges = [
+            {
+                "agent_id": e.agent_id,
+                "target_id": e.target_id,
+                "strength": e.strength,
+            }
+            for e in edges_db
+            if e.agent_id in selected_agent_ids and e.target_id in selected_agent_ids
+        ]
+
+        # Prepare responses with agent_id
+        responses_with_ids = []
+        for agent, resp in zip(selected_agents, activation_result["responses"]):
+            responses_with_ids.append({
+                **resp,
+                "agent_id": agent["id"],
+            })
+
+        await sse_manager.publish(simulation_id, "network_propagation_started", {
+            "agent_count": len(selected_agents),
+            "edge_count": len(edges),
+        })
+
+        async def on_propagation_timestep(record):
+            await sse_manager.publish(simulation_id, "propagation_timestep", {
+                "timestep": record.timestep,
+                "opinion_distribution": record.opinion_distribution,
+                "entropy": record.entropy,
+                "cluster_count": record.cluster_count,
+                "max_delta": record.max_delta,
+            })
+
+        propagation_result = await run_network_propagation(
+            agents=selected_agents,
+            initial_responses=responses_with_ids,
+            edges=edges,
+            theme=theme,
+            max_timesteps=12,
+            confidence_threshold=0.5,
+            on_timestep=on_propagation_timestep,
+        )
+
+        # Stigmergy: extract topics from agent concerns
+        for resp in responses_with_ids:
+            concern = resp.get("concern", "")
+            if concern:
+                # Simple topic extraction from concerns
+                for keyword in ["財源", "格差", "負担", "教育", "生活", "経済", "安全", "環境", "雇用", "福祉"]:
+                    if keyword in concern:
+                        stigmergy_board.deposit(
+                            resp.get("agent_id", ""),
+                            keyword,
+                            intensity=resp.get("confidence", 0.5),
+                        )
+
+        # Compute independence weights and re-aggregate
+        cluster_dicts = [
+            {"member_ids": c.member_ids, "size": c.size}
+            for c in propagation_result.clusters
+        ]
+        independence_weights = _apply_independence_re_aggregation(
+            activation_result, cluster_dicts, edges,
+            selected_agent_ids, selected_agents,
+        )
+        activation_record.phase_data = _build_activation_phase_data(
+            activation_result=activation_result,
+            representative_count=len(activation_result["representatives"]),
+            individual_responses=individual_responses,
+        )
+
+        # Prediction Market (with independence-weighted bets + adaptive liquidity)
+        # Design Decision: デフォルトでは pre-propagation stance を使用。
+        # 各エージェントの独立した判断を予測市場に反映するため。
+        # use_post_propagation=True で社会的影響後のスタンスに切替可能。
+        pm_config = _get_prediction_market_config(settings.load_population_mix_config())
+        outcomes = list(activation_result["aggregation"]["stance_distribution"].keys())
+        if outcomes and not pm_config["use_post_propagation"]:
+            prediction_market = PredictionMarket(outcomes=outcomes, adaptive_b=True)
+            for agent, resp in zip(selected_agents, activation_result["responses"]):
+                stance = resp.get("stance", "中立")
+                raw_confidence = resp.get("confidence", 0.5)
+                calibrated_confidence = platt_recalibrate(raw_confidence)
+                ind_w = independence_weights.get(agent["id"], 1.0)
+                if stance in outcomes:
+                    prediction_market.submit_bet(agent["id"], stance, calibrated_confidence, weight=ind_w)
+
+        # Emergence tracking from propagation history
+        for ts_record in propagation_result.timestep_history:
+            emergence_tracker.record_timestep({
+                "timestep": ts_record.timestep,
+                "opinions": ts_record.opinions,
+                "agent_ids": selected_agent_ids,
+            })
+
+        # Save propagation result
+        propagation_record = _make_layer_record(
+            simulation_id=simulation_id,
+            population_id=pop_id,
+            layer="network_propagation",
+            phase_data={
+                "converged": propagation_result.converged,
+                "total_timesteps": propagation_result.total_timesteps,
+                "cluster_count": len(propagation_result.clusters),
+                "clusters": [
+                    {"label": c.label, "size": c.size, "centroid": c.centroid}
+                    for c in propagation_result.clusters
+                ],
+                "echo_chamber": propagation_result.metrics.get("echo_chamber", {}),
+                "stigmergy_topics": [
+                    {"topic": t.topic, "intensity": t.intensity}
+                    for t in stigmergy_board.get_salient_topics(top_k=10)
+                ],
+                "prediction_market": prediction_market.get_prices() if prediction_market else {},
+                "phase_transitions": emergence_tracker.detect_phase_transitions(),
+                "tipping_points": emergence_tracker.detect_tipping_points(),
+                "aggregation_pre_independence": activation_result.get(
+                    "aggregation_pre_independence"
+                ),
+                "aggregation_post_independence": activation_result["aggregation"],
+                "independence_re_aggregation": _build_independence_reaggregation_summary(
+                    activation_result
+                ),
+            },
+            usage={},
+        )
+        session.add(propagation_record)
+
+        # Update activation responses with propagated opinions
+        stance_updates = []
+        if propagation_result and propagation_result.final_opinions:
+            for i, opinion in enumerate(propagation_result.final_opinions):
+                if i < len(activation_result["responses"]) and i < len(selected_agents):
+                    new_stance = _convert_opinion_to_stance(opinion)
+                    old_stance = activation_result["responses"][i].get("stance", "")
+                    activation_result["responses"][i]["propagated_stance"] = new_stance
+                    activation_result["responses"][i]["opinion_vector"] = opinion
+                    if new_stance != old_stance:
+                        stance_updates.append({
+                            "agent_id": selected_agents[i]["id"],
+                            "stance": new_stance,
+                        })
+
+        # Post-propagation prediction market (use_post_propagation=True の場合のみ)
+        if outcomes and pm_config["use_post_propagation"]:
+            prediction_market = PredictionMarket(outcomes=outcomes, adaptive_b=True)
+            for agent, resp in zip(selected_agents, activation_result["responses"]):
+                stance = resp.get("propagated_stance", resp.get("stance", "中立"))
+                raw_confidence = resp.get("confidence", 0.5)
+                calibrated_confidence = platt_recalibrate(raw_confidence)
+                ind_w = independence_weights.get(agent["id"], 1.0)
+                if stance in outcomes:
+                    prediction_market.submit_bet(agent["id"], stance, calibrated_confidence, weight=ind_w)
+            # Update persisted phase_data with post-propagation prices
+            propagation_record.phase_data["prediction_market"] = prediction_market.get_prices()
+
+        await sse_manager.publish(simulation_id, "network_propagation_completed", {
+            "converged": propagation_result.converged,
+            "total_timesteps": propagation_result.total_timesteps,
+            "cluster_count": len(propagation_result.clusters),
+            "clusters": [
+                {"label": c.label, "size": c.size, "centroid": c.centroid}
+                for c in propagation_result.clusters
+            ],
+            "echo_chamber": propagation_result.metrics.get("echo_chamber", {}),
+            "stance_updates": stance_updates,
+            "aggregation_pre_independence": activation_result.get(
+                "aggregation_pre_independence"
+            ),
+            "independence_weighting_applied": activation_result["aggregation"].get(
+                "independence_weighting_applied", False
+            ),
+            "independence_re_aggregation": _build_independence_reaggregation_summary(
+                activation_result
+            ),
+            "aggregation": activation_result["aggregation"],
+        })
+
+        logger.info(
+            "Network propagation completed: %d timesteps, converged=%s, %d clusters",
+            propagation_result.total_timesteps,
+            propagation_result.converged,
+            len(propagation_result.clusters),
+        )
+
+    except Exception as exc:
+        logger.warning("Network propagation failed, continuing without: %s", exc)
+
+    ctx.propagation_result = propagation_result
+    ctx.prediction_market = prediction_market
+    ctx.edges = edges
+    ctx.responses_with_ids = responses_with_ids
 
 
 async def run_society(simulation_id: str) -> None:
@@ -763,203 +993,13 @@ async def run_society(simulation_id: str) -> None:
             )
 
             # === Phase 3.5: Network Propagation (Swarm Intelligence) ===
-            propagation_result = None
-            stigmergy_board = StigmergyBoard()
-            prediction_market = None
-            emergence_tracker = EmergenceTracker()
-
-            try:
-                # Load edges for selected agents
-                edge_result = await session.execute(
-                    select(SocialEdge).where(SocialEdge.population_id == pop_id)
-                )
-                edges_db = edge_result.scalars().all()
-                edges = [
-                    {
-                        "agent_id": e.agent_id,
-                        "target_id": e.target_id,
-                        "strength": e.strength,
-                    }
-                    for e in edges_db
-                    if e.agent_id in selected_agent_ids and e.target_id in selected_agent_ids
-                ]
-
-                # Prepare responses with agent_id
-                responses_with_ids = []
-                for agent, resp in zip(selected_agents, activation_result["responses"]):
-                    responses_with_ids.append({
-                        **resp,
-                        "agent_id": agent["id"],
-                    })
-
-                await sse_manager.publish(simulation_id, "network_propagation_started", {
-                    "agent_count": len(selected_agents),
-                    "edge_count": len(edges),
-                })
-
-                async def on_propagation_timestep(record):
-                    await sse_manager.publish(simulation_id, "propagation_timestep", {
-                        "timestep": record.timestep,
-                        "opinion_distribution": record.opinion_distribution,
-                        "entropy": record.entropy,
-                        "cluster_count": record.cluster_count,
-                        "max_delta": record.max_delta,
-                    })
-
-                propagation_result = await run_network_propagation(
-                    agents=selected_agents,
-                    initial_responses=responses_with_ids,
-                    edges=edges,
-                    theme=theme,
-                    max_timesteps=12,
-                    confidence_threshold=0.5,
-                    on_timestep=on_propagation_timestep,
-                )
-
-                # Stigmergy: extract topics from agent concerns
-                for resp in responses_with_ids:
-                    concern = resp.get("concern", "")
-                    if concern:
-                        # Simple topic extraction from concerns
-                        for keyword in ["財源", "格差", "負担", "教育", "生活", "経済", "安全", "環境", "雇用", "福祉"]:
-                            if keyword in concern:
-                                stigmergy_board.deposit(
-                                    resp.get("agent_id", ""),
-                                    keyword,
-                                    intensity=resp.get("confidence", 0.5),
-                                )
-
-                # Compute independence weights and re-aggregate
-                cluster_dicts = [
-                    {"member_ids": c.member_ids, "size": c.size}
-                    for c in propagation_result.clusters
-                ]
-                independence_weights = _apply_independence_re_aggregation(
-                    activation_result, cluster_dicts, edges,
-                    selected_agent_ids, selected_agents,
-                )
-                activation_record.phase_data = _build_activation_phase_data(
-                    activation_result=activation_result,
-                    representative_count=len(activation_result["representatives"]),
-                    individual_responses=individual_responses,
-                )
-
-                # Prediction Market (with independence-weighted bets + adaptive liquidity)
-                # Design Decision: デフォルトでは pre-propagation stance を使用。
-                # 各エージェントの独立した判断を予測市場に反映するため。
-                # use_post_propagation=True で社会的影響後のスタンスに切替可能。
-                pm_config = _get_prediction_market_config(settings.load_population_mix_config())
-                outcomes = list(activation_result["aggregation"]["stance_distribution"].keys())
-                if outcomes and not pm_config["use_post_propagation"]:
-                    prediction_market = PredictionMarket(outcomes=outcomes, adaptive_b=True)
-                    for agent, resp in zip(selected_agents, activation_result["responses"]):
-                        stance = resp.get("stance", "中立")
-                        raw_confidence = resp.get("confidence", 0.5)
-                        calibrated_confidence = platt_recalibrate(raw_confidence)
-                        ind_w = independence_weights.get(agent["id"], 1.0)
-                        if stance in outcomes:
-                            prediction_market.submit_bet(agent["id"], stance, calibrated_confidence, weight=ind_w)
-
-                # Emergence tracking from propagation history
-                for ts_record in propagation_result.timestep_history:
-                    emergence_tracker.record_timestep({
-                        "timestep": ts_record.timestep,
-                        "opinions": ts_record.opinions,
-                        "agent_ids": selected_agent_ids,
-                    })
-
-                # Save propagation result
-                propagation_record = _make_layer_record(
-                    simulation_id=simulation_id,
-                    population_id=pop_id,
-                    layer="network_propagation",
-                    phase_data={
-                        "converged": propagation_result.converged,
-                        "total_timesteps": propagation_result.total_timesteps,
-                        "cluster_count": len(propagation_result.clusters),
-                        "clusters": [
-                            {"label": c.label, "size": c.size, "centroid": c.centroid}
-                            for c in propagation_result.clusters
-                        ],
-                        "echo_chamber": propagation_result.metrics.get("echo_chamber", {}),
-                        "stigmergy_topics": [
-                            {"topic": t.topic, "intensity": t.intensity}
-                            for t in stigmergy_board.get_salient_topics(top_k=10)
-                        ],
-                        "prediction_market": prediction_market.get_prices() if prediction_market else {},
-                        "phase_transitions": emergence_tracker.detect_phase_transitions(),
-                        "tipping_points": emergence_tracker.detect_tipping_points(),
-                        "aggregation_pre_independence": activation_result.get(
-                            "aggregation_pre_independence"
-                        ),
-                        "aggregation_post_independence": activation_result["aggregation"],
-                        "independence_re_aggregation": _build_independence_reaggregation_summary(
-                            activation_result
-                        ),
-                    },
-                    usage={},
-                )
-                session.add(propagation_record)
-
-                # Update activation responses with propagated opinions
-                stance_updates = []
-                if propagation_result and propagation_result.final_opinions:
-                    for i, opinion in enumerate(propagation_result.final_opinions):
-                        if i < len(activation_result["responses"]) and i < len(selected_agents):
-                            new_stance = _convert_opinion_to_stance(opinion)
-                            old_stance = activation_result["responses"][i].get("stance", "")
-                            activation_result["responses"][i]["propagated_stance"] = new_stance
-                            activation_result["responses"][i]["opinion_vector"] = opinion
-                            if new_stance != old_stance:
-                                stance_updates.append({
-                                    "agent_id": selected_agents[i]["id"],
-                                    "stance": new_stance,
-                                })
-
-                # Post-propagation prediction market (use_post_propagation=True の場合のみ)
-                if outcomes and pm_config["use_post_propagation"]:
-                    prediction_market = PredictionMarket(outcomes=outcomes, adaptive_b=True)
-                    for agent, resp in zip(selected_agents, activation_result["responses"]):
-                        stance = resp.get("propagated_stance", resp.get("stance", "中立"))
-                        raw_confidence = resp.get("confidence", 0.5)
-                        calibrated_confidence = platt_recalibrate(raw_confidence)
-                        ind_w = independence_weights.get(agent["id"], 1.0)
-                        if stance in outcomes:
-                            prediction_market.submit_bet(agent["id"], stance, calibrated_confidence, weight=ind_w)
-                    # Update persisted phase_data with post-propagation prices
-                    propagation_record.phase_data["prediction_market"] = prediction_market.get_prices()
-
-                await sse_manager.publish(simulation_id, "network_propagation_completed", {
-                    "converged": propagation_result.converged,
-                    "total_timesteps": propagation_result.total_timesteps,
-                    "cluster_count": len(propagation_result.clusters),
-                    "clusters": [
-                        {"label": c.label, "size": c.size, "centroid": c.centroid}
-                        for c in propagation_result.clusters
-                    ],
-                    "echo_chamber": propagation_result.metrics.get("echo_chamber", {}),
-                    "stance_updates": stance_updates,
-                    "aggregation_pre_independence": activation_result.get(
-                        "aggregation_pre_independence"
-                    ),
-                    "independence_weighting_applied": activation_result["aggregation"].get(
-                        "independence_weighting_applied", False
-                    ),
-                    "independence_re_aggregation": _build_independence_reaggregation_summary(
-                        activation_result
-                    ),
-                    "aggregation": activation_result["aggregation"],
-                })
-
-                logger.info(
-                    "Network propagation completed: %d timesteps, converged=%s, %d clusters",
-                    propagation_result.total_timesteps,
-                    propagation_result.converged,
-                    len(propagation_result.clusters),
-                )
-
-            except Exception as exc:
-                logger.warning("Network propagation failed, continuing without: %s", exc)
+            await _phase_network_propagation(
+                ctx, session, activation_record, individual_responses,
+            )
+            propagation_result = ctx.propagation_result
+            prediction_market = ctx.prediction_market
+            edges = ctx.edges
+            responses_with_ids = ctx.responses_with_ids
 
             # === Phase 4: Evaluation ===
             await _phase_evaluation(ctx, session)
