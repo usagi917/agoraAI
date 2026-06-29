@@ -544,6 +544,8 @@ class SocietyRunContext:
     meeting_participants: list = field(default_factory=list)
     meeting_result: dict | None = None
     meeting_report: dict | None = None
+    # Provenance フェーズの出力（Narrative / 完了メタデータで参照）
+    provenance: dict | None = None
 
 
 async def _phase_evaluation(ctx: "SocietyRunContext", session) -> None:
@@ -926,6 +928,32 @@ async def _phase_validation(
     ctx.survey_comparison = survey_comparison
 
 
+async def _phase_persona(ctx: "SocietyRunContext") -> None:
+    """Phase 4.8: activation 後にペルソナナラティブを生成し selected_agents を更新する。
+
+    generate_... は agents を in-place 変異しつつ同一リストを返すため ctx 参照は
+    保たれるが、将来の戻り値差し替えに備え ctx.selected_agents も更新する。
+    失敗時は握り潰して継続する。
+    """
+    try:
+        from src.app.services.society.persona_generator import (
+            generate_persona_narratives_post_activation,
+        )
+        await sse_manager.publish(ctx.simulation_id, "persona_generation_started", {
+            "agent_count": len(ctx.selected_agents),
+        })
+        ctx.selected_agents = await generate_persona_narratives_post_activation(
+            ctx.selected_agents, ctx.activation_result["responses"], ctx.theme,
+        )
+        persona_count = sum(1 for a in ctx.selected_agents if a.get("persona_narrative"))
+        logger.info(
+            "Post-activation persona narratives: %d/%d generated",
+            persona_count, len(ctx.selected_agents),
+        )
+    except Exception as exc:
+        logger.warning("Post-activation persona generation failed, continuing: %s", exc)
+
+
 async def _phase_meeting(ctx: "SocietyRunContext", session, total_usage: dict) -> None:
     """Phase 5: 代表者会議を実行し meeting レイヤを永続化する。
 
@@ -1017,6 +1045,353 @@ async def _phase_meeting(ctx: "SocietyRunContext", session, total_usage: dict) -
     ctx.meeting_participants = meeting_participants
     ctx.meeting_result = meeting_result
     ctx.meeting_report = meeting_report
+
+
+async def _phase_meeting_feedback(ctx: "SocietyRunContext", session, sim_seed) -> None:
+    """Phase 5.025: 会議結果を母集団へフィードバック伝播する(フラグ ON 時のみ)。
+
+    representative_updates が生じた場合のみ post_feedback_* レイヤを永続化する。
+    propagation_result が無い/フラグ OFF/更新なしの場合は何もしない。失敗時は握り潰す。
+    """
+    simulation_id = ctx.simulation_id
+    pop_id = ctx.pop_id
+    selected_agents = ctx.selected_agents
+    propagation_result = ctx.propagation_result
+    meeting_participants = ctx.meeting_participants
+    meeting_result = ctx.meeting_result
+    responses_with_ids = ctx.responses_with_ids
+    edges = ctx.edges
+
+    feedback_result = None
+    try:
+        from src.app.services.society.accuracy_config import is_enabled
+        if is_enabled("meeting_feedback_propagation") and propagation_result:
+            await sse_manager.publish(simulation_id, "meeting_feedback_started", {
+                "representative_count": len(meeting_participants),
+            })
+
+            representative_updates = _extract_representative_updates(
+                meeting_participants, meeting_result, responses_with_ids,
+            )
+
+            if representative_updates:
+                from src.app.services.society.network_propagation import (
+                    run_meeting_feedback_propagation,
+                )
+                feedback_result = await run_meeting_feedback_propagation(
+                    agents=selected_agents,
+                    edges=edges,
+                    representative_updates=representative_updates,
+                    activation_responses=responses_with_ids,
+                    seed=sim_seed,
+                )
+
+                await sse_manager.publish(simulation_id, "meeting_feedback_timestep", {
+                    "changed_count": len(feedback_result["changed_agents"]),
+                })
+
+                # Re-run evaluation with post-feedback responses
+                fb_responses = feedback_result["feedback_responses"]
+                post_fb_eval = await evaluate_society_simulation(
+                    selected_agents, fb_responses,
+                )
+                post_fb_eval_data = {m["metric_name"]: m["score"] for m in post_fb_eval}
+
+                # Re-run demographic analysis
+                post_fb_demographics = analyze_demographics(
+                    selected_agents, fb_responses,
+                )
+
+                # Rebuild PredictionMarket with post-feedback opinions
+                fb_stances = list({r["stance"] for r in fb_responses})
+                if fb_stances:
+                    post_fb_market = PredictionMarket(outcomes=fb_stances, adaptive_b=True)
+                    for resp in fb_responses:
+                        stance = resp.get("stance", "中立")
+                        if stance in fb_stances:
+                            post_fb_market.submit_bet(
+                                resp["agent_id"], stance,
+                                resp.get("confidence", 0.5),
+                            )
+
+                    # Resolve with meeting majority_stance
+                    synthesis = meeting_result.get("synthesis", {})
+                    majority_stance = synthesis.get("majority_stance", "")
+                    post_fb_brier = None
+                    if majority_stance and majority_stance in fb_stances:
+                        post_fb_market.resolve(majority_stance)
+                        post_fb_brier = post_fb_market.compute_brier_score(majority_stance)
+
+                # Save post-feedback results as separate layers
+                fb_eval_record = _make_layer_record(
+                    simulation_id=simulation_id,
+                    population_id=pop_id,
+                    layer="post_feedback_evaluation",
+                    phase_data={"metrics": post_fb_eval_data},
+                    usage={},
+                )
+                session.add(fb_eval_record)
+
+                fb_demo_record = _make_layer_record(
+                    simulation_id=simulation_id,
+                    population_id=pop_id,
+                    layer="post_feedback_demographics",
+                    phase_data=post_fb_demographics,
+                    usage={},
+                )
+                session.add(fb_demo_record)
+
+                fb_propagation_record = _make_layer_record(
+                    simulation_id=simulation_id,
+                    population_id=pop_id,
+                    layer="post_feedback_propagation",
+                    phase_data={
+                        "propagation_record": feedback_result["propagation_record"],
+                        "changed_agents": feedback_result["changed_agents"],
+                        "market_prices": post_fb_market.get_prices() if fb_stances else {},
+                        "brier_score": post_fb_brier,
+                    },
+                    usage={},
+                )
+                session.add(fb_propagation_record)
+
+            await sse_manager.publish(simulation_id, "meeting_feedback_completed", {
+                "total_changed": len(feedback_result["changed_agents"]) if feedback_result else 0,
+            })
+    except (ValueError, ImportError) as exc:
+        logger.warning("Meeting feedback propagation skipped: %s", exc)
+    except Exception as exc:
+        logger.warning("Meeting feedback propagation failed: %s", exc, exc_info=True)
+
+
+def _phase_prediction_market_resolution(ctx: "SocietyRunContext") -> None:
+    """Phase 5.05: 会議の多数派スタンスで予測市場を清算する(market への副作用のみ)。"""
+    prediction_market = ctx.prediction_market
+    if prediction_market:
+        try:
+            synthesis = ctx.meeting_result.get("synthesis", {})
+            majority_stance = synthesis.get("majority_stance", "")
+            if majority_stance and majority_stance in [o for o in prediction_market._outcomes]:
+                prediction_market.resolve(majority_stance)
+                brier = prediction_market.compute_brier_score(majority_stance)
+                logger.info("Prediction market resolved: Brier=%.3f", brier)
+        except Exception as exc:
+            logger.warning("Prediction market resolution failed: %s", exc)
+
+
+def _phase_provenance(
+    ctx: "SocietyRunContext",
+    agents: list,
+    theme_estimate,
+    anchor_applied: bool,
+    sim_seed,
+) -> None:
+    """Phase 5.5: provenance(再現性メタデータ)を構築し ctx.provenance に保存する。
+
+    agents(全母集団) / theme_estimate / anchor_applied / sim_seed は前処理・setup の
+    出力を明示引数で受け取る。
+    """
+    selected_agents = ctx.selected_agents
+    activation_result = ctx.activation_result
+    propagation_result = ctx.propagation_result
+
+    quality_metrics = {m["metric_name"]: m["score"] for m in ctx.eval_metrics}
+    if ctx.dqi_overall_score is not None:
+        quality_metrics["dqi_overall"] = ctx.dqi_overall_score
+
+    provenance = build_provenance(
+        population_size=len(agents),
+        selected_count=len(selected_agents),
+        effective_sample_size=activation_result["aggregation"].get(
+            "effective_sample_size", float(len(selected_agents))
+        ),
+        activation_params={"temperature": 0.5},
+        meeting_params={
+            "num_rounds": 3,
+            "participants": len(ctx.meeting_participants),
+        },
+        quality_metrics=quality_metrics,
+        seed=sim_seed,
+        survey_comparison=ctx.survey_comparison,
+    )
+
+    # Augment provenance with theme_category anchoring provenance
+    provenance["theme_category_anchoring"] = {
+        "category": theme_estimate.category,
+        "confidence": theme_estimate.confidence,
+        "source": theme_estimate.source,
+        "is_anchor_eligible": theme_estimate.is_anchor_eligible,
+        "anchor_applied": anchor_applied,
+    }
+
+    # Augment provenance with network propagation data
+    if propagation_result:
+        provenance["network_propagation"] = {
+            "model": "Bounded Confidence (Hegselmann-Krause) + Friedkin-Johnsen",
+            "max_timesteps": 12,
+            "actual_timesteps": propagation_result.total_timesteps,
+            "converged": propagation_result.converged,
+            "cluster_count": len(propagation_result.clusters),
+            "echo_chamber": propagation_result.metrics.get("echo_chamber", {}),
+        }
+
+    ctx.provenance = provenance
+
+
+def _phase_narrative(ctx: "SocietyRunContext", session) -> None:
+    """Phase 5.5: activation-meeting ギャップ説明とナラティブを生成し narrative レイヤを永続化する。"""
+    activation_result = ctx.activation_result
+    meeting_result = ctx.meeting_result
+    propagation_result = ctx.propagation_result
+
+    # Explain activation-meeting gap
+    propagation_data_for_gap = None
+    if propagation_result:
+        propagation_data_for_gap = {
+            "converged": propagation_result.converged,
+            "total_timesteps": propagation_result.total_timesteps,
+            "clusters": [
+                {"label": c.label, "size": c.size, "centroid": c.centroid, "member_ids": c.member_ids}
+                for c in propagation_result.clusters
+            ],
+            "echo_chamber": propagation_result.metrics.get("echo_chamber", {}),
+            "timestep_history": [
+                {"timestep": ts.timestep, "opinion_distribution": ts.opinion_distribution}
+                for ts in propagation_result.timestep_history
+            ],
+        }
+
+    gap_explanation = explain_activation_meeting_gap(
+        aggregation=activation_result["aggregation"],
+        synthesis=meeting_result.get("synthesis", {}),
+        meeting_participants=ctx.meeting_participants,
+        propagation_data=propagation_data_for_gap,
+    )
+
+    # Prepare cluster data for v2 narrative
+    narrative_clusters = None
+    if propagation_result and propagation_result.clusters:
+        narrative_clusters = [
+            {"label": c.label, "size": c.size, "centroid": c.centroid, "member_ids": c.member_ids}
+            for c in propagation_result.clusters
+        ]
+
+    narrative = generate_narrative(
+        ctx.selected_agents,
+        activation_result["responses"],
+        meeting_result.get("synthesis", {}),
+        activation_result["aggregation"],
+        ctx.demographic_analysis,
+        meeting_rounds=meeting_result.get("rounds"),
+        provenance=ctx.provenance,
+        clusters=narrative_clusters,
+    )
+
+    # Enrich narrative with gap explanation
+    narrative["gap_explanation"] = gap_explanation
+
+    narrative_record = _make_layer_record(
+        simulation_id=ctx.simulation_id,
+        population_id=ctx.pop_id,
+        layer="narrative",
+        phase_data=narrative,
+        usage={},
+    )
+    session.add(narrative_record)
+
+
+async def _phase_persistent_society(ctx: "SocietyRunContext", session, theme_estimate) -> None:
+    """Phase 6: エージェント記憶の圧縮とソーシャルグラフ進化を行い社会を永続化する。"""
+    simulation_id = ctx.simulation_id
+    pop_id = ctx.pop_id
+    selected_agents = ctx.selected_agents
+
+    from src.app.services.society.accuracy_config import AccuracyConfig as _AccuracyConfig
+    _acc_flags = _AccuracyConfig(settings.load_population_mix_config())
+    _mem_llm = None
+    if _acc_flags.is_enabled("rolling_summary"):
+        from src.app.llm.multi_client import multi_llm_client as _mem_llm
+    await update_agent_memories(
+        session, selected_agents, ctx.activation_result["responses"],
+        meeting_result=ctx.meeting_result,
+        theme=ctx.theme,
+        theme_category=theme_estimate.category,
+        simulation_id=simulation_id,
+        llm_client=_mem_llm,
+        accuracy_flags=_acc_flags,
+    )
+
+    await evolve_social_graph(
+        session, pop_id, ctx.meeting_result, ctx.meeting_participants,
+    )
+
+    # ソーシャルグラフ準備完了を通知
+    edge_count_result = await session.execute(
+        select(func.count()).select_from(SocialEdge).where(SocialEdge.population_id == pop_id)
+    )
+    edge_count = edge_count_result.scalar() or 0
+    await sse_manager.publish(simulation_id, "society_social_graph_ready", {
+        "population_id": pop_id,
+        "edge_count": edge_count,
+        "node_count": len(selected_agents),
+    })
+
+
+async def _phase_time_axis(ctx: "SocietyRunContext", session, sim) -> bool:
+    """Phase 6(Wondrous Crayon): 時間軸予測パイプライン(フラグ ON 時のみ)。
+
+    sim.metadata_json に time_axis_result / time_axis_error を追記し、実行可否を返す。
+    """
+    from src.app.services.society.accuracy_config import AccuracyConfig as _AccuracyConfig
+    _acc_flags = _AccuracyConfig(settings.load_population_mix_config())
+    if not _acc_flags.is_enabled("time_axis_orchestrator"):
+        return False
+
+    simulation_id = ctx.simulation_id
+    pop_id = ctx.pop_id
+    try:
+        from src.app.services.society.time_axis_runner import (
+            run_time_axis_pipeline,
+        )
+        edge_rows = (await session.execute(
+            select(SocialEdge).where(SocialEdge.population_id == pop_id)
+        )).scalars().all()
+        edges_list: list[tuple] = [
+            (e.agent_id, e.target_id) for e in edge_rows
+        ]
+        base_responses: list[dict] = []
+        for agent, resp in zip(
+            ctx.selected_agents, ctx.activation_result.get("responses", [])
+        ):
+            base_responses.append({
+                **resp,
+                "agent_id": agent["id"],
+            })
+        time_axis_report = await run_time_axis_pipeline(
+            simulation_id=simulation_id,
+            base_responses=base_responses,
+            base_edges=edges_list,
+            theme=ctx.theme,
+            sse_manager=sse_manager,
+        )
+        sim.metadata_json = {
+            **dict(sim.metadata_json or {}),
+            "time_axis_result": time_axis_report,
+        }
+        await session.commit()
+        return True
+    except Exception as time_axis_exc:
+        logger.exception(
+            "time-axis pipeline failed for sim %s", simulation_id
+        )
+        sim.metadata_json = {
+            **dict(sim.metadata_json or {}),
+            "time_axis_error": (
+                f"{type(time_axis_exc).__name__}: {time_axis_exc}"
+            )[:500],
+        }
+        await session.commit()
+        return False
 
 
 async def run_society(simulation_id: str) -> None:
@@ -1174,294 +1549,44 @@ async def run_society(simulation_id: str) -> None:
             await _phase_network_propagation(
                 ctx, session, activation_record, individual_responses,
             )
-            propagation_result = ctx.propagation_result
-            prediction_market = ctx.prediction_market
-            edges = ctx.edges
-            responses_with_ids = ctx.responses_with_ids
 
             # === Phase 4: Evaluation ===
             await _phase_evaluation(ctx, session)
-            eval_metrics = ctx.eval_metrics
             eval_data = ctx.eval_data
 
             # === Phase 4.5: Validation Registration ===
             await _phase_validation(ctx, session, theme_estimate, survey_data_dir)
-            survey_comparison = ctx.survey_comparison
 
             # === Phase 4.6: Demographic Analysis ===
             _phase_demographics(ctx, session)
-            demographic_analysis = ctx.demographic_analysis
 
             # === Phase 4.8: Post-Activation Persona Generation ===
-            try:
-                from src.app.services.society.persona_generator import (
-                    generate_persona_narratives_post_activation,
-                )
-                await sse_manager.publish(simulation_id, "persona_generation_started", {
-                    "agent_count": len(selected_agents),
-                })
-                selected_agents = await generate_persona_narratives_post_activation(
-                    selected_agents, activation_result["responses"], theme,
-                )
-                persona_count = sum(1 for a in selected_agents if a.get("persona_narrative"))
-                logger.info(
-                    "Post-activation persona narratives: %d/%d generated",
-                    persona_count, len(selected_agents),
-                )
-            except Exception as exc:
-                logger.warning("Post-activation persona generation failed, continuing: %s", exc)
+            await _phase_persona(ctx)
+            selected_agents = ctx.selected_agents
 
             # === Phase 5: Meeting Layer ===
             await _phase_meeting(ctx, session, total_usage)
-            meeting_participants = ctx.meeting_participants
             meeting_result = ctx.meeting_result
             meeting_report = ctx.meeting_report
 
             # === Phase 5.025: Meeting Feedback Propagation ===
-            feedback_result = None
-            try:
-                from src.app.services.society.accuracy_config import is_enabled
-                if is_enabled("meeting_feedback_propagation") and propagation_result:
-                    await sse_manager.publish(simulation_id, "meeting_feedback_started", {
-                        "representative_count": len(meeting_participants),
-                    })
-
-                    representative_updates = _extract_representative_updates(
-                        meeting_participants, meeting_result, responses_with_ids,
-                    )
-
-                    if representative_updates:
-                        from src.app.services.society.network_propagation import (
-                            run_meeting_feedback_propagation,
-                        )
-                        feedback_result = await run_meeting_feedback_propagation(
-                            agents=selected_agents,
-                            edges=edges,
-                            representative_updates=representative_updates,
-                            activation_responses=responses_with_ids,
-                            seed=sim.seed,
-                        )
-
-                        await sse_manager.publish(simulation_id, "meeting_feedback_timestep", {
-                            "changed_count": len(feedback_result["changed_agents"]),
-                        })
-
-                        # Re-run evaluation with post-feedback responses
-                        fb_responses = feedback_result["feedback_responses"]
-                        post_fb_eval = await evaluate_society_simulation(
-                            selected_agents, fb_responses,
-                        )
-                        post_fb_eval_data = {m["metric_name"]: m["score"] for m in post_fb_eval}
-
-                        # Re-run demographic analysis
-                        post_fb_demographics = analyze_demographics(
-                            selected_agents, fb_responses,
-                        )
-
-                        # Rebuild PredictionMarket with post-feedback opinions
-                        fb_stances = list({r["stance"] for r in fb_responses})
-                        if fb_stances:
-                            post_fb_market = PredictionMarket(outcomes=fb_stances, adaptive_b=True)
-                            for resp in fb_responses:
-                                stance = resp.get("stance", "中立")
-                                if stance in fb_stances:
-                                    post_fb_market.submit_bet(
-                                        resp["agent_id"], stance,
-                                        resp.get("confidence", 0.5),
-                                    )
-
-                            # Resolve with meeting majority_stance
-                            synthesis = meeting_result.get("synthesis", {})
-                            majority_stance = synthesis.get("majority_stance", "")
-                            post_fb_brier = None
-                            if majority_stance and majority_stance in fb_stances:
-                                post_fb_market.resolve(majority_stance)
-                                post_fb_brier = post_fb_market.compute_brier_score(majority_stance)
-
-                        # Save post-feedback results as separate layers
-                        fb_eval_record = _make_layer_record(
-                            simulation_id=simulation_id,
-                            population_id=pop_id,
-                            layer="post_feedback_evaluation",
-                            phase_data={"metrics": post_fb_eval_data},
-                            usage={},
-                        )
-                        session.add(fb_eval_record)
-
-                        fb_demo_record = _make_layer_record(
-                            simulation_id=simulation_id,
-                            population_id=pop_id,
-                            layer="post_feedback_demographics",
-                            phase_data=post_fb_demographics,
-                            usage={},
-                        )
-                        session.add(fb_demo_record)
-
-                        fb_propagation_record = _make_layer_record(
-                            simulation_id=simulation_id,
-                            population_id=pop_id,
-                            layer="post_feedback_propagation",
-                            phase_data={
-                                "propagation_record": feedback_result["propagation_record"],
-                                "changed_agents": feedback_result["changed_agents"],
-                                "market_prices": post_fb_market.get_prices() if fb_stances else {},
-                                "brier_score": post_fb_brier,
-                            },
-                            usage={},
-                        )
-                        session.add(fb_propagation_record)
-
-                    await sse_manager.publish(simulation_id, "meeting_feedback_completed", {
-                        "total_changed": len(feedback_result["changed_agents"]) if feedback_result else 0,
-                    })
-            except (ValueError, ImportError) as exc:
-                logger.warning("Meeting feedback propagation skipped: %s", exc)
-            except Exception as exc:
-                logger.warning("Meeting feedback propagation failed: %s", exc, exc_info=True)
+            await _phase_meeting_feedback(ctx, session, sim.seed)
 
             # === Phase 5.05: Prediction Market Resolution ===
-            if prediction_market:
-                try:
-                    synthesis = meeting_result.get("synthesis", {})
-                    majority_stance = synthesis.get("majority_stance", "")
-                    if majority_stance and majority_stance in [o for o in prediction_market._outcomes]:
-                        payoffs = prediction_market.resolve(majority_stance)
-                        brier = prediction_market.compute_brier_score(majority_stance)
-                        logger.info("Prediction market resolved: Brier=%.3f", brier)
-                except Exception as exc:
-                    logger.warning("Prediction market resolution failed: %s", exc)
+            _phase_prediction_market_resolution(ctx)
 
             # === Phase 5.1: Deliberation Quality Assessment ===
             _phase_deliberation_quality(ctx, session, meeting_result)
-            dqi_overall_score = ctx.dqi_overall_score
 
             # === Phase 5.5: Provenance 構築 ===
-            quality_metrics = {m["metric_name"]: m["score"] for m in eval_metrics}
-            if dqi_overall_score is not None:
-                quality_metrics["dqi_overall"] = dqi_overall_score
-
-            provenance = build_provenance(
-                population_size=len(agents),
-                selected_count=len(selected_agents),
-                effective_sample_size=activation_result["aggregation"].get(
-                    "effective_sample_size", float(len(selected_agents))
-                ),
-                activation_params={"temperature": 0.5},
-                meeting_params={
-                    "num_rounds": 3,
-                    "participants": len(meeting_participants),
-                },
-                quality_metrics=quality_metrics,
-                seed=sim.seed,
-                survey_comparison=survey_comparison,
-            )
-
-            # Augment provenance with theme_category anchoring provenance
-            provenance["theme_category_anchoring"] = {
-                "category": theme_estimate.category,
-                "confidence": theme_estimate.confidence,
-                "source": theme_estimate.source,
-                "is_anchor_eligible": theme_estimate.is_anchor_eligible,
-                "anchor_applied": anchor_applied,
-            }
-
-            # Augment provenance with network propagation data
-            if propagation_result:
-                provenance["network_propagation"] = {
-                    "model": "Bounded Confidence (Hegselmann-Krause) + Friedkin-Johnsen",
-                    "max_timesteps": 12,
-                    "actual_timesteps": propagation_result.total_timesteps,
-                    "converged": propagation_result.converged,
-                    "cluster_count": len(propagation_result.clusters),
-                    "echo_chamber": propagation_result.metrics.get("echo_chamber", {}),
-                }
+            _phase_provenance(ctx, agents, theme_estimate, anchor_applied, sim.seed)
+            provenance = ctx.provenance
 
             # === Phase 5.5: Gap Explanation + Narrative Report ===
-            # Explain activation-meeting gap
-            propagation_data_for_gap = None
-            if propagation_result:
-                propagation_data_for_gap = {
-                    "converged": propagation_result.converged,
-                    "total_timesteps": propagation_result.total_timesteps,
-                    "clusters": [
-                        {"label": c.label, "size": c.size, "centroid": c.centroid, "member_ids": c.member_ids}
-                        for c in propagation_result.clusters
-                    ],
-                    "echo_chamber": propagation_result.metrics.get("echo_chamber", {}),
-                    "timestep_history": [
-                        {"timestep": ts.timestep, "opinion_distribution": ts.opinion_distribution}
-                        for ts in propagation_result.timestep_history
-                    ],
-                }
-
-            gap_explanation = explain_activation_meeting_gap(
-                aggregation=activation_result["aggregation"],
-                synthesis=meeting_result.get("synthesis", {}),
-                meeting_participants=meeting_participants,
-                propagation_data=propagation_data_for_gap,
-            )
-
-            # Prepare cluster data for v2 narrative
-            narrative_clusters = None
-            if propagation_result and propagation_result.clusters:
-                narrative_clusters = [
-                    {"label": c.label, "size": c.size, "centroid": c.centroid, "member_ids": c.member_ids}
-                    for c in propagation_result.clusters
-                ]
-
-            narrative = generate_narrative(
-                selected_agents,
-                activation_result["responses"],
-                meeting_result.get("synthesis", {}),
-                activation_result["aggregation"],
-                demographic_analysis,
-                meeting_rounds=meeting_result.get("rounds"),
-                provenance=provenance,
-                clusters=narrative_clusters,
-            )
-
-            # Enrich narrative with gap explanation
-            narrative["gap_explanation"] = gap_explanation
-
-            narrative_record = _make_layer_record(
-                simulation_id=simulation_id,
-                population_id=pop_id,
-                layer="narrative",
-                phase_data=narrative,
-                usage={},
-            )
-            session.add(narrative_record)
+            _phase_narrative(ctx, session)
 
             # === Phase 6: Persistent Society (記憶圧縮 + グラフ進化) ===
-            from src.app.services.society.accuracy_config import AccuracyConfig as _AccuracyConfig
-            _acc_flags = _AccuracyConfig(settings.load_population_mix_config())
-            _mem_llm = None
-            if _acc_flags.is_enabled("rolling_summary"):
-                from src.app.llm.multi_client import multi_llm_client as _mem_llm
-            await update_agent_memories(
-                session, selected_agents, activation_result["responses"],
-                meeting_result=meeting_result,
-                theme=theme,
-                theme_category=theme_estimate.category,
-                simulation_id=simulation_id,
-                llm_client=_mem_llm,
-                accuracy_flags=_acc_flags,
-            )
-
-            await evolve_social_graph(
-                session, pop_id, meeting_result, meeting_participants,
-            )
-
-            # ソーシャルグラフ準備完了を通知
-            edge_count_result = await session.execute(
-                select(func.count()).select_from(SocialEdge).where(SocialEdge.population_id == pop_id)
-            )
-            edge_count = edge_count_result.scalar() or 0
-            await sse_manager.publish(simulation_id, "society_social_graph_ready", {
-                "population_id": pop_id,
-                "edge_count": edge_count,
-                "node_count": len(selected_agents),
-            })
+            await _phase_persistent_society(ctx, session, theme_estimate)
 
             # === 完了 ===
             sim.status = "completed"
@@ -1488,50 +1613,7 @@ async def run_society(simulation_id: str) -> None:
             await session.commit()
 
             # === Wondrous Crayon: 時間軸予測 (フラグ ON 時のみ) ===
-            time_axis_available = False
-            if _acc_flags.is_enabled("time_axis_orchestrator"):
-                try:
-                    from src.app.services.society.time_axis_runner import (
-                        run_time_axis_pipeline,
-                    )
-                    edge_rows = (await session.execute(
-                        select(SocialEdge).where(SocialEdge.population_id == pop_id)
-                    )).scalars().all()
-                    edges_list: list[tuple] = [
-                        (e.agent_id, e.target_id) for e in edge_rows
-                    ]
-                    base_responses: list[dict] = []
-                    for agent, resp in zip(
-                        selected_agents, activation_result.get("responses", [])
-                    ):
-                        base_responses.append({
-                            **resp,
-                            "agent_id": agent["id"],
-                        })
-                    time_axis_report = await run_time_axis_pipeline(
-                        simulation_id=simulation_id,
-                        base_responses=base_responses,
-                        base_edges=edges_list,
-                        theme=theme,
-                        sse_manager=sse_manager,
-                    )
-                    sim.metadata_json = {
-                        **dict(sim.metadata_json or {}),
-                        "time_axis_result": time_axis_report,
-                    }
-                    await session.commit()
-                    time_axis_available = True
-                except Exception as time_axis_exc:
-                    logger.exception(
-                        "time-axis pipeline failed for sim %s", simulation_id
-                    )
-                    sim.metadata_json = {
-                        **dict(sim.metadata_json or {}),
-                        "time_axis_error": (
-                            f"{type(time_axis_exc).__name__}: {time_axis_exc}"
-                        )[:500],
-                    }
-                    await session.commit()
+            time_axis_available = await _phase_time_axis(ctx, session, sim)
 
             await sse_manager.publish(simulation_id, "society_completed", {
                 "simulation_id": simulation_id,
