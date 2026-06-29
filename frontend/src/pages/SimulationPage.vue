@@ -36,6 +36,7 @@ import ForceGraph2D from '../components/ForceGraph2D.vue'
 import AgentStoryDrawer from '../components/AgentStoryDrawer.vue'
 import ConversationsTab from '../components/ConversationsTab.vue'
 import { useTheaterStore } from '../stores/theaterStore'
+import { parseServerDate } from '../utils/format'
 import {
   getDefaultLiveSecondaryTab,
   getLivePrimaryView,
@@ -360,13 +361,6 @@ function handleConnectionHighlight(sourceId: string, targetId: string) {
 
 function liveStateKey(id: string) {
   return `agent-ai:live:${id}`
-}
-
-function parseServerDate(value?: string | null) {
-  if (!value) return null
-  const normalized = /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`
-  const timestamp = Date.parse(normalized)
-  return Number.isFinite(timestamp) ? timestamp : null
 }
 
 function stopElapsedTimer() {

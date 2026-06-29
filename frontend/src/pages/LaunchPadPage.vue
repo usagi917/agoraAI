@@ -13,6 +13,7 @@ import {
   type SimulationListItem,
 } from '../api/client'
 import InputPanel from '../components/InputPanel.vue'
+import { parseServerDate } from '../utils/format'
 
 const router = useRouter()
 
@@ -34,6 +35,11 @@ const bootstrapError = ref('')
 const examplesOpen = ref(false)
 const advancedOpen = ref(false)
 // advanced options removed for simplicity
+
+function formatServerDateTime(value?: string | null) {
+  const ms = parseServerDate(value)
+  return ms != null ? new Date(ms).toLocaleString('ja-JP') : ''
+}
 
 // Question Wizard state
 const questionTemplates = [
@@ -430,7 +436,7 @@ function getPipelineStageLabel(stage: string) {
           </div>
           <div class="history-right">
             <span class="status-badge" :class="getStatusColor(sim.status)">{{ getStatusLabel(sim.status) }}</span>
-            <span class="history-date">{{ new Date(sim.created_at).toLocaleString('ja-JP') }}</span>
+            <span class="history-date">{{ formatServerDateTime(sim.created_at) }}</span>
           </div>
         </router-link>
       </div>

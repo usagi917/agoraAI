@@ -7,6 +7,7 @@ import {
   forkPopulation,
   type PopulationResponse,
 } from '../api/client'
+import { parseServerDate } from '../utils/format'
 
 const populations = ref<PopulationResponse[]>([])
 const selectedPop = ref<any>(null)
@@ -14,6 +15,11 @@ const parentPop = ref<any>(null)
 const loading = ref(false)
 const generating = ref(false)
 const error = ref('')
+
+function formatServerDateTime(value?: string | null) {
+  const ms = parseServerDate(value)
+  return ms != null ? new Date(ms).toLocaleString('ja-JP') : ''
+}
 
 onMounted(async () => {
   await loadPopulations()
@@ -159,7 +165,7 @@ const hasForkDiff = computed(() => !!selectedPop.value?.parent_id && !!parentPop
             <span class="pop-status" :class="pop.status">{{ pop.status }}</span>
           </div>
           <div class="pop-count">{{ pop.agent_count.toLocaleString() }}人</div>
-          <div class="pop-date">{{ new Date(pop.created_at).toLocaleString('ja-JP') }}</div>
+          <div class="pop-date">{{ formatServerDateTime(pop.created_at) }}</div>
           <div class="pop-actions">
             <button class="btn btn-ghost btn-sm" @click.stop="handleFork(pop.id)">Fork</button>
           </div>
@@ -192,7 +198,7 @@ const hasForkDiff = computed(() => !!selectedPop.value?.parent_id && !!parentPop
         </div>
         <div class="stat-item">
           <span class="stat-label">作成日</span>
-          <span class="stat-value">{{ new Date(selectedPop.created_at).toLocaleString('ja-JP') }}</span>
+          <span class="stat-value">{{ formatServerDateTime(selectedPop.created_at) }}</span>
         </div>
       </div>
 
