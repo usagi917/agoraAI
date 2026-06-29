@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   TYPE_COLORS,
   buildAdjacency,
+  buildSyntheticLinks,
   clamp01,
   linkColor,
   linkWidth,
@@ -10,6 +11,7 @@ import {
   nodeColor,
   nodeDisplayColor,
   nodeRadius,
+  syntheticLinkColor,
   toEdgeProp,
   toNodeProp,
   withAlpha,
@@ -115,6 +117,13 @@ describe('linkColor', () => {
   })
 })
 
+describe('syntheticLinkColor', () => {
+  it('mixes endpoint colors into a canvas-safe rgba string', () => {
+    expect(syntheticLinkColor('#22c55e', '#ef4444', false)).toMatch(/^rgba\(\d+, \d+, \d+, 0\.32\)$/)
+    expect(syntheticLinkColor('#22c55e', '#ef4444', true)).toBe('rgba(148, 163, 184, 0.12)')
+  })
+})
+
 describe('withAlpha', () => {
   it('converts hex to rgba', () => {
     expect(withAlpha('#4FC3F7', 0.5)).toBe('rgba(79, 195, 247, 0.5)')
@@ -150,6 +159,36 @@ describe('buildAdjacency', () => {
     ] as unknown as EdgeProp[]
     const adj = buildAdjacency(edges)
     expect(adj.get('a')?.has('b')).toBe(true)
+  })
+})
+
+describe('buildSyntheticLinks', () => {
+  it('adds visual affinity links for sparse completed graphs', () => {
+    const nodes = Array.from({ length: 8 }, (_, i) => baseNode({
+      id: `agent-${i + 1}`,
+      type: 'agent',
+      stance: i % 2 === 0 ? '賛成' : '反対',
+    }))
+
+    const links = buildSyntheticLinks(nodes, [])
+
+    expect(links.length).toBeGreaterThan(nodes.length)
+    expect(links.every((link) => link.synthetic)).toBe(true)
+    expect(links.every((link) => link.relation_type === 'visual_affinity')).toBe(true)
+    expect(links.every((link) => link.source !== link.target)).toBe(true)
+  })
+
+  it('does not add visual links when real graph density is already sufficient', () => {
+    const nodes = Array.from({ length: 4 }, (_, i) => baseNode({ id: `n${i}` }))
+    const edges: EdgeProp[] = [
+      { source: 'n0', target: 'n1', relation_type: 'friend', weight: 0.5 },
+      { source: 'n1', target: 'n2', relation_type: 'friend', weight: 0.5 },
+      { source: 'n2', target: 'n3', relation_type: 'friend', weight: 0.5 },
+      { source: 'n3', target: 'n0', relation_type: 'friend', weight: 0.5 },
+      { source: 'n0', target: 'n2', relation_type: 'friend', weight: 0.5 },
+    ]
+
+    expect(buildSyntheticLinks(nodes, edges)).toEqual([])
   })
 })
 
@@ -201,6 +240,13 @@ describe('mergeGraphData', () => {
     expect(result.links[0].source).toBe('a')
     expect(result.links[0].target).toBe('b')
     expect(result.links[0].weight).toBe(0.6)
+  })
+
+  it('includes synthetic visual links when persisted graph edges are too sparse', () => {
+    const nodes = Array.from({ length: 6 }, (_, i) => baseNode({ id: `agent-${i + 1}` }))
+    const result = mergeGraphData([], nodes, [])
+
+    expect(result.links.some((link) => link.synthetic)).toBe(true)
   })
 })
 

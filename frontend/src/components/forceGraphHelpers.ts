@@ -36,6 +36,7 @@ export interface SimLink {
   relation_type: string
   weight: number
   label?: string
+  synthetic?: boolean
 }
 
 export const TYPE_COLORS: Record<string, string> = {
@@ -69,6 +70,8 @@ const NODE_PROP_KEYS = [
 ] as const
 
 const EDGE_PROP_KEYS = ['id', 'source', 'target', 'relation_type', 'weight', 'label'] as const
+const MIN_LINKS_PER_NODE_FOR_CONNECTED_VIEW = 1.25
+const MAX_SYNTHETIC_NEIGHBORS = 3
 
 export function clamp01(value: number | null | undefined): number {
   if (value == null || Number.isNaN(value)) return 0
@@ -127,6 +130,16 @@ export function linkColor(relation_type: string, weight: number | null | undefin
   return withAlpha(base, alpha)
 }
 
+export function syntheticLinkColor(sourceColor: string, targetColor: string, dimmed: boolean): string {
+  if (dimmed) return 'rgba(148, 163, 184, 0.12)'
+  const source = hexToRgb(sourceColor)
+  const target = hexToRgb(targetColor)
+  const r = Math.round(source.r * 0.52 + target.r * 0.48)
+  const g = Math.round(source.g * 0.52 + target.g * 0.48)
+  const b = Math.round(source.b * 0.52 + target.b * 0.48)
+  return `rgba(${r}, ${g}, ${b}, 0.32)`
+}
+
 export function nodeDegree(nodeId: string, edges: ReadonlyArray<EdgeProp | SimLink>): number {
   let degree = 0
   for (const edge of edges) {
@@ -135,6 +148,64 @@ export function nodeDegree(nodeId: string, edges: ReadonlyArray<EdgeProp | SimLi
     if (source === nodeId || target === nodeId) degree += 1
   }
   return degree
+}
+
+function stableNodeSortKey(node: Pick<NodeProp, 'id' | 'stance' | 'type'>): string {
+  return `${node.stance || node.type || ''}:${node.id}`
+}
+
+export function buildSyntheticLinks(
+  nodes: ReadonlyArray<NodeProp>,
+  edges: ReadonlyArray<EdgeProp>,
+): SimLink[] {
+  if (nodes.length < 3) return []
+  if (edges.length >= nodes.length * MIN_LINKS_PER_NODE_FOR_CONNECTED_VIEW) return []
+
+  const realPairs = new Set<string>()
+  const degree = new Map(nodes.map((node) => [node.id, 0]))
+  const pairKey = (a: string, b: string) => [a, b].sort().join('::')
+
+  for (const edge of edges) {
+    const source = endpointId(edge.source)
+    const target = endpointId(edge.target)
+    if (!source || !target || source === target) continue
+    realPairs.add(pairKey(source, target))
+    degree.set(source, (degree.get(source) ?? 0) + 1)
+    degree.set(target, (degree.get(target) ?? 0) + 1)
+  }
+
+  const ordered = [...nodes].sort((a, b) => stableNodeSortKey(a).localeCompare(stableNodeSortKey(b)))
+  const synthetic: SimLink[] = []
+  const syntheticPairs = new Set<string>()
+  const targetNeighborCount = Math.min(MAX_SYNTHETIC_NEIGHBORS, Math.max(1, Math.ceil(nodes.length / 28)))
+  const addSynthetic = (source: NodeProp, target: NodeProp, weight: number) => {
+    if (source.id === target.id) return
+    const key = pairKey(source.id, target.id)
+    if (realPairs.has(key) || syntheticPairs.has(key)) return
+    syntheticPairs.add(key)
+    synthetic.push({
+      id: `synthetic:${key}`,
+      source: source.id,
+      target: target.id,
+      relation_type: 'visual_affinity',
+      weight,
+      synthetic: true,
+    })
+  }
+
+  for (let i = 0; i < ordered.length; i++) {
+    const source = ordered[i]
+    const sourceDegree = degree.get(source.id) ?? 0
+    const neighbors = sourceDegree === 0 ? targetNeighborCount + 1 : targetNeighborCount
+    for (let offset = 1; offset <= neighbors; offset++) {
+      let targetIndex = (i + offset * 7) % ordered.length
+      if (targetIndex === i) targetIndex = (i + offset) % ordered.length
+      const target = ordered[targetIndex]
+      addSynthetic(source, target, Math.max(0.18, 0.42 - offset * 0.06))
+    }
+  }
+
+  return synthetic
 }
 
 function endpointId(end: string | { id?: string | number } | undefined): string {
@@ -187,7 +258,7 @@ export function mergeGraphData(
     weight: e.weight,
     label: e.label,
   }))
-  return { nodes, links }
+  return { nodes, links: [...links, ...buildSyntheticLinks(nodes, newEdges)] }
 }
 
 export function toNodeProp(node: SimNode | NodeProp | null | undefined): NodeProp | null {

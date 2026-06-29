@@ -12,6 +12,7 @@ import {
   nodeDegree,
   nodeDisplayColor,
   nodeRadius,
+  syntheticLinkColor,
   toEdgeProp,
   toNodeProp,
   withAlpha,
@@ -57,6 +58,7 @@ const degreeByNodeId = computed(() => {
   }
   return map
 })
+const nodeById = computed(() => new Map(currentNodes.value.map((node) => [node.id, node])))
 
 const highlightedSet = computed(() => {
   if (!props.highlightedNodeIds?.length) return null
@@ -92,6 +94,12 @@ function endpointId(end: unknown): string {
   return ''
 }
 
+function endpointNode(end: unknown): SimNode | null {
+  if (end && typeof end === 'object' && 'id' in end) return end as SimNode
+  const id = endpointId(end)
+  return id ? nodeById.value.get(id) ?? null : null
+}
+
 function isLinkDimmed(link: SimLink): boolean {
   const source = endpointId(link.source)
   const target = endpointId(link.target)
@@ -101,6 +109,25 @@ function isLinkDimmed(link: SimLink): boolean {
   const focus = activeFocusId()
   if (!focus) return false
   return source !== focus && target !== focus
+}
+
+function displayLinkColor(link: SimLink): string {
+  const dimmed = isLinkDimmed(link)
+  if (link.synthetic) {
+    const source = endpointNode(link.source)
+    const target = endpointNode(link.target)
+    return syntheticLinkColor(
+      source ? nodeDisplayColor(source) : '#94a3b8',
+      target ? nodeDisplayColor(target) : '#94a3b8',
+      dimmed,
+    )
+  }
+  return computeLinkColor(link.relation_type, link.weight, dimmed)
+}
+
+function displayLinkWidth(link: SimLink): number {
+  if (link.synthetic) return isLinkDimmed(link) ? 0.45 : 0.7 + clamp01(link.weight) * 1.05
+  return computeLinkWidth(link.weight)
 }
 
 function createGraph(element: HTMLElement) {
@@ -245,10 +272,10 @@ onMounted(() => {
     .nodeCanvasObjectMode(() => 'replace')
     .nodeCanvasObject(paintNode as never)
     .nodePointerAreaPaint(paintNodePointerArea as never)
-    .linkColor(((l: SimLink) => computeLinkColor(l.relation_type, l.weight, isLinkDimmed(l))) as never)
-    .linkWidth(((l: SimLink) => computeLinkWidth(l.weight)) as never)
-    .linkCurvature(((l: SimLink) => (clamp01(l.weight) > 0.7 ? 0.05 : 0.015)) as never)
-    .linkDirectionalParticles(((l: SimLink) => (clamp01(l.weight) > 0.72 ? 3 : clamp01(l.weight) > 0.45 ? 1 : 0)) as never)
+    .linkColor(((l: SimLink) => displayLinkColor(l)) as never)
+    .linkWidth(((l: SimLink) => displayLinkWidth(l)) as never)
+    .linkCurvature(((l: SimLink) => (l.synthetic ? 0.025 : clamp01(l.weight) > 0.7 ? 0.05 : 0.015)) as never)
+    .linkDirectionalParticles(((l: SimLink) => (l.synthetic ? 0 : clamp01(l.weight) > 0.72 ? 3 : clamp01(l.weight) > 0.45 ? 1 : 0)) as never)
     .linkDirectionalParticleWidth(2.2)
     .linkDirectionalParticleColor(((l: SimLink) => withAlpha(nodeColor(l.relation_type), 0.85)) as never)
     .linkDirectionalParticleSpeed(((l: SimLink) => 0.003 + clamp01(l.weight) * 0.006) as never)
@@ -283,10 +310,16 @@ onMounted(() => {
       refreshCanvas()
     })
     .onLinkClick((link: SimLink) => {
+      if (link.synthetic) return
       const ep = toEdgeProp(link)
       if (ep) emit('select-edge', ep)
     })
     .onLinkHover((link: SimLink | null) => {
+      if (link?.synthetic) {
+        emit('hover-edge', null)
+        refreshCanvas()
+        return
+      }
       const ep = link ? toEdgeProp(link) : null
       emit('hover-edge', ep)
       refreshCanvas()

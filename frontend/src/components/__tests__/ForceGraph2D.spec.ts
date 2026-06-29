@@ -148,6 +148,33 @@ describe('ForceGraph2D', () => {
     void wrapper
   })
 
+  it('adds non-interactive visual links when persisted graph data is too sparse', async () => {
+    const wrapper = await mountComponent({
+      nodes: Array.from({ length: 6 }, (_, index) => ({
+        id: `agent-${index + 1}`,
+        label: `Agent ${index + 1}`,
+        type: 'agent',
+        stance: index % 2 === 0 ? '賛成' : '反対',
+        importance_score: 0.5,
+        activity_score: 0,
+      })),
+      edges: [],
+    })
+    await flushPromises()
+
+    const inst = MockForceGraph.lastInstance!
+    const syntheticLink = inst.graphDataValue.links.find((link) => (link as { synthetic?: boolean }).synthetic)
+    expect(syntheticLink).toBeTruthy()
+    expect((inst.setterCalls.linkDirectionalParticles?.[0] as (link: unknown) => number)(syntheticLink)).toBe(0)
+    expect((inst.setterCalls.linkWidth?.[0] as (link: unknown) => number)(syntheticLink)).toBeGreaterThan(0)
+
+    inst.callbacks.onLinkClick(syntheticLink, { detail: 1 } as unknown as MouseEvent)
+    expect(wrapper.emitted('select-edge')).toBeFalsy()
+
+    inst.callbacks.onLinkHover(syntheticLink, null)
+    expect(wrapper.emitted('hover-edge')?.at(-1)?.[0]).toBeNull()
+  })
+
   it('refreshes graphData when graph arrays are mutated in place', async () => {
     const ForceGraph2D = (await import('../ForceGraph2D.vue')).default
     const Parent = defineComponent({
