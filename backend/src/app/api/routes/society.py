@@ -505,7 +505,7 @@ async def get_agents(
     session: AsyncSession = Depends(get_session),
 ):
     """選抜済みエージェント一覧（activation 回答付き、フィルター対応）。"""
-    pop_id = await _resolve_population_id(sim_id, session)
+    await _resolve_population_id(sim_id, session)
 
     # activation 結果を取得
     act_record = await _latest_layer(session, sim_id, "activation")

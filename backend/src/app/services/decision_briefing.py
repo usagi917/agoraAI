@@ -190,7 +190,6 @@ def _decision_usage_hint(
     quality = dict(quality or {})
     verification = dict(verification or {})
     verification_status = _clean_text(verification.get("status"))
-    verification_score = _safe_float(verification.get("score"), 0.0)
     quality_status = _clean_text(quality.get("status"))
     trust_level = _clean_text(quality.get("trust_level"))
 

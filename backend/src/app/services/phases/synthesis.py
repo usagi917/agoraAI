@@ -191,7 +191,6 @@ def _build_fallback_brief(
     stance_dist = aggregation.get("stance_distribution", {})
     avg_conf = _safe_float(aggregation.get("average_confidence"), 0.5)
     top_concerns = aggregation.get("top_concerns", [])
-    top_priorities = aggregation.get("top_priorities", [])
     synthesis = council.synthesis or {}
     consensus_points = synthesis.get("consensus_points", []) or []
     disagreement_points = synthesis.get("disagreement_points", []) or []
@@ -372,7 +371,6 @@ async def _build_narrative_report(
 
     consensus = council.synthesis.get("consensus_points", []) or []
     disagreements = council.synthesis.get("disagreement_points", []) or []
-    recommendations = council.synthesis.get("recommendations", []) or []
 
     key_quotes = highlights.get("key_quotes", [])
     belief_journeys = highlights.get("belief_journeys", [])

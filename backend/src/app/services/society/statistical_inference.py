@@ -385,11 +385,6 @@ def compute_independence_weights(
         for mid in cluster.get("member_ids", []):
             agent_to_cluster[mid] = ci
 
-    # Build set of members per cluster for fast lookup
-    cluster_member_sets: list[set[str]] = [
-        set(c.get("member_ids", [])) for c in clusters
-    ]
-
     # Compute average internal edge strength per cluster
     cluster_edge_sums: dict[int, float] = defaultdict(float)
     cluster_edge_counts: dict[int, int] = defaultdict(int)
@@ -586,8 +581,6 @@ def mrp_estimate(
 
     if grouping_dims is None:
         grouping_dims = ["age_bracket", "region", "gender"]
-
-    n = len(agents)
 
     # Step 1: 全体のスタンス分布（global prior）
     all_stances: dict[str, int] = defaultdict(int)

@@ -149,7 +149,6 @@ def enrich_meeting_with_clusters(
     for p in participants:
         agent_profile = p.get("agent_profile", {}) or {}
         agent_id = agent_profile.get("id", "")
-        is_devil = p.get("is_devil_advocate", False)
 
         my_cluster = agent_cluster.get(agent_id)
 
