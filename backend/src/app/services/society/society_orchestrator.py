@@ -531,6 +531,7 @@ class SocietyRunContext:
     activation_result: dict
     eval_metrics: list = field(default_factory=list)
     eval_data: dict = field(default_factory=dict)
+    demographic_analysis: dict = field(default_factory=dict)
 
 
 async def _phase_evaluation(ctx: "SocietyRunContext", session) -> None:
@@ -567,6 +568,22 @@ async def _phase_evaluation(ctx: "SocietyRunContext", session) -> None:
 
     ctx.eval_metrics = eval_metrics
     ctx.eval_data = eval_data
+
+
+def _phase_demographics(ctx: "SocietyRunContext", session) -> None:
+    """Phase 4.6: 人口統計分析を計算・永続化し ctx に保存する。"""
+    demographic_analysis = analyze_demographics(
+        ctx.selected_agents, ctx.activation_result["responses"],
+    )
+    demo_record = _make_layer_record(
+        simulation_id=ctx.simulation_id,
+        population_id=ctx.pop_id,
+        layer="demographic_analysis",
+        phase_data=demographic_analysis,
+        usage={},
+    )
+    session.add(demo_record)
+    ctx.demographic_analysis = demographic_analysis
 
 
 async def run_society(simulation_id: str) -> None:
@@ -988,17 +1005,8 @@ async def run_society(simulation_id: str) -> None:
                 logger.warning("Validation registration failed, continuing sim=%s: %s", simulation_id, exc, exc_info=True)
 
             # === Phase 4.6: Demographic Analysis ===
-            demographic_analysis = analyze_demographics(
-                selected_agents, activation_result["responses"],
-            )
-            demo_record = _make_layer_record(
-                simulation_id=simulation_id,
-                population_id=pop_id,
-                layer="demographic_analysis",
-                phase_data=demographic_analysis,
-                usage={},
-            )
-            session.add(demo_record)
+            _phase_demographics(ctx, session)
+            demographic_analysis = ctx.demographic_analysis
 
             # === Phase 4.8: Post-Activation Persona Generation ===
             try:
