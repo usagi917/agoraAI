@@ -76,6 +76,24 @@ _CATEGORY_KEYWORDS: dict[str, list[str]] = {
 }
 
 
+def _make_layer_record(
+    simulation_id: str,
+    population_id: str | None,
+    layer: str,
+    phase_data: dict,
+    usage: dict | None = None,
+) -> SocietyResult:
+    """SocietyResult レイヤレコードを生成する共通ファクトリ（id 採番と usage 既定を集約）。"""
+    return SocietyResult(
+        id=str(uuid.uuid4()),
+        simulation_id=simulation_id,
+        population_id=population_id,
+        layer=layer,
+        phase_data=phase_data,
+        usage=usage or {},
+    )
+
+
 def _estimate_theme_category(
     theme: str,
     grounding_facts: list[dict] | None = None,
@@ -593,8 +611,7 @@ async def run_society(simulation_id: str) -> None:
                     anchor_applied,
                 )
 
-            activation_record = SocietyResult(
-                id=str(uuid.uuid4()),
+            activation_record = _make_layer_record(
                 simulation_id=simulation_id,
                 population_id=pop_id,
                 layer="activation",
@@ -723,8 +740,7 @@ async def run_society(simulation_id: str) -> None:
                     })
 
                 # Save propagation result
-                propagation_record = SocietyResult(
-                    id=str(uuid.uuid4()),
+                propagation_record = _make_layer_record(
                     simulation_id=simulation_id,
                     population_id=pop_id,
                     layer="network_propagation",
@@ -835,8 +851,7 @@ async def run_society(simulation_id: str) -> None:
 
             # 評価結果保存
             eval_data = {m["metric_name"]: m["score"] for m in eval_metrics}
-            eval_record_society = SocietyResult(
-                id=str(uuid.uuid4()),
+            eval_record_society = _make_layer_record(
                 simulation_id=simulation_id,
                 population_id=pop_id,
                 layer="evaluation",
@@ -916,8 +931,7 @@ async def run_society(simulation_id: str) -> None:
             demographic_analysis = analyze_demographics(
                 selected_agents, activation_result["responses"],
             )
-            demo_record = SocietyResult(
-                id=str(uuid.uuid4()),
+            demo_record = _make_layer_record(
                 simulation_id=simulation_id,
                 population_id=pop_id,
                 layer="demographic_analysis",
@@ -1003,8 +1017,7 @@ async def run_society(simulation_id: str) -> None:
                     info["stance"] = p.get("stance", "")
                 enriched_participants.append(info)
 
-            meeting_record = SocietyResult(
-                id=str(uuid.uuid4()),
+            meeting_record = _make_layer_record(
                 simulation_id=simulation_id,
                 population_id=pop_id,
                 layer="meeting",
@@ -1082,8 +1095,7 @@ async def run_society(simulation_id: str) -> None:
                                 post_fb_brier = post_fb_market.compute_brier_score(majority_stance)
 
                         # Save post-feedback results as separate layers
-                        fb_eval_record = SocietyResult(
-                            id=str(uuid.uuid4()),
+                        fb_eval_record = _make_layer_record(
                             simulation_id=simulation_id,
                             population_id=pop_id,
                             layer="post_feedback_evaluation",
@@ -1092,8 +1104,7 @@ async def run_society(simulation_id: str) -> None:
                         )
                         session.add(fb_eval_record)
 
-                        fb_demo_record = SocietyResult(
-                            id=str(uuid.uuid4()),
+                        fb_demo_record = _make_layer_record(
                             simulation_id=simulation_id,
                             population_id=pop_id,
                             layer="post_feedback_demographics",
@@ -1102,8 +1113,7 @@ async def run_society(simulation_id: str) -> None:
                         )
                         session.add(fb_demo_record)
 
-                        fb_propagation_record = SocietyResult(
-                            id=str(uuid.uuid4()),
+                        fb_propagation_record = _make_layer_record(
                             simulation_id=simulation_id,
                             population_id=pop_id,
                             layer="post_feedback_propagation",
@@ -1147,8 +1157,7 @@ async def run_society(simulation_id: str) -> None:
                     "dqi": dqi_result,
                     "opinion_change": opinion_change,
                 }
-                dqi_society_result = SocietyResult(
-                    id=str(uuid.uuid4()),
+                dqi_society_result = _make_layer_record(
                     simulation_id=simulation_id,
                     population_id=pop_id,
                     layer="deliberation_quality",
@@ -1248,8 +1257,7 @@ async def run_society(simulation_id: str) -> None:
             # Enrich narrative with gap explanation
             narrative["gap_explanation"] = gap_explanation
 
-            narrative_record = SocietyResult(
-                id=str(uuid.uuid4()),
+            narrative_record = _make_layer_record(
                 simulation_id=simulation_id,
                 population_id=pop_id,
                 layer="narrative",
