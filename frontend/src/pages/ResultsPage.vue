@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DOMPurify from 'dompurify'
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -613,7 +614,7 @@ const filteredTranscript = computed(() => {
 })
 
 function renderMarkdown(content: string): string {
-  return content
+  const html = content
     .replace(/^### (.+)$/gm, '<h4>$1</h4>')
     .replace(/^## (.+)$/gm, '<h3>$1</h3>')
     .replace(/^# (.+)$/gm, '<h2>$1</h2>')
@@ -622,6 +623,8 @@ function renderMarkdown(content: string): string {
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     .replace(/^---$/gm, '<hr/>')
     .replace(/\n\n/g, '</p><p>')
+
+  return DOMPurify.sanitize(html)
 }
 </script>
 
