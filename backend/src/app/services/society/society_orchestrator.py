@@ -10,6 +10,7 @@ Swarm Intelligence Pipeline:
 
 import logging
 import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
@@ -515,6 +516,59 @@ def _phase_episodic_memory(
             )
 
 
+@dataclass
+class SocietyRunContext:
+    """run_society のフェーズ間で受け渡す状態を集約する可変コンテキスト。
+
+    フェーズ抽出の進行に合わせてフィールドを追加していく。各フェーズは ctx を
+    読み書きし、run_society 本体は ctx の組み立てとフェーズ呼び出しに専念する。
+    """
+
+    simulation_id: str
+    theme: str
+    pop_id: str
+    selected_agents: list[dict]
+    activation_result: dict
+    eval_metrics: list = field(default_factory=list)
+    eval_data: dict = field(default_factory=dict)
+
+
+async def _phase_evaluation(ctx: "SocietyRunContext", session) -> None:
+    """Phase 4: 社会シミュレーションの評価指標を計算・永続化し ctx に保存する。"""
+    eval_metrics = await evaluate_society_simulation(
+        ctx.selected_agents, ctx.activation_result["responses"],
+    )
+
+    for metric in eval_metrics:
+        eval_record = EvaluationResult(
+            id=str(uuid.uuid4()),
+            simulation_id=ctx.simulation_id,
+            metric_name=metric["metric_name"],
+            score=metric["score"],
+            details=metric["details"],
+            baseline_type=metric.get("baseline_type"),
+            baseline_score=metric.get("baseline_score"),
+        )
+        session.add(eval_record)
+
+    eval_data = {m["metric_name"]: m["score"] for m in eval_metrics}
+    eval_record_society = _make_layer_record(
+        simulation_id=ctx.simulation_id,
+        population_id=ctx.pop_id,
+        layer="evaluation",
+        phase_data={"metrics": eval_data},
+        usage={},
+    )
+    session.add(eval_record_society)
+
+    await sse_manager.publish(ctx.simulation_id, "society_evaluation_completed", {
+        "metrics": eval_data,
+    })
+
+    ctx.eval_metrics = eval_metrics
+    ctx.eval_data = eval_data
+
+
 async def run_society(simulation_id: str) -> None:
     """Society モードのメインオーケストレーション。"""
     logger.info("Starting society simulation %s", simulation_id)
@@ -657,6 +711,14 @@ async def run_society(simulation_id: str) -> None:
                 "selected_agent_ids": selected_agent_ids,
                 "usage": activation_result["usage"],
             })
+
+            ctx = SocietyRunContext(
+                simulation_id=simulation_id,
+                theme=theme,
+                pop_id=pop_id,
+                selected_agents=selected_agents,
+                activation_result=activation_result,
+            )
 
             # === Phase 3.5: Network Propagation (Swarm Intelligence) ===
             propagation_result = None
@@ -858,36 +920,9 @@ async def run_society(simulation_id: str) -> None:
                 logger.warning("Network propagation failed, continuing without: %s", exc)
 
             # === Phase 4: Evaluation ===
-            eval_metrics = await evaluate_society_simulation(
-                selected_agents, activation_result["responses"],
-            )
-
-            for metric in eval_metrics:
-                eval_record = EvaluationResult(
-                    id=str(uuid.uuid4()),
-                    simulation_id=simulation_id,
-                    metric_name=metric["metric_name"],
-                    score=metric["score"],
-                    details=metric["details"],
-                    baseline_type=metric.get("baseline_type"),
-                    baseline_score=metric.get("baseline_score"),
-                )
-                session.add(eval_record)
-
-            # 評価結果保存
-            eval_data = {m["metric_name"]: m["score"] for m in eval_metrics}
-            eval_record_society = _make_layer_record(
-                simulation_id=simulation_id,
-                population_id=pop_id,
-                layer="evaluation",
-                phase_data={"metrics": eval_data},
-                usage={},
-            )
-            session.add(eval_record_society)
-
-            await sse_manager.publish(simulation_id, "society_evaluation_completed", {
-                "metrics": eval_data,
-            })
+            await _phase_evaluation(ctx, session)
+            eval_metrics = ctx.eval_metrics
+            eval_data = ctx.eval_data
 
             # === Phase 4.5: Validation Registration ===
             survey_comparison = None
