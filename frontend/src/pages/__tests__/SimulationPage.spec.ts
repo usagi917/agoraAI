@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SimulationPage from '../SimulationPage.vue'
+import { useSimulationStore } from '../../stores/simulationStore'
 
 const push = vi.fn()
 
@@ -218,5 +219,65 @@ describe('SimulationPage', () => {
 
     expect(wrapper.find('[data-testid="graph-2d"]').exists()).toBe(true)
     expect(wrapper.find('.graph-canvas-host').exists()).toBe(false)
+  })
+
+  it('keeps the execution screen open when loading an already completed simulation', async () => {
+    apiMocks.getSimulation.mockResolvedValue({
+      id: 'sim-live-1',
+      project_id: null,
+      mode: 'single',
+      prompt_text: '市場分析',
+      template_name: 'business_analysis',
+      execution_profile: 'standard',
+      colony_count: 0,
+      deep_colony_count: 0,
+      status: 'completed',
+      error_message: '',
+      pipeline_stage: 'completed',
+      stage_progress: {},
+      run_id: 'run-1',
+      swarm_id: null,
+      metadata: {},
+      created_at: '2026-03-24T00:00:00Z',
+      started_at: '2026-03-24T00:00:10Z',
+      completed_at: '2026-03-24T00:01:10Z',
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(push).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('結果を表示')
+  })
+
+  it('redirects to results when a running simulation completes after bootstrap', async () => {
+    apiMocks.getSimulation.mockResolvedValue({
+      id: 'sim-live-1',
+      project_id: null,
+      mode: 'single',
+      prompt_text: '市場分析',
+      template_name: 'business_analysis',
+      execution_profile: 'standard',
+      colony_count: 0,
+      deep_colony_count: 0,
+      status: 'running',
+      error_message: '',
+      pipeline_stage: 'pending',
+      stage_progress: {},
+      run_id: 'run-1',
+      swarm_id: null,
+      metadata: {},
+      created_at: '2026-03-24T00:00:00Z',
+      started_at: '2026-03-24T00:00:10Z',
+      completed_at: null,
+    })
+
+    mountPage()
+    await flushPromises()
+
+    useSimulationStore().setStatus('completed')
+    await flushPromises()
+
+    expect(push).toHaveBeenCalledWith('/sim/sim-live-1/results')
   })
 })

@@ -64,6 +64,7 @@ const simId = route.params.id as string
 const sim = ref<SimulationResponse | null>(null)
 const selectedEntity = ref<any>(null)
 const elapsedTime = ref(0)
+const isBootstrapping = ref(true)
 const activeSecondaryTab = ref<LiveSecondaryTab>('progress')
 const selectedAgentForStory = ref<string | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
@@ -637,12 +638,15 @@ async function bootstrapSimulation() {
 }
 
 onMounted(async () => {
+  isBootstrapping.value = true
   try {
     await bootstrapSimulation()
   } catch (error) {
     console.error('Simulation bootstrap failed:', error)
     store.init(simId, store.mode, store.promptText)
     store.setError('シミュレーション状態の取得に失敗しました。少し待ってから再読み込みしてください。')
+  } finally {
+    isBootstrapping.value = false
   }
 })
 
@@ -665,7 +669,9 @@ watch(
     }
     if (newStatus === 'completed') {
       clearPersistedLiveState()
-      router.push(`/sim/${simId}/results`)
+      if (!isBootstrapping.value) {
+        router.push(`/sim/${simId}/results`)
+      }
     }
   },
 )
