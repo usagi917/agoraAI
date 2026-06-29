@@ -493,30 +493,7 @@ def build_single_decision_brief(
     return brief
 
 
-def build_pm_board_decision_brief(
-    *,
-    prompt_text: str,
-    pm_result: dict[str, Any],
-    scenarios: list[dict[str, Any]] | None = None,
-    council_synthesis: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    sections = dict(pm_result.get("sections") or {})
-    confidence = _safe_float(pm_result.get("overall_confidence"), 0.55)
-    recommendation = _recommendation_from_score(confidence)
-
-    winning = dict(sections.get("winning_hypothesis") or {})
-    customer_validation = dict(sections.get("customer_validation_plan") or {})
-    market_view = dict(sections.get("market_view") or {})
-    gtm = dict(sections.get("gtm_hypothesis") or {})
-    plan = dict(sections.get("plan_30_60_90") or {})
-    assumptions = _as_list(sections.get("assumptions"))
-    uncertainties = _as_list(sections.get("uncertainties"))
-    risks = _as_list(sections.get("risks"))
-    actions = _as_list(sections.get("top_5_actions"))
-    contradictions = _as_list(pm_result.get("contradictions"))
-    decision_points = _as_list(pm_result.get("key_decision_points"))
-    scenario_list = _as_list(scenarios)
-
+def _pm_top_scenario(scenario_list: list[Any]) -> Any | None:
     top_scenario = None
     if scenario_list:
         top_scenario = max(
@@ -526,8 +503,16 @@ def build_pm_board_decision_brief(
                 _safe_float(scenario.get("scenario_score"), _safe_float(scenario.get("probability"), 0.0)),
             ),
         )
+    return top_scenario
 
-    decision_summary = _truncate(
+
+def _pm_decision_summary(
+    winning: dict[str, Any],
+    sections: dict[str, Any],
+    prompt_text: str,
+    recommendation: str,
+) -> str:
+    return _truncate(
         (
             f"{_clean_text(winning.get('if_true'))} を成立させられる前提なら {recommendation}。"
             if winning.get("if_true")
@@ -535,7 +520,10 @@ def build_pm_board_decision_brief(
         ),
         180,
     )
-    why_now = _truncate(
+
+
+def _pm_why_now(customer_validation: dict[str, Any]) -> str:
+    return _truncate(
         (
             f"{_clean_text(customer_validation.get('timeline'))} 以内に主要仮説を検証できる計画があり、"
             "先に意思決定条件を明示しておくと検証の優先順位がぶれにくい。"
@@ -544,6 +532,14 @@ def build_pm_board_decision_brief(
         else "市場仮説と顧客検証の優先順位を早期に固定しないと、調査と開発が並行でぶれやすい。"
     )
 
+
+def _pm_key_reasons(
+    winning: dict[str, Any],
+    market_view: dict[str, Any],
+    top_scenario: Any | None,
+    actions: list[Any],
+    confidence: float,
+) -> list[dict[str, Any]]:
     key_reasons: list[dict[str, Any]] = []
     if winning.get("if_true") or winning.get("to_achieve"):
         key_reasons.append({
@@ -585,9 +581,11 @@ def build_pm_board_decision_brief(
             "confidence": _safe_float(action.get("confidence"), confidence),
             "decision_impact": "次の一手が判断にどう効くかが明確",
         })
-    key_reasons = _dedupe(key_reasons, key="reason")[:5]
+    return _dedupe(key_reasons, key="reason")[:5]
 
-    guardrails = [
+
+def _pm_guardrails(assumptions: list[Any]) -> list[dict[str, Any]]:
+    return [
         {
             "condition": _truncate(_clean_text(item.get("assumption"))),
             "status": (
@@ -601,6 +599,8 @@ def build_pm_board_decision_brief(
         if _clean_text(item.get("assumption"))
     ]
 
+
+def _pm_deal_breakers(risks: list[Any], contradictions: list[Any]) -> list[dict[str, Any]]:
     deal_breakers = [
         {
             "trigger": _truncate(_clean_text(item.get("risk"))),
@@ -619,8 +619,10 @@ def build_pm_board_decision_brief(
             "impact": "判断条件の内部整合が崩れる",
             "recommended_response": _truncate(_clean_text(contradiction.get("resolution") or "どちらを優先するか先に決める")),
         })
-    deal_breakers = _dedupe(deal_breakers, key="trigger")[:4]
+    return _dedupe(deal_breakers, key="trigger")[:4]
 
+
+def _pm_critical_unknowns(uncertainties: list[Any], decision_points: list[Any]) -> list[dict[str, Any]]:
     critical_unknowns = [
         {
             "question": _truncate(_clean_text(item.get("uncertainty"))),
@@ -641,8 +643,14 @@ def build_pm_board_decision_brief(
             "how_to_validate": "対応する検証アクションを完了する",
             "decision_blocking": True,
         })
-    critical_unknowns = _dedupe(critical_unknowns, key="question")[:5]
+    return _dedupe(critical_unknowns, key="question")[:5]
 
+
+def _pm_next_decisions(
+    decision_points: list[Any],
+    actions: list[Any],
+    critical_unknowns: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     next_decisions = [
         {
             "decision": _truncate(_clean_text(point)),
@@ -667,7 +675,10 @@ def build_pm_board_decision_brief(
             }
             for item in critical_unknowns[:3]
         ]
+    return next_decisions
 
+
+def _pm_recommended_actions(actions: list[Any]) -> list[dict[str, Any]]:
     recommended_actions = [
         {
             "action": _truncate(_clean_text(item.get("action"))),
@@ -693,9 +704,17 @@ def build_pm_board_decision_brief(
                 "priority": "high",
             }
         ]
+    return recommended_actions
 
+
+def _pm_option_comparison(
+    winning: dict[str, Any],
+    customer_validation: dict[str, Any],
+    gtm: dict[str, Any],
+    deal_breakers: list[dict[str, Any]],
+) -> list[dict[str, str]]:
     target_customer = _clean_text(gtm.get("target_customer"))
-    option_comparison = [
+    return [
         _normalize_option(
             "推奨案: 条件付きで進める",
             winning.get("then_do") or "仮説を前進させながら学習できる",
@@ -719,16 +738,24 @@ def build_pm_board_decision_brief(
         ),
     ]
 
-    strongest_counterargument = _coalesce(
+
+def _pm_strongest_counterargument(contradictions: list[Any], risks: list[Any]) -> str:
+    return _coalesce(
         contradictions[0].get("issue") if contradictions else "",
         risks[0].get("risk") if risks else "",
         "主要仮説を支える一次検証がまだ足りない",
     )
-    risk_factors = [
+
+
+def _pm_risk_factors(deal_breakers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
         {"condition": item["trigger"], "impact": item["impact"]}
         for item in deal_breakers[:4]
     ]
-    time_horizon = {
+
+
+def _pm_time_horizon(plan: dict[str, Any], winning: dict[str, Any]) -> dict[str, dict[str, str]]:
+    return {
         "short_term": {
             "period": "30日",
             "prediction": _truncate(_clean_text(plan.get("day_30", {}).get("goals")) or "検証計画を実行開始"),
@@ -742,6 +769,9 @@ def build_pm_board_decision_brief(
             "prediction": _truncate(_clean_text(winning.get("to_achieve")) or "有料転換や継続率を踏まえて拡大判断"),
         },
     }
+
+
+def _pm_evidence_gaps(actions: list[Any], critical_unknowns: list[dict[str, Any]]) -> list[str]:
     evidence_gaps = [
         _truncate(_clean_text(item.get("additional_info_needed")))
         for item in actions
@@ -749,7 +779,13 @@ def build_pm_board_decision_brief(
     ]
     if not evidence_gaps:
         evidence_gaps = [item["question"] for item in critical_unknowns[:3]]
+    return evidence_gaps
 
+
+def _pm_stakeholder_reactions(
+    customer_validation: dict[str, Any],
+    market_view: dict[str, Any],
+) -> list[dict[str, Any]]:
     stakeholder_reactions: list[dict[str, Any]] = []
     for segment in _as_list(customer_validation.get("target_segments"))[:2]:
         stakeholder_reactions.append({
@@ -763,9 +799,16 @@ def build_pm_board_decision_brief(
             "reaction": _truncate(_clean_text(player.get("position") or player.get("strength") or "競合反応に注意"), 80),
             "percentage": 45,
         })
+    return stakeholder_reactions
 
+
+def _pm_confidence_explainer(
+    confidence: float,
+    critical_unknowns: list[dict[str, Any]],
+    recommendation: str,
+) -> str:
     unresolved_count = len([item for item in critical_unknowns if item.get("decision_blocking")])
-    confidence_explainer = _truncate(
+    return _truncate(
         (
             f"総合確信度は {confidence * 100:.0f}% 。"
             f"勝利仮説と市場仮説は一定の筋がある一方、未解決の判断論点が {unresolved_count} 件残るため"
@@ -773,6 +816,48 @@ def build_pm_board_decision_brief(
         ),
         180,
     )
+
+
+def build_pm_board_decision_brief(
+    *,
+    prompt_text: str,
+    pm_result: dict[str, Any],
+    scenarios: list[dict[str, Any]] | None = None,
+    council_synthesis: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    sections = dict(pm_result.get("sections") or {})
+    confidence = _safe_float(pm_result.get("overall_confidence"), 0.55)
+    recommendation = _recommendation_from_score(confidence)
+
+    winning = dict(sections.get("winning_hypothesis") or {})
+    customer_validation = dict(sections.get("customer_validation_plan") or {})
+    market_view = dict(sections.get("market_view") or {})
+    gtm = dict(sections.get("gtm_hypothesis") or {})
+    plan = dict(sections.get("plan_30_60_90") or {})
+    assumptions = _as_list(sections.get("assumptions"))
+    uncertainties = _as_list(sections.get("uncertainties"))
+    risks = _as_list(sections.get("risks"))
+    actions = _as_list(sections.get("top_5_actions"))
+    contradictions = _as_list(pm_result.get("contradictions"))
+    decision_points = _as_list(pm_result.get("key_decision_points"))
+    scenario_list = _as_list(scenarios)
+
+    top_scenario = _pm_top_scenario(scenario_list)
+    decision_summary = _pm_decision_summary(winning, sections, prompt_text, recommendation)
+    why_now = _pm_why_now(customer_validation)
+    key_reasons = _pm_key_reasons(winning, market_view, top_scenario, actions, confidence)
+    guardrails = _pm_guardrails(assumptions)
+    deal_breakers = _pm_deal_breakers(risks, contradictions)
+    critical_unknowns = _pm_critical_unknowns(uncertainties, decision_points)
+    next_decisions = _pm_next_decisions(decision_points, actions, critical_unknowns)
+    recommended_actions = _pm_recommended_actions(actions)
+    option_comparison = _pm_option_comparison(winning, customer_validation, gtm, deal_breakers)
+    strongest_counterargument = _pm_strongest_counterargument(contradictions, risks)
+    risk_factors = _pm_risk_factors(deal_breakers)
+    time_horizon = _pm_time_horizon(plan, winning)
+    evidence_gaps = _pm_evidence_gaps(actions, critical_unknowns)
+    stakeholder_reactions = _pm_stakeholder_reactions(customer_validation, market_view)
+    confidence_explainer = _pm_confidence_explainer(confidence, critical_unknowns, recommendation)
 
     brief = {
         "recommendation": recommendation,
