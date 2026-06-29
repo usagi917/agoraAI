@@ -450,6 +450,71 @@ async def _load_population_edges(session, population_id: str) -> list[dict]:
     ]
 
 
+def _phase_grounding(theme: str, selected_agents: list[dict]) -> list:
+    """Phase 2.7: grounding facts をロードし各エージェントへ配布する（selected_agents を変異）。"""
+    grounding_facts = []
+    try:
+        grounding_facts = load_grounding_facts(theme)
+        agent_facts = distribute_facts_to_agents(selected_agents, grounding_facts)
+        for idx, agent in enumerate(selected_agents):
+            agent["grounding_facts"] = agent_facts.get(idx, [])
+        logger.info(
+            "Grounding: %d facts loaded, distributed to %d agents",
+            len(grounding_facts), len(selected_agents),
+        )
+    except Exception as exc:
+        logger.warning("Grounding failed, continuing without: %s", exc)
+        for agent in selected_agents:
+            agent["grounding_facts"] = []
+    return grounding_facts
+
+
+def _phase_theme_anchor(theme: str, grounding_facts: list, simulation_id: str):
+    """Phase 2.8: theme_category 推定とアンカー分布の事前準備。
+
+    returns: (survey_data_dir, theme_estimate, anchor_distribution)
+    """
+    survey_data_dir = settings.config_dir / "grounding" / "survey_data"
+    theme_estimate = _estimate_theme_category(theme, grounding_facts)
+    logger.info(
+        "Theme category estimated: category=%s confidence=%.2f source=%s anchor_eligible=%s",
+        theme_estimate.category, theme_estimate.confidence,
+        theme_estimate.source, theme_estimate.is_anchor_eligible,
+    )
+
+    anchor_distribution: dict[str, float] | None = None
+    if theme_estimate.is_anchor_eligible:
+        try:
+            anchor_surveys = load_survey_data(str(survey_data_dir))
+            anchor_distribution = get_anchor_distribution(
+                theme, theme_estimate.category, anchor_surveys
+            )
+            if anchor_distribution:
+                logger.info(
+                    "Anchor distribution pre-loaded for category=%s",
+                    theme_estimate.category,
+                )
+        except Exception as exc:
+            logger.warning(
+                "Anchor distribution pre-load failed (sim=%s): %s",
+                simulation_id, exc, exc_info=True,
+            )
+    return survey_data_dir, theme_estimate, anchor_distribution
+
+
+def _phase_episodic_memory(
+    theme: str, theme_estimate: ThemeCategoryEstimate, selected_agents: list[dict]
+) -> None:
+    """Phase 2.9: 二層メモリ Layer B のエピソード選択（selected_agents を変異）。"""
+    from src.app.services.society.accuracy_config import is_enabled as _acc_is_enabled
+    if _acc_is_enabled("episodic_memory"):
+        from src.app.services.society.memory_compressor import select_relevant_episodes
+        for agent in selected_agents:
+            agent["_relevant_episodes"] = select_relevant_episodes(
+                agent.get("episodes"), theme, theme_estimate.category, top_k=3,
+            )
+
+
 async def run_society(simulation_id: str) -> None:
     """Society モードのメインオーケストレーション。"""
     logger.info("Starting society simulation %s", simulation_id)
@@ -514,55 +579,15 @@ async def run_society(simulation_id: str) -> None:
             })
 
             # === Phase 2.7: Grounding ===
-            grounding_facts = []
-            try:
-                grounding_facts = load_grounding_facts(theme)
-                agent_facts = distribute_facts_to_agents(selected_agents, grounding_facts)
-                # 各エージェントに grounding_facts を付与
-                for idx, agent in enumerate(selected_agents):
-                    agent["grounding_facts"] = agent_facts.get(idx, [])
-                logger.info("Grounding: %d facts loaded, distributed to %d agents", len(grounding_facts), len(selected_agents))
-            except Exception as exc:
-                logger.warning("Grounding failed, continuing without: %s", exc)
-                for agent in selected_agents:
-                    agent["grounding_facts"] = []
+            grounding_facts = _phase_grounding(theme, selected_agents)
 
             # === Phase 2.8: theme_category 推定とアンカー事前準備 ===
-            # activation 前に推定を確定させ、アンカー適用タイミングを固定する
-            survey_data_dir = settings.config_dir / "grounding" / "survey_data"
-            theme_estimate = _estimate_theme_category(theme, grounding_facts)
-            logger.info(
-                "Theme category estimated: category=%s confidence=%.2f source=%s anchor_eligible=%s",
-                theme_estimate.category, theme_estimate.confidence,
-                theme_estimate.source, theme_estimate.is_anchor_eligible,
+            survey_data_dir, theme_estimate, anchor_distribution = _phase_theme_anchor(
+                theme, grounding_facts, simulation_id
             )
 
-            anchor_distribution: dict[str, float] | None = None
-            if theme_estimate.is_anchor_eligible:
-                try:
-                    anchor_surveys = load_survey_data(str(survey_data_dir))
-                    anchor_distribution = get_anchor_distribution(
-                        theme, theme_estimate.category, anchor_surveys
-                    )
-                    if anchor_distribution:
-                        logger.info(
-                            "Anchor distribution pre-loaded for category=%s",
-                            theme_estimate.category,
-                        )
-                except Exception as exc:
-                    logger.warning(
-                        "Anchor distribution pre-load failed (sim=%s): %s",
-                        simulation_id, exc, exc_info=True,
-                    )
-
             # === Phase 2.9: エピソードメモリ選択（二層メモリ Layer B） ===
-            from src.app.services.society.accuracy_config import is_enabled as _acc_is_enabled
-            if _acc_is_enabled("episodic_memory"):
-                from src.app.services.society.memory_compressor import select_relevant_episodes
-                for agent in selected_agents:
-                    agent["_relevant_episodes"] = select_relevant_episodes(
-                        agent.get("episodes"), theme, theme_estimate.category, top_k=3,
-                    )
+            _phase_episodic_memory(theme, theme_estimate, selected_agents)
 
             # === Phase 3: Activation ===
             await sse_manager.publish(simulation_id, "society_activation_started", {
