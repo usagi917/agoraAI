@@ -101,13 +101,9 @@ class GameMaster:
         self.causal_engine.build_graph(world_state)
 
         # === Phase 0: エージェントTier分類 ===
-        unread_counts = {
-            a.agent_id: len(self.message_bus.get_inbox(a.agent_id))
-            for a in cognitive_agents
-        }
-        # inbox を覗くだけなので get_inbox で消費されないよう注意
-        # → 実際は get_inbox は pop するので、分類時点では peek が必要
-        # 簡略化: 前ラウンドの通信量で分類
+        # Tier 分類は前ラウンドの通信量(active_conversations)で行う。
+        # 未読数(unread_counts)は MessageBus.get_inbox が破壊的(pop)で安全に覗けないため
+        # 未配線（classify には空 dict を渡す）。実装する場合は非破壊 peek の追加が必要。
         active_convos = {
             a.agent_id: len(self.conversation_manager.get_agent_channels(a.agent_id))
             for a in cognitive_agents
