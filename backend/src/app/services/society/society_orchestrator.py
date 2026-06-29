@@ -538,6 +538,8 @@ class SocietyRunContext:
     prediction_market: object | None = None
     edges: list = field(default_factory=list)
     responses_with_ids: list = field(default_factory=list)
+    # Validation フェーズの出力（Provenance 構築で参照）
+    survey_comparison: dict | None = None
 
 
 async def _phase_evaluation(ctx: "SocietyRunContext", session) -> None:
@@ -841,6 +843,85 @@ async def _phase_network_propagation(
     ctx.responses_with_ids = responses_with_ids
 
 
+async def _phase_validation(
+    ctx: "SocietyRunContext",
+    session,
+    theme_estimate,
+    survey_data_dir,
+) -> None:
+    """Phase 4.5: 検証レジストリ登録と survey 比較を行い ctx.survey_comparison を更新する。
+
+    theme_estimate / survey_data_dir は前処理(Phase 2.8)の出力を明示引数で受け取る。
+    失敗時は握り潰して継続する（survey_comparison は None のまま）。
+    """
+    simulation_id = ctx.simulation_id
+    theme = ctx.theme
+    activation_result = ctx.activation_result
+
+    survey_comparison = None
+    try:
+        from src.app.services.society.validation_pipeline import (
+            auto_compare,
+            build_distribution_prediction_payload,
+            register_prediction_evaluation,
+            register_result,
+        )
+        stance_dist = activation_result["aggregation"].get("stance_distribution", {})
+        validation_record = await register_result(
+            session,
+            simulation_id=simulation_id,
+            theme=theme,
+            theme_category=theme_estimate.category,
+            distribution=stance_dist,
+            theme_category_estimate=theme_estimate,
+        )
+        survey_comparison = await auto_compare(
+            session, validation_record, str(survey_data_dir)
+        )
+        actual_payload = None
+        if survey_comparison:
+            best_survey = next(
+                (
+                    survey
+                    for survey in survey_comparison.get("matched_surveys", [])
+                    if survey.get("source") == survey_comparison.get("best_match_source")
+                ),
+                None,
+            )
+            if best_survey:
+                actual_payload = {"actual_distribution": best_survey["stance_distribution"]}
+        await register_prediction_evaluation(
+            session,
+            simulation_id=simulation_id,
+            prediction_type="distribution",
+            theme_category=theme_estimate.category,
+            source="society_orchestrator",
+            predicted_payload=build_distribution_prediction_payload(
+                activation_result["aggregation"],
+                prediction_market_distribution=(
+                    ctx.prediction_market.get_prices() if ctx.prediction_market else None
+                ),
+            ),
+            actual_payload=actual_payload,
+        )
+        if survey_comparison:
+            await sse_manager.publish(simulation_id, "validation_comparison_completed", {
+                "kl_divergence": survey_comparison.get("kl_divergence"),
+                "emd": survey_comparison.get("emd"),
+                "best_match_source": survey_comparison.get("best_match_source"),
+                "matched_survey_count": len(survey_comparison.get("matched_surveys", [])),
+            })
+        logger.info("Validation registration completed for simulation %s", simulation_id)
+    except (FileNotFoundError, ImportError) as exc:
+        logger.error("Validation registration failed (system error) sim=%s: %s", simulation_id, exc)
+    except (ValueError, KeyError) as exc:
+        logger.warning("Validation registration failed (data issue) sim=%s: %s", simulation_id, exc)
+    except Exception as exc:
+        logger.warning("Validation registration failed, continuing sim=%s: %s", simulation_id, exc, exc_info=True)
+
+    ctx.survey_comparison = survey_comparison
+
+
 async def run_society(simulation_id: str) -> None:
     """Society モードのメインオーケストレーション。"""
     logger.info("Starting society simulation %s", simulation_id)
@@ -1007,67 +1088,8 @@ async def run_society(simulation_id: str) -> None:
             eval_data = ctx.eval_data
 
             # === Phase 4.5: Validation Registration ===
-            survey_comparison = None
-            try:
-                from src.app.services.society.validation_pipeline import (
-                    auto_compare,
-                    build_distribution_prediction_payload,
-                    register_prediction_evaluation,
-                    register_result,
-                )
-                # theme_estimate と survey_data_dir は Phase 2.8 で確定済み
-                stance_dist = activation_result["aggregation"].get("stance_distribution", {})
-                validation_record = await register_result(
-                    session,
-                    simulation_id=simulation_id,
-                    theme=theme,
-                    theme_category=theme_estimate.category,
-                    distribution=stance_dist,
-                    theme_category_estimate=theme_estimate,
-                )
-                survey_comparison = await auto_compare(
-                    session, validation_record, str(survey_data_dir)
-                )
-                actual_payload = None
-                if survey_comparison:
-                    best_survey = next(
-                        (
-                            survey
-                            for survey in survey_comparison.get("matched_surveys", [])
-                            if survey.get("source") == survey_comparison.get("best_match_source")
-                        ),
-                        None,
-                    )
-                    if best_survey:
-                        actual_payload = {"actual_distribution": best_survey["stance_distribution"]}
-                await register_prediction_evaluation(
-                    session,
-                    simulation_id=simulation_id,
-                    prediction_type="distribution",
-                    theme_category=theme_estimate.category,
-                    source="society_orchestrator",
-                    predicted_payload=build_distribution_prediction_payload(
-                        activation_result["aggregation"],
-                        prediction_market_distribution=(
-                            prediction_market.get_prices() if prediction_market else None
-                        ),
-                    ),
-                    actual_payload=actual_payload,
-                )
-                if survey_comparison:
-                    await sse_manager.publish(simulation_id, "validation_comparison_completed", {
-                        "kl_divergence": survey_comparison.get("kl_divergence"),
-                        "emd": survey_comparison.get("emd"),
-                        "best_match_source": survey_comparison.get("best_match_source"),
-                        "matched_survey_count": len(survey_comparison.get("matched_surveys", [])),
-                    })
-                logger.info("Validation registration completed for simulation %s", simulation_id)
-            except (FileNotFoundError, ImportError) as exc:
-                logger.error("Validation registration failed (system error) sim=%s: %s", simulation_id, exc)
-            except (ValueError, KeyError) as exc:
-                logger.warning("Validation registration failed (data issue) sim=%s: %s", simulation_id, exc)
-            except Exception as exc:
-                logger.warning("Validation registration failed, continuing sim=%s: %s", simulation_id, exc, exc_info=True)
+            await _phase_validation(ctx, session, theme_estimate, survey_data_dir)
+            survey_comparison = ctx.survey_comparison
 
             # === Phase 4.6: Demographic Analysis ===
             _phase_demographics(ctx, session)
