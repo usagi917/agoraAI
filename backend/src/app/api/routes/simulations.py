@@ -254,6 +254,33 @@ def _attach_decision_brief_context(
     return payload
 
 
+def _finalize_report(
+    payload: dict,
+    *,
+    sim: Simulation,
+    quality: dict,
+    run_config: dict,
+    evidence_refs: list[dict],
+    prediction_evaluations: dict,
+    validation_summary: dict | None = None,
+) -> None:
+    if validation_summary is None:
+        validation_summary = _get_validation_summary(sim)
+    payload["evidence_refs"] = evidence_refs
+    payload["run_config"] = run_config
+    payload["quality"] = quality
+    payload["validation_summary"] = validation_summary
+    payload["prediction_evaluations"] = prediction_evaluations
+    finalized = _attach_decision_brief_context(
+        payload,
+        quality=quality,
+        run_config=run_config,
+        evidence_refs=evidence_refs,
+    )
+    payload.clear()
+    payload.update(finalized)
+
+
 @router.get("/{sim_id}/stream")
 async def stream_simulation(sim_id: str):
     """Simulation の統一 SSE ストリーム。"""
@@ -353,21 +380,26 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
     # 新プリセット方式: unified_result に全結果を格納
     unified_result = dict((sim.metadata_json or {}).get("unified_result") or {})
     if unified_result:
-        return _attach_decision_brief_context({
+        payload = {
             **unified_result,
             "type": unified_result.get("type", sim.mode),
-            "evidence_refs": evidence_refs,
-            "run_config": run_config,
-            "quality": quality,
-            "validation_summary": _get_validation_summary(sim),
-            "prediction_evaluations": prediction_evaluations,
-        }, quality=quality, run_config=run_config, evidence_refs=evidence_refs)
+        }
+        _finalize_report(
+            payload,
+            sim=sim,
+            quality=quality,
+            run_config=run_config,
+            evidence_refs=evidence_refs,
+            validation_summary=_get_validation_summary(sim),
+            prediction_evaluations=prediction_evaluations,
+        )
+        return payload
 
     # レガシー: society_first 結果
     society_first = dict((sim.metadata_json or {}).get("society_first_result") or {})
     if society_first:
         backtest = society_first.get("backtest") or build_empty_backtest_result()
-        return _attach_decision_brief_context({
+        payload = {
             "type": "society_first",
             "content": society_first.get("content", ""),
             "sections": society_first.get("sections", {}),
@@ -383,27 +415,34 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
                 evidence_mode=evidence_mode,
             ),
             "verification": society_first.get("verification"),
-            "evidence_refs": evidence_refs,
-            "run_config": run_config,
-            "quality": quality,
-            "validation_summary": _get_validation_summary(sim, backtest),
-            "prediction_evaluations": prediction_evaluations,
-        }, quality=quality, run_config=run_config, evidence_refs=evidence_refs)
+        }
+        _finalize_report(
+            payload,
+            sim=sim,
+            quality=quality,
+            run_config=run_config,
+            evidence_refs=evidence_refs,
+            validation_summary=_get_validation_summary(sim, backtest),
+            prediction_evaluations=prediction_evaluations,
+        )
+        return payload
 
     # レガシー: meta_simulation 結果
     meta_report = dict((sim.metadata_json or {}).get("meta_simulation_result") or {})
     if meta_report:
-        response = _attach_decision_brief_context({
-            **meta_report,
-            "evidence_refs": evidence_refs,
-            "run_config": run_config,
-            "quality": quality,
-            "validation_summary": _get_validation_summary(sim),
-            "prediction_evaluations": prediction_evaluations,
-        }, quality=quality, run_config=run_config, evidence_refs=evidence_refs)
-        if "content" not in response and response.get("summary_markdown"):
-            response["content"] = response["summary_markdown"]
-        return response
+        payload = {**meta_report}
+        if "content" not in payload and payload.get("summary_markdown"):
+            payload["content"] = payload["summary_markdown"]
+        _finalize_report(
+            payload,
+            sim=sim,
+            quality=quality,
+            run_config=run_config,
+            evidence_refs=evidence_refs,
+            validation_summary=_get_validation_summary(sim),
+            prediction_evaluations=prediction_evaluations,
+        )
+        return payload
 
     # レガシー: single モード (Report テーブル)
     if sim.run_id:
@@ -427,7 +466,7 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
                     quality=response_quality,
                 )
             )
-            return _attach_decision_brief_context({
+            payload = {
                 "type": "single",
                 "id": report.id,
                 "run_id": report.run_id,
@@ -435,28 +474,36 @@ async def get_simulation_report(sim_id: str, session: AsyncSession = Depends(get
                 "sections": report.sections,
                 "status": report.status,
                 "decision_brief": decision_brief,
-                "evidence_refs": evidence_refs,
-                "run_config": run_config,
                 "verification": (
                     dict(report.sections.get("verification"))
                     if isinstance(report.sections, dict) and isinstance(report.sections.get("verification"), dict)
                     else None
                 ),
-                "quality": response_quality,
-                "validation_summary": _get_validation_summary(sim),
-                "prediction_evaluations": prediction_evaluations,
-            }, quality=response_quality, run_config=run_config, evidence_refs=evidence_refs)
+            }
+            _finalize_report(
+                payload,
+                sim=sim,
+                quality=response_quality,
+                run_config=run_config,
+                evidence_refs=evidence_refs,
+                validation_summary=_get_validation_summary(sim),
+                prediction_evaluations=prediction_evaluations,
+            )
+            return payload
 
     # レガシー: PM Board 結果 (metadata_json 直接)
     if sim.metadata_json and sim.metadata_json.get("pm_analyses"):
-        return _attach_decision_brief_context({
-            **sim.metadata_json,
-            "evidence_refs": evidence_refs,
-            "run_config": run_config,
-            "quality": quality,
-            "validation_summary": _get_validation_summary(sim),
-            "prediction_evaluations": prediction_evaluations,
-        }, quality=quality, run_config=run_config, evidence_refs=evidence_refs)
+        payload = {**sim.metadata_json}
+        _finalize_report(
+            payload,
+            sim=sim,
+            quality=quality,
+            run_config=run_config,
+            evidence_refs=evidence_refs,
+            validation_summary=_get_validation_summary(sim),
+            prediction_evaluations=prediction_evaluations,
+        )
+        return payload
 
     raise HTTPException(status_code=404, detail="レポートが見つかりません")
 
