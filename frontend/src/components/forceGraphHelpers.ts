@@ -41,24 +41,28 @@ export interface SimLink {
   curvature?: number
 }
 
+// Research-grade palette: a single cohesive, desaturated family (steel blue →
+// teal → muted sage → soft violet, with two restrained warm accents) so entity
+// type never competes with the loud, semantic stance colors. Against the deep
+// near-black field these read as calm, luminous points rather than candy.
 export const TYPE_COLORS: Record<string, string> = {
-  organization: '#4FC3F7',
-  person: '#FFB74D',
-  policy: '#81C784',
-  market: '#E57373',
-  technology: '#BA68C8',
-  resource: '#4DB6AC',
-  concept: '#64B5F6',
-  risk: '#FF8A65',
-  opportunity: '#AED581',
-  agent: '#FFB74D',
-  friend: '#4FC3F7',
-  family: '#FFB74D',
-  colleague: '#81C784',
-  neighbor: '#4DB6AC',
-  acquaintance: '#90A4AE',
-  mentions: '#BA68C8',
-  default: '#90A4AE',
+  organization: '#5b8fb0',
+  person: '#c9a373',
+  policy: '#6faa8f',
+  market: '#c17c74',
+  technology: '#8a7fbf',
+  resource: '#5fa0a6',
+  concept: '#6d92c4',
+  risk: '#c78f6a',
+  opportunity: '#8fb079',
+  agent: '#c9a373',
+  friend: '#5aa0c8',
+  family: '#c9a373',
+  colleague: '#6faa8f',
+  neighbor: '#5fa0a6',
+  acquaintance: '#8593a8',
+  mentions: '#8a7fbf',
+  default: '#7c8aa0',
 }
 
 const NODE_PROP_KEYS = [
@@ -117,12 +121,27 @@ export function computeDegrees(edges: ReadonlyArray<EdgeProp | SimLink>): Map<st
   return degrees
 }
 
+// Labels stay hidden across the overview zoom (where zoomToFit lands ~1x) so the
+// graph reads as a clean constellation, and fade in only once the user has
+// deliberately zoomed into a neighbourhood. Selected/hovered nodes bypass this.
 export function labelAlpha(globalScale: number): number {
-  const FADE_START = 0.45
-  const FADE_END = 0.9
+  const FADE_START = 2.0
+  const FADE_END = 3.4
   if (globalScale <= FADE_START) return 0
   if (globalScale >= FADE_END) return 1
   return (globalScale - FADE_START) / (FADE_END - FADE_START)
+}
+
+// Deterministic [0, 1) hash of a node id. Used to give the population "dust" a
+// stable per-point size/brightness jitter so 10k dots read as a star field
+// instead of a uniform stipple — identical every render (no layout churn).
+export function hashUnit(id: string): number {
+  let h = 2166136261
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return ((h >>> 0) % 100000) / 100000
 }
 
 export function linkWidth(weight: number | null | undefined): number {
@@ -170,14 +189,24 @@ export const DEFAULT_PHYSICS: GraphPhysics = {
   collidePadding: 4,
 }
 
+// Synthetic "visual affinity" links only exist to keep sparse graphs from
+// flying apart — they carry no semantic meaning, so they must whisper. We ignore
+// the endpoint colors entirely and paint a single cool slate at a hair of alpha,
+// blended toward the endpoints only faintly so the web has subtle depth without
+// ever becoming the loud green/red yarn ball it used to be.
 export function syntheticLinkColor(sourceColor: string, targetColor: string, dimmed: boolean): string {
-  if (dimmed) return 'rgba(148, 163, 184, 0.12)'
+  if (dimmed) return 'rgba(120, 138, 168, 0.04)'
   const source = hexToRgb(sourceColor)
   const target = hexToRgb(targetColor)
-  const r = Math.round(source.r * 0.52 + target.r * 0.48)
-  const g = Math.round(source.g * 0.52 + target.g * 0.48)
-  const b = Math.round(source.b * 0.52 + target.b * 0.48)
-  return `rgba(${r}, ${g}, ${b}, 0.32)`
+  // Pull the mixed hue 82% of the way toward a neutral slate so only a trace of
+  // the endpoints' color survives.
+  const slate = { r: 120, g: 138, b: 168 }
+  const mix = (s: number, t: number, base: number) =>
+    Math.round(base * 0.82 + (s * 0.52 + t * 0.48) * 0.18)
+  const r = mix(source.r, target.r, slate.r)
+  const g = mix(source.g, target.g, slate.g)
+  const b = mix(source.b, target.b, slate.b)
+  return `rgba(${r}, ${g}, ${b}, 0.1)`
 }
 
 function stableNodeSortKey(node: Pick<NodeProp, 'id' | 'stance' | 'type'>): string {
@@ -188,14 +217,20 @@ export function buildSyntheticLinks(
   nodes: ReadonlyArray<NodeProp>,
   edges: ReadonlyArray<EdgeProp>,
 ): SimLink[] {
-  if (nodes.length < 3) return []
-  if (edges.length >= nodes.length * MIN_LINKS_PER_NODE_FOR_CONNECTED_VIEW) return []
+  // Synthetic "visual affinity" links are a fallback for the sparse agent graph
+  // only. The dense population layer must never receive them — at 10k nodes that
+  // would mean tens of thousands of invisible links dragging layout, hit-testing
+  // and paint. Restrict candidates (and the density check) to non-population.
+  const linkable = nodes.filter((node) => node.tier !== 'population')
+  if (linkable.length < 3) return []
+  const realEdges = edges.filter((edge) => !(edge.id?.startsWith('pop-edge-') ?? false))
+  if (realEdges.length >= linkable.length * MIN_LINKS_PER_NODE_FOR_CONNECTED_VIEW) return []
 
   const realPairs = new Set<string>()
-  const degree = new Map(nodes.map((node) => [node.id, 0]))
+  const degree = new Map(linkable.map((node) => [node.id, 0]))
   const pairKey = (a: string, b: string) => [a, b].sort().join('::')
 
-  for (const edge of edges) {
+  for (const edge of realEdges) {
     const source = endpointId(edge.source)
     const target = endpointId(edge.target)
     if (!source || !target || source === target) continue
@@ -204,10 +239,10 @@ export function buildSyntheticLinks(
     degree.set(target, (degree.get(target) ?? 0) + 1)
   }
 
-  const ordered = [...nodes].sort((a, b) => stableNodeSortKey(a).localeCompare(stableNodeSortKey(b)))
+  const ordered = [...linkable].sort((a, b) => stableNodeSortKey(a).localeCompare(stableNodeSortKey(b)))
   const synthetic: SimLink[] = []
   const syntheticPairs = new Set<string>()
-  const targetNeighborCount = Math.min(MAX_SYNTHETIC_NEIGHBORS, Math.max(1, Math.ceil(nodes.length / 28)))
+  const targetNeighborCount = Math.min(MAX_SYNTHETIC_NEIGHBORS, Math.max(1, Math.ceil(linkable.length / 28)))
   const addSynthetic = (source: NodeProp, target: NodeProp, weight: number) => {
     if (source.id === target.id) return
     const key = pairKey(source.id, target.id)

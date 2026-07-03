@@ -22,13 +22,13 @@ interface GraphEdgePayload {
 }
 
 const RELATION_TYPE_STYLES: Record<string, { color: string; width: number; particleColor: string }> = {
-  friend: { color: '#4FC3F7', width: 1.4, particleColor: '#81D4FA' },
-  family: { color: '#FFB74D', width: 1.6, particleColor: '#FFE0B2' },
-  colleague: { color: '#81C784', width: 1.2, particleColor: '#A5D6A7' },
-  neighbor: { color: '#4DB6AC', width: 1.1, particleColor: '#80CBC4' },
-  acquaintance: { color: '#90A4AE', width: 0.9, particleColor: '#CFD8DC' },
-  mentions: { color: '#BA68C8', width: 1.0, particleColor: '#CE93D8' },
-  default: { color: '#90A4AE', width: 1.0, particleColor: '#CFD8DC' },
+  friend: { color: '#5aa0c8', width: 1.4, particleColor: '#8fc4e0' },
+  family: { color: '#c9a373', width: 1.6, particleColor: '#e0c9a0' },
+  colleague: { color: '#6faa8f', width: 1.2, particleColor: '#a0cbb8' },
+  neighbor: { color: '#5fa0a6', width: 1.1, particleColor: '#94cbcf' },
+  acquaintance: { color: '#8593a8', width: 0.9, particleColor: '#b8c2d0' },
+  mentions: { color: '#8a7fbf', width: 1.0, particleColor: '#b8aed8' },
+  default: { color: '#7c8aa0', width: 1.0, particleColor: '#b0bccc' },
 }
 
 const props = defineProps<{
@@ -335,13 +335,13 @@ onUnmounted(() => {
     <!-- Stance legend -->
     <div v-if="societyGraphStore.nodeCount > 0" class="stance-legend">
       <div v-for="[stance, color] in stanceLegend" :key="stance" class="legend-item">
-        <span class="legend-dot" :style="{ background: color, boxShadow: `0 0 6px ${color}` }" />
+        <span class="legend-dot" :style="{ background: color, boxShadow: `0 0 3px ${color}` }" />
         <span class="legend-label">{{ stance }}</span>
       </div>
       <!-- Edge type legend -->
       <div class="legend-divider" />
       <div v-for="[type, style] in edgeLegend" :key="type" class="legend-item">
-        <span class="legend-line" :style="{ background: style.color, boxShadow: `0 0 4px ${style.color}` }" />
+        <span class="legend-line" :style="{ background: style.color, boxShadow: `0 0 2px ${style.color}` }" />
         <span class="legend-label">{{ type }}</span>
       </div>
     </div>
@@ -588,7 +588,7 @@ onUnmounted(() => {
 
 .activation-bar {
   height: 100%;
-  background: linear-gradient(90deg, #66bb6a, #00e5ff);
+  background: linear-gradient(90deg, #5aa0c8, #6faa8f);
   border-radius: 2px;
   transition: width 0.3s ease;
 }
@@ -666,9 +666,9 @@ onUnmounted(() => {
 }
 
 .physics-toggle.active {
-  color: rgba(139, 124, 246, 0.95);
-  background: rgba(139, 124, 246, 0.12);
-  border-color: rgba(139, 124, 246, 0.45);
+  color: rgba(138, 127, 191, 0.95);
+  background: rgba(138, 127, 191, 0.12);
+  border-color: rgba(138, 127, 191, 0.45);
 }
 
 .physics-panel {
@@ -725,7 +725,7 @@ onUnmounted(() => {
   padding: 0.35rem 0.75rem;
   background: rgba(10, 10, 30, 0.8);
   backdrop-filter: blur(8px);
-  border: 1px solid rgba(186, 104, 200, 0.25);
+  border: 1px solid rgba(138, 127, 191, 0.25);
   border-radius: 6px;
   z-index: 5;
   font-family: var(--font-mono);
@@ -735,11 +735,11 @@ onUnmounted(() => {
 
 .population-stats-badge {
   bottom: 2.9rem;
-  border-color: rgba(79, 195, 247, 0.25);
+  border-color: rgba(90, 160, 200, 0.25);
 }
 
 .kg-badge-label {
-  color: rgba(186, 104, 200, 0.9);
+  color: rgba(138, 127, 191, 0.9);
   font-weight: 700;
   font-size: 0.7rem;
 }
@@ -812,8 +812,8 @@ onUnmounted(() => {
 }
 
 .interaction-chip {
-  border-color: rgba(0, 229, 255, 0.4) !important;
-  color: rgba(0, 229, 255, 0.8) !important;
+  border-color: rgba(90, 160, 200, 0.4) !important;
+  color: rgba(143, 196, 224, 0.85) !important;
 }
 
 .edge-transcript {

@@ -9,6 +9,7 @@ import {
   clamp01,
   computeDegrees,
   createMergeGraphDataCache,
+  hashUnit,
   labelAlpha,
   linkColor as computeLinkColor,
   linkWidth as computeLinkWidth,
@@ -16,6 +17,7 @@ import {
   nodeColor,
   nodeDisplayColor,
   nodeRadius,
+  POPULATION_NODE_RADIUS,
   syntheticLinkColor,
   toEdgeProp,
   toNodeProp,
@@ -57,10 +59,11 @@ const mergeCache = createMergeGraphDataCache()
 let didFitOnce = false
 const LAYOUT_COOLDOWN_TICKS = 160
 const LAYOUT_COOLDOWN_TIME_MS = 5000
-const HIGH_DEGREE_LABEL_THRESHOLD = 8
+const SMALL_GRAPH_LABEL_THRESHOLD = 22
 const LARGE_GRAPH_THRESHOLD = 1500
-const POPULATION_UNDECIDED_COLOR = '#475569'
+const POPULATION_UNDECIDED_COLOR = '#5a6b88'
 const PULSE_DURATION_MS = 900
+const TWO_PI = Math.PI * 2
 
 // Firing "synapse" links, keyed by a STABLE string (not the object reference):
 // mergeGraphData rebuilds the link array on every store update, so an object key
@@ -145,7 +148,7 @@ function displayLinkColor(link: SimLink): string {
 
 function displayLinkWidth(link: SimLink): number {
   if (link.id?.startsWith('pop-edge-')) return 0.4
-  if (link.synthetic) return isLinkDimmed(link) ? 0.45 : 0.7 + clamp01(link.weight) * 1.05
+  if (link.synthetic) return isLinkDimmed(link) ? 0.25 : 0.35 + clamp01(link.weight) * 0.3
   const base = computeLinkWidth(link.weight)
   const intensity = firingIntensity(link)
   return intensity > 0 ? base * (1 + intensity * 1.3) : base
@@ -185,6 +188,8 @@ function paintLinkGlow(link: SimLink, ctx: CanvasRenderingContext2D, globalScale
   const target = link.target as SimNode
   if (typeof source?.x !== 'number' || typeof source?.y !== 'number') return
   if (typeof target?.x !== 'number' || typeof target?.y !== 'number') return
+  if (!Number.isFinite(source.x) || !Number.isFinite(source.y)) return
+  if (!Number.isFinite(target.x) || !Number.isFinite(target.y)) return
 
   const color = nodeColor(link.relation_type)
   const curvature = link.curvature ?? (clamp01(link.weight) > 0.7 ? 0.05 : 0.015)
@@ -249,16 +254,38 @@ function createGraph(element: HTMLElement) {
   return new FG(element)
 }
 
+// Population "dust": each of up to 10k points is a single additive dot. With
+// 'lighter' compositing, overlapping dots sum toward light, so dense regions
+// glow like a nebula while sparse space stays near-black. Per-id hash gives a
+// stable size/brightness jitter so it reads as a star field, not a stipple.
+function paintPopulationNode(node: SimNode, ctx: CanvasRenderingContext2D) {
+  const popDimmed = isNodeDimmed(node.id)
+  const focusActive = highlightedSet.value != null || activeFocusId() != null
+  const jitter = hashUnit(node.id)
+  const r = POPULATION_NODE_RADIUS * (0.55 + jitter * 1.05)
+  const color = node.stance ? nodeDisplayColor(node) : POPULATION_UNDECIDED_COLOR
+  // Kept deliberately low: with additive blending, dense overlaps sum toward
+  // light, so modest per-dot alpha yields the nebula glow without clipping to a
+  // chalky white fog. Decided (stance) dust glows a little hotter than the dim
+  // undecided haze.
+  const baseAlpha = node.stance ? 0.34 + jitter * 0.28 : 0.16 + jitter * 0.16
+  const alpha = popDimmed ? 0.04 : focusActive ? baseAlpha * 0.45 : baseAlpha
+  if (alpha <= 0.001) return
+  ctx.save()
+  ctx.globalCompositeOperation = 'lighter'
+  ctx.beginPath()
+  ctx.arc(node.x!, node.y!, r, 0, TWO_PI)
+  ctx.fillStyle = withAlpha(color, alpha)
+  ctx.fill()
+  ctx.restore()
+}
+
 function paintNode(node: SimNode, ctx: CanvasRenderingContext2D, globalScale: number) {
   if (typeof node.x !== 'number' || typeof node.y !== 'number') return
+  if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return
 
   if (node.tier === 'population') {
-    const popDimmed = isNodeDimmed(node.id)
-    const color = node.stance ? nodeDisplayColor(node) : POPULATION_UNDECIDED_COLOR
-    ctx.beginPath()
-    ctx.arc(node.x, node.y, nodeRadius(node), 0, Math.PI * 2)
-    ctx.fillStyle = withAlpha(color, popDimmed ? 0.08 : node.stance ? 0.75 : 0.45)
-    ctx.fill()
+    paintPopulationNode(node, ctx)
     return
   }
 
@@ -269,28 +296,61 @@ function paintNode(node: SimNode, ctx: CanvasRenderingContext2D, globalScale: nu
   const selected = props.selectedNodeId === node.id
   const hovered = hoveredNodeId.value === node.id
   const active = node.status === 'speaking' || node.status === 'activating'
-  const alpha = dimmed ? 0.15 : selected ? 1 : 0.92
+  // How brightly this node asserts itself: selection > hover > speaking > rest.
+  const emphasis = selected ? 1 : hovered ? 0.75 : active ? 0.5 : 0
+  const alpha = dimmed ? 0.08 : selected ? 1 : 0.9
 
+  // Outer bloom — additive radial gradient so the node reads as a luminous point
+  // floating in space rather than a flat sticker. Skipped for dimmed nodes so a
+  // focused neighbourhood pops out of a receded field.
   if (!dimmed) {
-    const glowRadius = r * 2.4
-    const halo = ctx.createRadialGradient(node.x, node.y, r * 0.3, node.x, node.y, glowRadius)
-    halo.addColorStop(0, withAlpha(baseColor, selected || hovered || active ? 0.45 : 0.22))
-    ctx.beginPath()
+    const glowRadius = r * (2.8 + emphasis * 2.2)
+    const halo = ctx.createRadialGradient(node.x, node.y, r * 0.2, node.x, node.y, glowRadius)
+    halo.addColorStop(0, withAlpha(baseColor, 0.32 + emphasis * 0.3))
+    halo.addColorStop(0.45, withAlpha(baseColor, 0.1 + emphasis * 0.12))
     halo.addColorStop(1, withAlpha(baseColor, 0))
-    ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2)
+    ctx.save()
+    ctx.globalCompositeOperation = 'lighter'
+    ctx.beginPath()
+    ctx.arc(node.x, node.y, glowRadius, 0, TWO_PI)
     ctx.fillStyle = halo
     ctx.fill()
+    ctx.restore()
   }
 
+  // Solid body.
   ctx.beginPath()
-  ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
+  ctx.arc(node.x, node.y, r, 0, TWO_PI)
   ctx.fillStyle = withAlpha(baseColor, alpha)
   ctx.fill()
 
-  if (selected) {
-    ctx.strokeStyle = '#f8fafc'
-    ctx.lineWidth = 2.5 / globalScale
+  // Hot core — a small near-white additive center gives the point a real light
+  // source instead of a flat disc.
+  if (!dimmed) {
+    const coreRadius = r * 0.5
+    const core = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, coreRadius)
+    core.addColorStop(0, `rgba(255, 255, 255, ${0.36 + emphasis * 0.42})`)
+    core.addColorStop(1, 'rgba(255, 255, 255, 0)')
+    ctx.save()
+    ctx.globalCompositeOperation = 'lighter'
+    ctx.beginPath()
+    ctx.arc(node.x, node.y, coreRadius, 0, TWO_PI)
+    ctx.fillStyle = core
+    ctx.fill()
+    ctx.restore()
+  }
+
+  // Soft focus ring — replaces the old hard white stroke. A thin luminous halo
+  // in the accent (white for selection, the node's own hue for hover).
+  if ((selected || hovered) && !dimmed) {
+    ctx.save()
+    ctx.globalCompositeOperation = 'lighter'
+    ctx.beginPath()
+    ctx.arc(node.x, node.y, r + 3.5, 0, TWO_PI)
+    ctx.strokeStyle = withAlpha(selected ? '#eaf1ff' : baseColor, selected ? 0.55 : 0.32)
+    ctx.lineWidth = 1.4 / globalScale
     ctx.stroke()
+    ctx.restore()
   }
 
   if (active && !dimmed) {
@@ -299,35 +359,73 @@ function paintNode(node: SimNode, ctx: CanvasRenderingContext2D, globalScale: nu
     // particle loop keeps repainting, so this time-based value stays animated.
     const phase = reducedMotion ? 1 : (Math.sin(performance.now() / 320) + 1) / 2
     ctx.beginPath()
-    ctx.arc(node.x, node.y, r + 5 + phase * 5, 0, Math.PI * 2)
-    ctx.strokeStyle = withAlpha(baseColor, 0.28 + phase * 0.34)
+    ctx.arc(node.x, node.y, r + 5 + phase * 5, 0, TWO_PI)
+    ctx.strokeStyle = withAlpha(baseColor, 0.24 + phase * 0.3)
     ctx.lineWidth = (0.8 + phase * 0.8) / globalScale
     ctx.stroke()
   }
 
-  const forceLabel = selected || hovered || degree >= HIGH_DEGREE_LABEL_THRESHOLD || nonPopulationNodeCount.value <= 40
-  const fade = forceLabel ? Math.max(labelAlpha(globalScale), 0.95) : labelAlpha(globalScale)
+  // Labels stay out of the way: hidden across the overview, shown for the
+  // focused node and its neighbours (which are the only non-dimmed nodes in
+  // focus mode), for small graphs, and otherwise faded in only on deep zoom.
+  const focused = activeFocusId() != null || highlightedSet.value != null
+  const forceLabel = selected || hovered || focused || nonPopulationNodeCount.value <= SMALL_GRAPH_LABEL_THRESHOLD
+  const fade = forceLabel
+    ? Math.max(labelAlpha(globalScale), focused && !selected && !hovered ? 0.98 : 0.92)
+    : labelAlpha(globalScale)
   if (fade > 0.02 && !dimmed) {
-    const fontSize = 10 / globalScale
-    ctx.font = `${fontSize}px sans-serif`
+    const fontSize = 11 / globalScale
+    ctx.font = `500 ${fontSize}px 'Space Grotesk', 'Noto Sans JP', sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
-    ctx.lineWidth = 3 / globalScale
-    ctx.strokeStyle = `rgba(8, 9, 18, ${0.88 * fade})`
+    ctx.lineWidth = 2.6 / globalScale
+    ctx.strokeStyle = `rgba(3, 5, 12, ${0.72 * fade})`
     ctx.lineJoin = 'round'
-    const labelY = node.y + r + 3
+    const labelY = node.y + r + 4
     ctx.strokeText(node.label, node.x, labelY)
-    ctx.fillStyle = `rgba(226, 232, 240, ${0.85 * fade})`
+    ctx.fillStyle = `rgba(233, 238, 247, ${0.92 * fade})`
     ctx.fillText(node.label, node.x, labelY)
   }
 }
 
 function paintNodePointerArea(node: SimNode, color: string, ctx: CanvasRenderingContext2D) {
   if (typeof node.x !== 'number' || typeof node.y !== 'number') return
+  if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return
   ctx.fillStyle = color
   ctx.beginPath()
   ctx.arc(node.x, node.y, nodeRadius(node, degreeByNodeId.value.get(node.id) ?? 0) + 2, 0, Math.PI * 2)
   ctx.fill()
+}
+
+// Painted every frame beneath the graph (in screen space, transform reset) to
+// give the field real depth: a soft central nebula glow fading into a darkened
+// vignette at the edges, so nodes read as points of light in deep space rather
+// than dots on flat black.
+function paintBackground(ctx: CanvasRenderingContext2D) {
+  const cw = ctx.canvas.width
+  const ch = ctx.canvas.height
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.fillStyle = '#05060d'
+  ctx.fillRect(0, 0, cw, ch)
+
+  const cx = cw * 0.5
+  const cy = ch * 0.46
+  const reach = Math.max(cw, ch)
+
+  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, reach * 0.62)
+  glow.addColorStop(0, 'rgba(32, 47, 80, 0.5)')
+  glow.addColorStop(0.4, 'rgba(18, 27, 50, 0.28)')
+  glow.addColorStop(1, 'rgba(5, 6, 13, 0)')
+  ctx.fillStyle = glow
+  ctx.fillRect(0, 0, cw, ch)
+
+  const vignette = ctx.createRadialGradient(cx, cy, Math.min(cw, ch) * 0.34, cx, cy, reach * 0.72)
+  vignette.addColorStop(0, 'rgba(2, 3, 8, 0)')
+  vignette.addColorStop(1, 'rgba(1, 2, 6, 0.72)')
+  ctx.fillStyle = vignette
+  ctx.fillRect(0, 0, cw, ch)
+  ctx.restore()
 }
 
 function configureForces(g: ReturnType<typeof createGraph>) {
@@ -385,9 +483,18 @@ function applyData() {
 }
 
 function refreshCanvas() {
-  // Trigger a redraw without restarting the simulation. d3ReheatSimulation()
-  // bumps alpha briefly which also forces a render in idle state.
-  graph?.d3ReheatSimulation()
+  if (!graph) return
+  // On large graphs a physics reheat is expensive AND jitters 10k settled nodes
+  // on every hover. Re-setting a no-op config nudges the renderer to repaint a
+  // single frame (for the focus dimming) without touching the simulation.
+  if (isLargeGraph.value) {
+    // Re-set nodeRelSize to its established value: a no-op change that still
+    // triggers a single repaint through the renderer's digest, no physics.
+    graph.nodeRelSize(1)
+    return
+  }
+  // Small graphs: a brief alpha bump both repaints and gently settles the layout.
+  graph.d3ReheatSimulation()
 }
 
 onMounted(() => {
@@ -405,7 +512,7 @@ onMounted(() => {
     .nodeId('id')
     .linkSource('source')
     .linkTarget('target')
-    .backgroundColor('rgba(8, 9, 18, 1)')
+    .backgroundColor('#05060d')
     .nodeRelSize(1)
     .nodeVal(0)
     .nodeCanvasObjectMode(() => 'replace')
@@ -483,6 +590,12 @@ onMounted(() => {
   glowLayer.linkCanvasObjectMode((l) => (firingIntensity(l) > 0 && !reducedMotion ? 'after' : undefined))
   glowLayer.linkCanvasObject((l, ctx, scale) => paintLinkGlow(l, ctx, scale))
 
+  // onRenderFramePre is missing from this version's force-graph typings; apply
+  // the screen-space background painter via a narrow structural cast.
+  ;(graph as unknown as {
+    onRenderFramePre: (fn: (ctx: CanvasRenderingContext2D) => void) => unknown
+  }).onRenderFramePre((ctx) => paintBackground(ctx))
+
   configureForces(graph)
   syncSize()
   applyData()
@@ -559,9 +672,8 @@ watch(
   overflow: hidden;
   border-radius: var(--radius, 8px);
   background:
-    radial-gradient(circle at 25% 20%, rgba(59, 130, 246, 0.08), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
-    #080912;
+    radial-gradient(ellipse 70% 55% at 50% 46%, rgba(32, 47, 80, 0.5), transparent 70%),
+    #05060d;
 }
 
 .force-graph-2d :deep(canvas) {

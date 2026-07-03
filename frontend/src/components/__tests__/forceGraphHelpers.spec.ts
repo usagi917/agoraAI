@@ -10,6 +10,7 @@ import {
   clamp01,
   computeDegrees,
   createMergeGraphDataCache,
+  hashUnit,
   labelAlpha,
   linkColor,
   linkWidth,
@@ -125,9 +126,35 @@ describe('linkColor', () => {
 })
 
 describe('syntheticLinkColor', () => {
-  it('mixes endpoint colors into a canvas-safe rgba string', () => {
-    expect(syntheticLinkColor('#22c55e', '#ef4444', false)).toMatch(/^rgba\(\d+, \d+, \d+, 0\.32\)$/)
-    expect(syntheticLinkColor('#22c55e', '#ef4444', true)).toBe('rgba(148, 163, 184, 0.12)')
+  it('collapses endpoint colors toward a quiet cool slate at a hair of alpha', () => {
+    // Opposed stance colors (green vs red) must NOT survive as loud yarn — the
+    // result is dominated by slate with only a trace of the endpoints.
+    expect(syntheticLinkColor('#22c55e', '#ef4444', false)).toBe('rgba(122, 137, 152, 0.1)')
+    expect(syntheticLinkColor('#22c55e', '#ef4444', true)).toBe('rgba(120, 138, 168, 0.04)')
+  })
+
+  it('keeps synthetic links far quieter than real relation links', () => {
+    const synthAlpha = Number(syntheticLinkColor('#5aa0c8', '#6faa8f', false).match(/, (0\.\d+)\)/)?.[1])
+    const realAlpha = Number(linkColor('friend', 1, false).match(/, (0\.\d+)\)/)?.[1])
+    expect(synthAlpha).toBeLessThan(realAlpha)
+  })
+})
+
+describe('hashUnit', () => {
+  it('is deterministic and bounded in [0, 1)', () => {
+    for (const id of ['agent-0', 'agent-9999', 'kg-entity-abc', '']) {
+      const a = hashUnit(id)
+      const b = hashUnit(id)
+      expect(a).toBe(b)
+      expect(a).toBeGreaterThanOrEqual(0)
+      expect(a).toBeLessThan(1)
+    }
+  })
+
+  it('spreads distinct ids across the range (no trivial collisions)', () => {
+    const values = new Set(Array.from({ length: 500 }, (_, i) => hashUnit(`agent-${i}`)))
+    // A decent hash keeps almost all 500 ids distinct.
+    expect(values.size).toBeGreaterThan(480)
   })
 })
 
@@ -234,21 +261,22 @@ describe('nodeRadius for population tier', () => {
 })
 
 describe('labelAlpha', () => {
-  it('hides labels when zoomed far out', () => {
+  it('hides labels across the whole overview zoom (fit lands ~1x)', () => {
     expect(labelAlpha(0.2)).toBe(0)
-    expect(labelAlpha(0.45)).toBe(0)
+    expect(labelAlpha(1)).toBe(0)
+    expect(labelAlpha(2)).toBe(0)
   })
 
-  it('fades in continuously between 0.45 and 0.9', () => {
-    const mid = labelAlpha(0.675)
+  it('fades in continuously between 2.0 and 3.4 (deliberate zoom-in)', () => {
+    const mid = labelAlpha(2.7)
     expect(mid).toBeGreaterThan(0)
     expect(mid).toBeLessThan(1)
-    expect(labelAlpha(0.5)).toBeLessThan(labelAlpha(0.8))
+    expect(labelAlpha(2.2)).toBeLessThan(labelAlpha(3.2))
   })
 
-  it('is fully visible at close zoom', () => {
-    expect(labelAlpha(0.9)).toBe(1)
-    expect(labelAlpha(3)).toBe(1)
+  it('is fully visible only once zoomed deep in', () => {
+    expect(labelAlpha(3.4)).toBe(1)
+    expect(labelAlpha(6)).toBe(1)
   })
 })
 

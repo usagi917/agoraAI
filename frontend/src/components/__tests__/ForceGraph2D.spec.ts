@@ -103,7 +103,12 @@ describe('ForceGraph2D', () => {
       stroke: vi.fn(),
       strokeText: vi.fn(),
       fillText: vi.fn(),
+      save: vi.fn(),
+      restore: vi.fn(),
+      setTransform: vi.fn(),
+      fillRect: vi.fn(),
       createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+      canvas: { width: 800, height: 600 },
       set fillStyle(_value: string) {},
       set strokeStyle(_value: string) {},
       set lineWidth(_value: number) {},
@@ -111,6 +116,7 @@ describe('ForceGraph2D', () => {
       set font(_value: string) {},
       set textAlign(_value: string) {},
       set textBaseline(_value: string) {},
+      set globalCompositeOperation(_value: string) {},
     } as unknown as CanvasRenderingContext2D & {
       strokeText: ReturnType<typeof vi.fn>
       fillText: ReturnType<typeof vi.fn>
@@ -173,7 +179,7 @@ describe('ForceGraph2D', () => {
     await flushPromises()
 
     const inst = MockForceGraph.lastInstance!
-    expect(inst.setterCalls.backgroundColor?.[0]).toBe('rgba(8, 9, 18, 1)')
+    expect(inst.setterCalls.backgroundColor?.[0]).toBe('#05060d')
     expect(inst.setterCalls.nodeCanvasObjectMode?.[0]).toBeTypeOf('function')
     expect(inst.setterCalls.linkCurvature?.[0]).toBeTypeOf('function')
     expect(inst.setterCalls.linkDirectionalParticleSpeed?.[0]).toBeTypeOf('function')
