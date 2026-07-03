@@ -124,8 +124,13 @@ def _stratified_sample(
     agents: list[dict],
     scores: list[float],
     target_count: int,
+    rng: random.Random | None = None,
 ) -> list[int]:
-    """スコアに基づく層化抽出。多様性保証のため各層から均等にサンプリングする。"""
+    """スコアに基づく層化抽出。多様性保証のため各層から均等にサンプリングする。
+
+    rng を渡すと抽出が再現可能になる。None ならグローバル random（従来動作）。
+    """
+    sampler = rng if rng is not None else random
     n = len(agents)
     if n <= target_count:
         return list(range(n))
@@ -147,7 +152,7 @@ def _stratified_sample(
     for stratum, ratio in zip(strata, layer_ratios):
         sample_size = max(1, int(target_count * ratio))
         sample_size = min(sample_size, len(stratum))
-        selected.extend(random.sample(stratum, sample_size))
+        selected.extend(sampler.sample(stratum, sample_size))
 
     # 不足分を上位層から追加
     remaining = target_count - len(selected)
@@ -244,12 +249,14 @@ async def select_agents(
     min_count: int = 50,
     max_count: int = 200,
     edges: list[dict] | None = None,
+    seed: int | None = None,
 ) -> list[dict]:
     """テーマに基づいてエージェントを選抜する。
 
     Args:
         edges: ネットワークエッジ。指定された場合、degree centrality を
                スコアリングに反映する (topic*0.7 + centrality*0.3)。
+        seed: 指定すると層化抽出が再現可能になる。None なら非決定的（従来動作）。
 
     Returns:
         選抜されたエージェントプロフィールのリスト
@@ -271,7 +278,8 @@ async def select_agents(
     ]
 
     # 層化抽出
-    selected_indices = _stratified_sample(agents, scores, target_count)
+    rng = random.Random(seed) if seed is not None else None
+    selected_indices = _stratified_sample(agents, scores, target_count, rng=rng)
 
     # 人口統計的多様性保証（地域・年齢帯・性別）
     selected_indices = _ensure_demographic_quotas(agents, selected_indices)

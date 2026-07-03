@@ -8,6 +8,7 @@ export interface NodeProp {
   activity_score: number
   stance?: string
   status?: string
+  tier?: string
 }
 
 export interface EdgeProp {
@@ -37,6 +38,7 @@ export interface SimLink {
   weight: number
   label?: string
   synthetic?: boolean
+  curvature?: number
 }
 
 export const TYPE_COLORS: Record<string, string> = {
@@ -67,6 +69,7 @@ const NODE_PROP_KEYS = [
   'activity_score',
   'stance',
   'status',
+  'tier',
 ] as const
 
 const EDGE_PROP_KEYS = ['id', 'source', 'target', 'relation_type', 'weight', 'label'] as const
@@ -93,14 +96,37 @@ export function nodeDisplayColor(node: Pick<NodeProp, 'type' | 'stance'>): strin
   return typeColor
 }
 
-export function nodeRadius(node: Pick<NodeProp, 'importance_score' | 'activity_score' | 'status'>): number {
+export const POPULATION_NODE_RADIUS = 2.2
+
+export function nodeRadius(
+  node: Pick<NodeProp, 'importance_score' | 'activity_score' | 'status' | 'tier'>,
+  degree = 0,
+): number {
+  if (node.tier === 'population') return POPULATION_NODE_RADIUS
   const importance = clamp01(node.importance_score ?? 0.4)
   const activityBoost = (node.activity_score ?? 0) > 0 || node.status === 'speaking' ? 3 : 0
-  return 5 + importance * 8 + activityBoost
+  const degreeBoost = Math.min(8, Math.sqrt(Math.max(0, degree)) * 0.9)
+  return 5 + importance * 8 + activityBoost + degreeBoost
+}
+
+export function computeDegrees(edges: ReadonlyArray<EdgeProp | SimLink>): Map<string, number> {
+  const degrees = new Map<string, number>()
+  for (const [id, neighbors] of buildAdjacency(edges)) {
+    degrees.set(id, neighbors.size)
+  }
+  return degrees
+}
+
+export function labelAlpha(globalScale: number): number {
+  const FADE_START = 0.45
+  const FADE_END = 0.9
+  if (globalScale <= FADE_START) return 0
+  if (globalScale >= FADE_END) return 1
+  return (globalScale - FADE_START) / (FADE_END - FADE_START)
 }
 
 export function linkWidth(weight: number | null | undefined): number {
-  return 0.9 + clamp01(weight) * 2.8
+  return 0.7 + clamp01(weight) * 2.4
 }
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
@@ -126,8 +152,22 @@ export function withAlpha(color: string, alpha: number): string {
 
 export function linkColor(relation_type: string, weight: number | null | undefined, dimmed: boolean): string {
   const base = nodeColor(relation_type)
-  const alpha = dimmed ? 0.12 : Math.min(0.82, 0.32 + clamp01(weight) * 0.46)
+  const alpha = dimmed ? 0.06 : Math.min(0.42, 0.14 + clamp01(weight) * 0.28)
   return withAlpha(base, alpha)
+}
+
+export interface GraphPhysics {
+  chargeStrength: number
+  linkDistance: number
+  centerStrength: number
+  collidePadding: number
+}
+
+export const DEFAULT_PHYSICS: GraphPhysics = {
+  chargeStrength: -220,
+  linkDistance: 60,
+  centerStrength: 0.04,
+  collidePadding: 4,
 }
 
 export function syntheticLinkColor(sourceColor: string, targetColor: string, dimmed: boolean): string {
@@ -138,16 +178,6 @@ export function syntheticLinkColor(sourceColor: string, targetColor: string, dim
   const g = Math.round(source.g * 0.52 + target.g * 0.48)
   const b = Math.round(source.b * 0.52 + target.b * 0.48)
   return `rgba(${r}, ${g}, ${b}, 0.32)`
-}
-
-export function nodeDegree(nodeId: string, edges: ReadonlyArray<EdgeProp | SimLink>): number {
-  let degree = 0
-  for (const edge of edges) {
-    const source = endpointId(edge.source as string | { id?: string | number })
-    const target = endpointId(edge.target as string | { id?: string | number })
-    if (source === nodeId || target === nodeId) degree += 1
-  }
-  return degree
 }
 
 function stableNodeSortKey(node: Pick<NodeProp, 'id' | 'stance' | 'type'>): string {
@@ -215,6 +245,36 @@ function endpointId(end: string | { id?: string | number } | undefined): string 
   return String(end.id ?? '')
 }
 
+export function assignLinkCurvatures(links: SimLink[]): void {
+  const groups = new Map<string, SimLink[]>()
+  for (const link of links) {
+    if (link.synthetic) continue
+    // Clear any prior value so a reused link that dropped from a parallel pair
+    // back to a lone edge doesn't keep its stale curvature.
+    link.curvature = undefined
+    const source = endpointId(link.source as string | { id?: string | number })
+    const target = endpointId(link.target as string | { id?: string | number })
+    const key = [source, target].sort().join('::')
+    const group = groups.get(key)
+    if (group) group.push(link)
+    else groups.set(key, [link])
+  }
+
+  for (const group of groups.values()) {
+    const total = group.length
+    if (total < 2) continue
+    const range = Math.min(0.6, 0.3 + total * 0.08)
+    group.forEach((link, index) => {
+      const base = (index / (total - 1) - 0.5) * range
+      const source = endpointId(link.source as string | { id?: string | number })
+      const target = endpointId(link.target as string | { id?: string | number })
+      // Normalize against the sorted pair key so anti-parallel edges land on
+      // opposite physical sides in force-graph's source->target frame.
+      link.curvature = source > target ? -base : base
+    })
+  }
+}
+
 export function buildAdjacency(edges: ReadonlyArray<EdgeProp | SimLink>): Map<string, Set<string>> {
   const map = new Map<string, Set<string>>()
   for (const edge of edges) {
@@ -229,36 +289,131 @@ export function buildAdjacency(edges: ReadonlyArray<EdgeProp | SimLink>): Map<st
   return map
 }
 
+export interface MergeGraphDataCache {
+  populationNodeProps: NodeProp[]
+  populationNodes: SimNode[]
+  populationEdgeProps: EdgeProp[]
+  populationLinks: SimLink[]
+}
+
+export function createMergeGraphDataCache(): MergeGraphDataCache {
+  return {
+    populationNodeProps: [],
+    populationNodes: [],
+    populationEdgeProps: [],
+    populationLinks: [],
+  }
+}
+
+function findPopulationRange<T>(items: ReadonlyArray<T>, predicate: (item: T) => boolean): { start: number; end: number } | null {
+  let start = -1
+  let end = -1
+  for (let i = 0; i < items.length; i++) {
+    if (predicate(items[i])) {
+      if (start === -1) start = i
+      end = i + 1
+    } else if (start !== -1) {
+      break
+    }
+  }
+  return start === -1 ? null : { start, end }
+}
+
+function segmentMatches<T>(items: ReadonlyArray<T>, range: { start: number; end: number }, cached: ReadonlyArray<T>): boolean {
+  if (range.end - range.start !== cached.length) return false
+  for (let i = 0; i < cached.length; i++) {
+    if (items[range.start + i] !== cached[i]) return false
+  }
+  return true
+}
+
+function updateSimNode(existing: SimNode | undefined, next: NodeProp): SimNode {
+  if (existing) {
+    // Mutate in place so force-graph keeps the same object reference,
+    // preserving x/y/vx/vy/fx/fy/index across reactive updates.
+    existing.label = next.label
+    existing.type = next.type
+    existing.importance_score = next.importance_score
+    existing.activity_score = next.activity_score
+    existing.stance = next.stance
+    existing.status = next.status
+    existing.tier = next.tier
+    return existing
+  }
+  return { ...next }
+}
+
+function toSimLink(edge: EdgeProp): SimLink {
+  return {
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    relation_type: edge.relation_type,
+    weight: edge.weight,
+    label: edge.label,
+  }
+}
+
 export function mergeGraphData(
   prevNodes: ReadonlyArray<SimNode>,
   newNodes: ReadonlyArray<NodeProp>,
   newEdges: ReadonlyArray<EdgeProp>,
+  cache?: MergeGraphDataCache,
 ): { nodes: SimNode[]; links: SimLink[] } {
   const prevById = new Map(prevNodes.map((n) => [n.id, n]))
-  const nodes: SimNode[] = newNodes.map((n) => {
-    const existing = prevById.get(n.id)
-    if (existing) {
-      // Mutate in place so force-graph keeps the same object reference,
-      // preserving x/y/vx/vy/fx/fy/index across reactive updates.
-      existing.label = n.label
-      existing.type = n.type
-      existing.importance_score = n.importance_score
-      existing.activity_score = n.activity_score
-      existing.stance = n.stance
-      existing.status = n.status
-      return existing
+  const populationNodeRange = findPopulationRange(newNodes, (node) => node.tier === 'population')
+  const canReusePopulationNodes = !!cache
+    && !!populationNodeRange
+    && segmentMatches(newNodes, populationNodeRange, cache.populationNodeProps)
+
+  const nodes: SimNode[] = []
+  for (let i = 0; i < newNodes.length; i++) {
+    if (canReusePopulationNodes && populationNodeRange && i === populationNodeRange.start) {
+      nodes.push(...cache!.populationNodes)
+      i = populationNodeRange.end - 1
+      continue
     }
-    return { ...n }
-  })
-  const links: SimLink[] = newEdges.map((e) => ({
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    relation_type: e.relation_type,
-    weight: e.weight,
-    label: e.label,
-  }))
-  return { nodes, links: [...links, ...buildSyntheticLinks(nodes, newEdges)] }
+    nodes.push(updateSimNode(prevById.get(newNodes[i].id), newNodes[i]))
+  }
+  if (cache && populationNodeRange && !canReusePopulationNodes) {
+    cache.populationNodeProps = newNodes.slice(populationNodeRange.start, populationNodeRange.end)
+    cache.populationNodes = nodes.slice(populationNodeRange.start, populationNodeRange.end)
+  } else if (cache && !populationNodeRange) {
+    cache.populationNodeProps = []
+    cache.populationNodes = []
+  }
+
+  const nodeIds = new Set(nodes.map((n) => n.id))
+  const populationEdgeRange = findPopulationRange(newEdges, (edge) => edge.id?.startsWith('pop-edge-') ?? false)
+  const canReusePopulationLinks = !!cache
+    && !!populationEdgeRange
+    && segmentMatches(newEdges, populationEdgeRange, cache.populationEdgeProps)
+
+  const validEdges: EdgeProp[] = []
+  const links: SimLink[] = []
+  for (let i = 0; i < newEdges.length; i++) {
+    if (canReusePopulationLinks && populationEdgeRange && i === populationEdgeRange.start) {
+      validEdges.push(...cache!.populationEdgeProps)
+      links.push(...cache!.populationLinks)
+      i = populationEdgeRange.end - 1
+      continue
+    }
+    const edge = newEdges[i]
+    if (!nodeIds.has(endpointId(edge.source)) || !nodeIds.has(endpointId(edge.target))) continue
+    validEdges.push(edge)
+    links.push(toSimLink(edge))
+  }
+  if (cache && populationEdgeRange && !canReusePopulationLinks) {
+    const populationEdges = validEdges.filter((edge) => edge.id?.startsWith('pop-edge-'))
+    cache.populationEdgeProps = populationEdges
+    cache.populationLinks = links.filter((link) => link.id?.startsWith('pop-edge-'))
+  } else if (cache && !populationEdgeRange) {
+    cache.populationEdgeProps = []
+    cache.populationLinks = []
+  }
+
+  assignLinkCurvatures(links)
+  return { nodes, links: [...links, ...buildSyntheticLinks(nodes, validEdges)] }
 }
 
 export function toNodeProp(node: SimNode | NodeProp | null | undefined): NodeProp | null {

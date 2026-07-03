@@ -24,6 +24,7 @@ import ActivityFeed from '../components/ActivityFeed.vue'
 import SocietyProgress from '../components/SocietyProgress.vue'
 import OpinionDistribution from '../components/OpinionDistribution.vue'
 import LiveSocietyGraph from '../components/LiveSocietyGraph.vue'
+import SocietyLiveFeed from '../components/SocietyLiveFeed.vue'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useSocietyStore } from '../stores/societyStore'
 import { useCognitiveStore } from '../stores/cognitiveStore'
@@ -985,6 +986,9 @@ function goToResults() {
       </div>
     </div>
 
+    <!-- SNS-style live feed (society mode) -->
+    <SocietyLiveFeed v-if="store.isSocietyMode" />
+
     <!-- Agent Story Drawer (society mode) -->
     <AgentStoryDrawer
       v-if="store.isSocietyMode"
@@ -1521,8 +1525,8 @@ function goToResults() {
 }
 
 .stepper-step.stepper-active {
-  background: rgba(var(--accent-rgb, 99, 102, 241), 0.12);
-  color: var(--accent, #6366f1);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
   font-weight: 600;
 }
 

@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import ForceGraph from 'force-graph'
+import { forceCollide } from 'd3-force'
 
 import {
+  DEFAULT_PHYSICS,
   buildAdjacency,
   clamp01,
+  computeDegrees,
+  createMergeGraphDataCache,
+  labelAlpha,
   linkColor as computeLinkColor,
   linkWidth as computeLinkWidth,
   mergeGraphData,
   nodeColor,
-  nodeDegree,
   nodeDisplayColor,
   nodeRadius,
   syntheticLinkColor,
@@ -17,6 +21,7 @@ import {
   toNodeProp,
   withAlpha,
   type EdgeProp,
+  type GraphPhysics,
   type NodeProp,
   type SimLink,
   type SimNode,
@@ -27,15 +32,18 @@ const props = withDefaults(defineProps<{
   edges: EdgeProp[]
   selectedNodeId?: string | null
   highlightedNodeIds?: string[]
+  physics?: Partial<GraphPhysics>
 }>(), {
   selectedNodeId: null,
   highlightedNodeIds: () => [],
+  physics: () => ({}),
 })
 
 const emit = defineEmits<{
   (e: 'select-node', node: NodeProp): void
   (e: 'select-edge', edge: EdgeProp): void
   (e: 'hover-edge', edge: EdgeProp | null): void
+  (e: 'background-click'): void
 }>()
 
 const host = ref<HTMLElement | null>(null)
@@ -45,20 +53,28 @@ let graph: ReturnType<typeof createGraph> | null = null
 let resizeObserver: ResizeObserver | null = null
 const currentNodes = ref<SimNode[]>([])
 const currentLinks = ref<SimLink[]>([])
+const mergeCache = createMergeGraphDataCache()
 let didFitOnce = false
 const LAYOUT_COOLDOWN_TICKS = 160
 const LAYOUT_COOLDOWN_TIME_MS = 5000
-const MIN_HUB_DEGREE = 3
+const HIGH_DEGREE_LABEL_THRESHOLD = 8
+const LARGE_GRAPH_THRESHOLD = 1500
+const POPULATION_UNDECIDED_COLOR = '#475569'
+const PULSE_DURATION_MS = 900
+
+// Firing "synapse" links, keyed by a STABLE string (not the object reference):
+// mergeGraphData rebuilds the link array on every store update, so an object key
+// would orphan the entry — dropping the glow early and leaking the map.
+const firingLinks = new Map<string, number>()
+let reducedMotion = false
+let motionQuery: MediaQueryList | null = null
 
 const adjacency = computed(() => buildAdjacency(currentLinks.value))
-const degreeByNodeId = computed(() => {
-  const map = new Map<string, number>()
-  for (const node of currentNodes.value) {
-    map.set(node.id, nodeDegree(node.id, currentLinks.value))
-  }
-  return map
-})
+const degreeByNodeId = computed(() => computeDegrees(currentLinks.value))
 const nodeById = computed(() => new Map(currentNodes.value.map((node) => [node.id, node])))
+const effectivePhysics = computed<GraphPhysics>(() => ({ ...DEFAULT_PHYSICS, ...props.physics }))
+const isLargeGraph = computed(() => currentNodes.value.length > LARGE_GRAPH_THRESHOLD)
+const nonPopulationNodeCount = computed(() => currentNodes.value.filter((node) => node.tier !== 'population').length)
 
 const highlightedSet = computed(() => {
   if (!props.highlightedNodeIds?.length) return null
@@ -77,11 +93,6 @@ function isNodeDimmed(nodeId: string): boolean {
   if (!focus) return false
   if (focus === nodeId) return false
   return !(adjacency.value.get(focus)?.has(nodeId) ?? false)
-}
-
-function isNodeFocused(nodeId: string): boolean {
-  const focus = activeFocusId()
-  return focus === nodeId || (focus != null && (adjacency.value.get(focus)?.has(nodeId) ?? false))
 }
 
 function endpointId(end: unknown): string {
@@ -113,6 +124,9 @@ function isLinkDimmed(link: SimLink): boolean {
 
 function displayLinkColor(link: SimLink): string {
   const dimmed = isLinkDimmed(link)
+  if (link.id?.startsWith('pop-edge-')) {
+    return withAlpha('#7dd3fc', dimmed ? 0.015 : 0.05)
+  }
   if (link.synthetic) {
     const source = endpointNode(link.source)
     const target = endpointNode(link.target)
@@ -122,12 +136,110 @@ function displayLinkColor(link: SimLink): string {
       dimmed,
     )
   }
+  const intensity = firingIntensity(link)
+  if (intensity > 0 && !dimmed) {
+    return withAlpha(nodeColor(link.relation_type), Math.min(0.95, 0.55 + intensity * 0.4))
+  }
   return computeLinkColor(link.relation_type, link.weight, dimmed)
 }
 
 function displayLinkWidth(link: SimLink): number {
+  if (link.id?.startsWith('pop-edge-')) return 0.4
   if (link.synthetic) return isLinkDimmed(link) ? 0.45 : 0.7 + clamp01(link.weight) * 1.05
-  return computeLinkWidth(link.weight)
+  const base = computeLinkWidth(link.weight)
+  const intensity = firingIntensity(link)
+  return intensity > 0 ? base * (1 + intensity * 1.3) : base
+}
+
+// Stable identity for a link across mergeGraphData rebuilds: prefer the edge id,
+// else the unordered endpoint pair plus relation type (parallel edges differ by type).
+function firingKey(link: SimLink): string {
+  if (link.id) return link.id
+  const s = endpointId(link.source)
+  const t = endpointId(link.target)
+  return `${[s, t].sort().join('::')}::${link.relation_type}`
+}
+
+/**
+ * How strongly a link is firing right now, in [0, 1]. Decays linearly over the
+ * pulse window; expired entries are dropped lazily on read. Under reduced motion
+ * it collapses to a flat 1 (a static highlight instead of an easing fade).
+ */
+function firingIntensity(link: SimLink, now: number = performance.now()): number {
+  const key = firingKey(link)
+  const expiry = firingLinks.get(key)
+  if (expiry == null) return 0
+  const remaining = expiry - now
+  if (remaining <= 0) {
+    firingLinks.delete(key)
+    return 0
+  }
+  return reducedMotion ? 1 : Math.min(1, remaining / PULSE_DURATION_MS)
+}
+
+/** Overlay a shadow-blurred glow on a firing link (linkCanvasObjectMode 'after'). */
+function paintLinkGlow(link: SimLink, ctx: CanvasRenderingContext2D, globalScale: number) {
+  const intensity = firingIntensity(link)
+  if (intensity <= 0) return
+  const source = link.source as SimNode
+  const target = link.target as SimNode
+  if (typeof source?.x !== 'number' || typeof source?.y !== 'number') return
+  if (typeof target?.x !== 'number' || typeof target?.y !== 'number') return
+
+  const color = nodeColor(link.relation_type)
+  const curvature = link.curvature ?? (clamp01(link.weight) > 0.7 ? 0.05 : 0.015)
+  const dx = target.x - source.x
+  const dy = target.y - source.y
+  const len = Math.hypot(dx, dy) || 1
+  // Match force-graph's curved-link control point so the glow tracks the arc.
+  const cx = (source.x + target.x) / 2 + (-dy / len) * curvature * len
+  const cy = (source.y + target.y) / 2 + (dx / len) * curvature * len
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.moveTo(source.x, source.y)
+  ctx.quadraticCurveTo(cx, cy, target.x, target.y)
+  ctx.strokeStyle = withAlpha(color, 0.35 * intensity)
+  ctx.lineWidth = (computeLinkWidth(link.weight) + 2.5 * intensity) / globalScale
+  ctx.shadowBlur = 14 * intensity
+  ctx.shadowColor = color
+  ctx.stroke()
+  ctx.restore()
+}
+
+/**
+ * Fire a conversation "synapse" between two agents. Finds the real (non-synthetic)
+ * link joining them in either direction, marks it firing for PULSE_DURATION_MS, and
+ * emits a single travelling particle. Returns false when no such link exists.
+ */
+function firePulse(sourceId: string, targetId: string): boolean {
+  const now = performance.now()
+  // Sweep expired entries so the map stays bounded even for pairs whose glow is
+  // never revisited by the render loop.
+  for (const [key, expiry] of firingLinks) {
+    if (expiry <= now) firingLinks.delete(key)
+  }
+  const link = currentLinks.value.find((l) => {
+    if (l.synthetic) return false
+    const s = endpointId(l.source)
+    const t = endpointId(l.target)
+    return (s === sourceId && t === targetId) || (s === targetId && t === sourceId)
+  })
+  if (!link) return false
+  firingLinks.set(firingKey(link), now + PULSE_DURATION_MS)
+  // No explicit redraw: directional particles keep force-graph's render loop
+  // running, so a d3ReheatSimulation() here would only jitter the layout and
+  // burn CPU on every incoming utterance.
+  if (!reducedMotion && graph) {
+    (graph as unknown as { emitParticle: (l: SimLink) => void }).emitParticle(link)
+  }
+  return true
+}
+
+defineExpose({ firePulse })
+
+function handleMotionPreferenceChange(event: MediaQueryListEvent) {
+  reducedMotion = event.matches
 }
 
 function createGraph(element: HTMLElement) {
@@ -139,70 +251,73 @@ function createGraph(element: HTMLElement) {
 
 function paintNode(node: SimNode, ctx: CanvasRenderingContext2D, globalScale: number) {
   if (typeof node.x !== 'number' || typeof node.y !== 'number') return
-  const r = nodeRadius(node)
-  const baseColor = nodeDisplayColor(node)
+
+  if (node.tier === 'population') {
+    const popDimmed = isNodeDimmed(node.id)
+    const color = node.stance ? nodeDisplayColor(node) : POPULATION_UNDECIDED_COLOR
+    ctx.beginPath()
+    ctx.arc(node.x, node.y, nodeRadius(node), 0, Math.PI * 2)
+    ctx.fillStyle = withAlpha(color, popDimmed ? 0.08 : node.stance ? 0.75 : 0.45)
+    ctx.fill()
+    return
+  }
+
   const degree = degreeByNodeId.value.get(node.id) ?? 0
-  const hubRatio = Math.min(1, degree / 10)
+  const r = nodeRadius(node, degree)
+  const baseColor = nodeDisplayColor(node)
   const dimmed = isNodeDimmed(node.id)
   const selected = props.selectedNodeId === node.id
-  const focused = isNodeFocused(node.id)
+  const hovered = hoveredNodeId.value === node.id
   const active = node.status === 'speaking' || node.status === 'activating'
-  const alpha = dimmed ? 0.16 : selected ? 1 : focused ? 0.96 : 0.84
-  const haloRadius = r + 8 + hubRatio * 14 + (active ? 6 : 0)
+  const alpha = dimmed ? 0.15 : selected ? 1 : 0.92
 
   if (!dimmed) {
-    const halo = ctx.createRadialGradient(node.x, node.y, r * 0.5, node.x, node.y, haloRadius)
-    halo.addColorStop(0, withAlpha(baseColor, selected ? 0.34 : active ? 0.3 : 0.2 + hubRatio * 0.12))
-    halo.addColorStop(0.55, withAlpha(baseColor, selected ? 0.14 : 0.08 + hubRatio * 0.08))
-    halo.addColorStop(1, withAlpha(baseColor, 0))
+    const glowRadius = r * 2.4
+    const halo = ctx.createRadialGradient(node.x, node.y, r * 0.3, node.x, node.y, glowRadius)
+    halo.addColorStop(0, withAlpha(baseColor, selected || hovered || active ? 0.45 : 0.22))
     ctx.beginPath()
-    ctx.arc(node.x, node.y, haloRadius, 0, Math.PI * 2)
+    halo.addColorStop(1, withAlpha(baseColor, 0))
+    ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2)
     ctx.fillStyle = halo
     ctx.fill()
   }
 
-  if (degree >= MIN_HUB_DEGREE && !dimmed) {
-    ctx.beginPath()
-    ctx.arc(node.x, node.y, r + 4 + hubRatio * 4, 0, Math.PI * 2)
-    ctx.strokeStyle = withAlpha(baseColor, selected ? 0.72 : 0.34 + hubRatio * 0.18)
-    ctx.lineWidth = Math.max(0.8, 1.4 / globalScale)
-    ctx.stroke()
-  }
-
   ctx.beginPath()
   ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
-  const core = ctx.createRadialGradient(node.x - r * 0.35, node.y - r * 0.4, r * 0.2, node.x, node.y, r)
-  core.addColorStop(0, withAlpha('#f8fafc', dimmed ? 0.22 : 0.48))
-  core.addColorStop(0.28, withAlpha(baseColor, alpha))
-  core.addColorStop(1, withAlpha(baseColor, dimmed ? 0.12 : 0.64))
-  ctx.fillStyle = core
+  ctx.fillStyle = withAlpha(baseColor, alpha)
   ctx.fill()
 
-  ctx.beginPath()
-  ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
-  ctx.strokeStyle = selected ? '#f8fafc' : withAlpha(baseColor, dimmed ? 0.12 : 0.56)
-  ctx.lineWidth = selected ? 2.5 / globalScale : 1.15 / globalScale
-  ctx.stroke()
-
-  if (active && !dimmed) {
-    ctx.beginPath()
-    ctx.arc(node.x, node.y, r + 7, 0, Math.PI * 2)
-    ctx.strokeStyle = withAlpha(baseColor, 0.42)
-    ctx.lineWidth = 1 / globalScale
+  if (selected) {
+    ctx.strokeStyle = '#f8fafc'
+    ctx.lineWidth = 2.5 / globalScale
     ctx.stroke()
   }
 
-  if (globalScale > 0.62 && !dimmed && (focused || selected || degree >= MIN_HUB_DEGREE || currentNodes.value.length <= 40)) {
+  if (active && !dimmed) {
+    // Speaking nodes "breathe": a sine-driven ring that swells and fades. Reduced
+    // motion pins the phase so the ring is present but static. The directional
+    // particle loop keeps repainting, so this time-based value stays animated.
+    const phase = reducedMotion ? 1 : (Math.sin(performance.now() / 320) + 1) / 2
+    ctx.beginPath()
+    ctx.arc(node.x, node.y, r + 5 + phase * 5, 0, Math.PI * 2)
+    ctx.strokeStyle = withAlpha(baseColor, 0.28 + phase * 0.34)
+    ctx.lineWidth = (0.8 + phase * 0.8) / globalScale
+    ctx.stroke()
+  }
+
+  const forceLabel = selected || hovered || degree >= HIGH_DEGREE_LABEL_THRESHOLD || nonPopulationNodeCount.value <= 40
+  const fade = forceLabel ? Math.max(labelAlpha(globalScale), 0.95) : labelAlpha(globalScale)
+  if (fade > 0.02 && !dimmed) {
     const fontSize = 10 / globalScale
     ctx.font = `${fontSize}px sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
     ctx.lineWidth = 3 / globalScale
-    ctx.strokeStyle = 'rgba(8, 9, 18, 0.88)'
+    ctx.strokeStyle = `rgba(8, 9, 18, ${0.88 * fade})`
     ctx.lineJoin = 'round'
     const labelY = node.y + r + 3
     ctx.strokeText(node.label, node.x, labelY)
-    ctx.fillStyle = 'rgba(226, 232, 240, 0.85)'
+    ctx.fillStyle = `rgba(226, 232, 240, ${0.85 * fade})`
     ctx.fillText(node.label, node.x, labelY)
   }
 }
@@ -211,15 +326,17 @@ function paintNodePointerArea(node: SimNode, color: string, ctx: CanvasRendering
   if (typeof node.x !== 'number' || typeof node.y !== 'number') return
   ctx.fillStyle = color
   ctx.beginPath()
-  ctx.arc(node.x, node.y, nodeRadius(node) + 2, 0, Math.PI * 2)
+  ctx.arc(node.x, node.y, nodeRadius(node, degreeByNodeId.value.get(node.id) ?? 0) + 2, 0, Math.PI * 2)
   ctx.fill()
 }
 
 function configureForces(g: ReturnType<typeof createGraph>) {
+  const p = effectivePhysics.value
+
   // Adjust the default forces force-graph already wires up.
   const charge = g.d3Force('charge') as { strength?: (v: number) => unknown; distanceMax?: (v: number) => unknown } | undefined
-  charge?.strength?.(-260)
-  charge?.distanceMax?.(520)
+  charge?.strength?.(p.chargeStrength)
+  charge?.distanceMax?.(420)
 
   const link = g.d3Force('link') as
     | {
@@ -228,12 +345,21 @@ function configureForces(g: ReturnType<typeof createGraph>) {
       iterations?: (v: number) => unknown
     }
     | undefined
-  link?.distance?.((l: SimLink) => 44 + (1 - clamp01(l.weight)) * 90)
-  link?.strength?.((l: SimLink) => 0.36 + clamp01(l.weight) * 0.58)
+  link?.distance?.((l: SimLink) => p.linkDistance + (1 - clamp01(l.weight)) * 80)
+  link?.strength?.((l: SimLink) => 0.3 + clamp01(l.weight) * 0.5)
   link?.iterations?.(2)
 
   const center = g.d3Force('center') as { strength?: (v: number) => unknown } | undefined
-  center?.strength?.(0.055)
+  center?.strength?.(p.centerStrength)
+
+  const collideIterations = isLargeGraph.value ? 1 : 2
+  g.d3Force('collide', forceCollide<SimNode>(
+    (node) => node.tier === 'population'
+      ? nodeRadius(node)
+      : nodeRadius(node, degreeByNodeId.value.get(node.id) ?? 0) + p.collidePadding,
+  ).iterations(collideIterations))
+
+  g.d3VelocityDecay(isLargeGraph.value ? 0.55 : 0.4)
 }
 
 function syncSize() {
@@ -244,12 +370,18 @@ function syncSize() {
   graph.width(w).height(h)
 }
 
+let wasLargeGraph = false
+
 function applyData() {
   if (!graph) return
-  const merged = mergeGraphData(currentNodes.value, props.nodes, props.edges)
+  const merged = mergeGraphData(currentNodes.value, props.nodes, props.edges, mergeCache)
   currentNodes.value = merged.nodes
   currentLinks.value = merged.links
   graph.graphData({ nodes: merged.nodes, links: merged.links })
+  if (isLargeGraph.value !== wasLargeGraph) {
+    wasLargeGraph = isLargeGraph.value
+    configureForces(graph)
+  }
 }
 
 function refreshCanvas() {
@@ -260,13 +392,20 @@ function refreshCanvas() {
 
 onMounted(() => {
   if (!host.value) return
+
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+    reducedMotion = motionQuery.matches
+    motionQuery.addEventListener?.('change', handleMotionPreferenceChange)
+  }
+
   graph = createGraph(host.value)
 
   graph
     .nodeId('id')
     .linkSource('source')
     .linkTarget('target')
-    .backgroundColor('rgba(0, 0, 0, 0)')
+    .backgroundColor('rgba(8, 9, 18, 1)')
     .nodeRelSize(1)
     .nodeVal(0)
     .nodeCanvasObjectMode(() => 'replace')
@@ -274,10 +413,10 @@ onMounted(() => {
     .nodePointerAreaPaint(paintNodePointerArea as never)
     .linkColor(((l: SimLink) => displayLinkColor(l)) as never)
     .linkWidth(((l: SimLink) => displayLinkWidth(l)) as never)
-    .linkCurvature(((l: SimLink) => (l.synthetic ? 0.025 : clamp01(l.weight) > 0.7 ? 0.05 : 0.015)) as never)
-    .linkDirectionalParticles(((l: SimLink) => (l.synthetic ? 0 : clamp01(l.weight) > 0.72 ? 3 : clamp01(l.weight) > 0.45 ? 1 : 0)) as never)
-    .linkDirectionalParticleWidth(2.2)
-    .linkDirectionalParticleColor(((l: SimLink) => withAlpha(nodeColor(l.relation_type), 0.85)) as never)
+    .linkCurvature(((l: SimLink) => l.curvature ?? (l.synthetic ? 0.025 : clamp01(l.weight) > 0.7 ? 0.05 : 0.015)) as never)
+    .linkDirectionalParticles(((l: SimLink) => (l.synthetic || l.id?.startsWith('pop-edge-') ? 0 : clamp01(l.weight) > 0.75 ? 1 : 0)) as never)
+    .linkDirectionalParticleWidth(1.6)
+    .linkDirectionalParticleColor(((l: SimLink) => withAlpha(nodeColor(l.relation_type), 0.7)) as never)
     .linkDirectionalParticleSpeed(((l: SimLink) => 0.003 + clamp01(l.weight) * 0.006) as never)
     .warmupTicks(0)
     .cooldownTicks(LAYOUT_COOLDOWN_TICKS)
@@ -324,12 +463,25 @@ onMounted(() => {
       emit('hover-edge', ep)
       refreshCanvas()
     })
+    .onBackgroundClick(() => {
+      emit('background-click')
+    })
     .onEngineStop(() => {
       if (!didFitOnce && currentNodes.value.length > 0) {
         didFitOnce = true
         graph?.zoomToFit(400, 40)
       }
     })
+
+  // linkCanvasObject(Mode) resolve to any-degrading overloads in this version's
+  // force-graph typings, so apply them via a narrow structural cast to keep the
+  // rest of the chain type-checked. Only firing links get the extra canvas pass.
+  const glowLayer = graph as unknown as {
+    linkCanvasObjectMode: (accessor: (l: SimLink) => 'after' | undefined) => unknown
+    linkCanvasObject: (renderFn: (l: SimLink, ctx: CanvasRenderingContext2D, scale: number) => void) => unknown
+  }
+  glowLayer.linkCanvasObjectMode((l) => (firingIntensity(l) > 0 && !reducedMotion ? 'after' : undefined))
+  glowLayer.linkCanvasObject((l, ctx, scale) => paintLinkGlow(l, ctx, scale))
 
   configureForces(graph)
   syncSize()
@@ -344,6 +496,9 @@ onMounted(() => {
 onUnmounted(() => {
   resizeObserver?.disconnect()
   resizeObserver = null
+  motionQuery?.removeEventListener?.('change', handleMotionPreferenceChange)
+  motionQuery = null
+  firingLinks.clear()
   if (graph) {
     ;(graph as unknown as { _destructor: () => void })._destructor()
     graph = null
@@ -351,19 +506,22 @@ onUnmounted(() => {
 })
 
 watch(
-  () => [props.nodes, props.edges] as const,
+  () => [props.nodes.length, props.edges.length, props.nodes, props.edges] as const,
   () => {
     applyData()
     didFitOnce = false
     refreshCanvas()
   },
-  { deep: true },
 )
 
 watch(
   () => props.selectedNodeId,
   (id) => {
-    if (!graph || !id) return
+    if (!graph) return
+    if (!id) {
+      refreshCanvas()
+      return
+    }
     const target = currentNodes.value.find((n) => n.id === id)
     if (target && typeof target.x === 'number' && typeof target.y === 'number') {
       graph.centerAt(target.x, target.y, 600)
@@ -377,6 +535,16 @@ watch(
   () => refreshCanvas(),
   { deep: true },
 )
+
+watch(
+  () => props.physics,
+  () => {
+    if (!graph) return
+    configureForces(graph)
+    graph.d3ReheatSimulation()
+  },
+  { deep: true },
+)
 </script>
 
 <template>
@@ -385,45 +553,18 @@ watch(
 
 <style scoped>
 .force-graph-2d {
-  position: relative;
   width: 100%;
   height: 100%;
   min-height: 300px;
   overflow: hidden;
   border-radius: var(--radius, 8px);
   background:
-    linear-gradient(rgba(148, 163, 184, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.03) 1px, transparent 1px),
-    radial-gradient(ellipse at center, rgba(15, 23, 42, 0.18), rgba(3, 6, 18, 0.72) 68%),
+    radial-gradient(circle at 25% 20%, rgba(59, 130, 246, 0.08), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0)),
     #080912;
-  background-size: 36px 36px, 36px 36px, 100% 100%;
-}
-
-.force-graph-2d::before {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  content: "";
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.055), transparent 18%),
-    linear-gradient(120deg, rgba(255, 183, 77, 0.055), transparent 32%),
-    linear-gradient(300deg, rgba(79, 195, 247, 0.045), transparent 34%);
-  mix-blend-mode: screen;
-}
-
-.force-graph-2d::after {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  content: "";
-  background:
-    linear-gradient(to right, rgba(8, 9, 18, 0.78), transparent 18%, transparent 82%, rgba(8, 9, 18, 0.78)),
-    linear-gradient(to bottom, rgba(8, 9, 18, 0.62), transparent 24%, transparent 80%, rgba(8, 9, 18, 0.84));
 }
 
 .force-graph-2d :deep(canvas) {
-  position: relative;
-  z-index: 1;
   display: block;
   cursor: grab;
 }

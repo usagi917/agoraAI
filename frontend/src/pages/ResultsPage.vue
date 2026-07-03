@@ -31,6 +31,7 @@ import {
   getPropagation,
   type PropagationData,
   type CodexHealthResponse,
+  getPopulationNetwork,
 } from '../api/client'
 import DecisionBriefComponent from '../components/DecisionBrief.vue'
 import ProbabilityChart from '../components/ProbabilityChart.vue'
@@ -39,6 +40,7 @@ import AgreementHeatmap from '../components/AgreementHeatmap.vue'
 import PropagationDashboard from '../components/PropagationDashboard.vue'
 import IntegratedReport from '../components/IntegratedReport.vue'
 import { useTimeAxis } from '../composables/useTimeAxis'
+import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { formatPercent } from '../utils/format'
 import {
   getDefaultResultsSecondaryTab,
@@ -51,6 +53,7 @@ import {
 const route = useRoute()
 const router = useRouter()
 const simId = route.params.id as string
+const societyGraphStore = useSocietyGraphStore()
 
 const sim = ref<SimulationResponse | null>(null)
 const report = ref<SimulationReportResponse | null>(null)
@@ -63,6 +66,7 @@ const transcriptLoading = ref(false)
 const transcriptPhaseFilter = ref<string>('')
 const activeSecondaryTab = ref<ResultsSecondaryTab>('society')
 let playbackFrame: number | null = null
+let populationNetworkAbort: AbortController | null = null
 
 // Time-axis (t0..t5) prediction view — lazily attached if backend produced it.
 const { report: timeAxisReport, loading: timeAxisLoading, error: timeAxisError, fetch: fetchTimeAxis } = useTimeAxis()
@@ -385,6 +389,31 @@ const secondaryTabLabels: Record<ResultsSecondaryTab, string> = {
   evidence: 'Evidence',
 }
 
+async function hydratePopulationNetwork() {
+  const mode = sim.value?.mode
+  if (mode !== 'unified' && mode !== 'society' && mode !== 'society_first' && !layoutContext.value.hasSociety) {
+    return
+  }
+
+  populationNetworkAbort?.abort()
+  populationNetworkAbort = new AbortController()
+  const controller = populationNetworkAbort
+  const startedGeneration = societyGraphStore.generation
+  try {
+    const network = await getPopulationNetwork(simId, { signal: controller.signal }).catch((err) => {
+      if (err?.name === 'AbortError' || err?.code === 'ERR_CANCELED') return null
+      return null
+    })
+    if (network && network.nodes.length > 0) {
+      societyGraphStore.setPopulationNetworkIfCurrent(network, startedGeneration)
+    }
+  } catch {
+    /* グラフは補助表示なので、取得失敗時は空状態に委ねる */
+  } finally {
+    if (populationNetworkAbort === controller) populationNetworkAbort = null
+  }
+}
+
 function stopPlaybackLoop() {
   if (playbackFrame !== null) {
     cancelAnimationFrame(playbackFrame)
@@ -415,6 +444,7 @@ onMounted(async () => {
     const reportData = await getSimulationReport(simId).catch(() => null)
 
     report.value = reportData
+    void hydratePopulationNetwork()
 
     // レポートが未取得かつシミュレーション完了済みなら数秒後にリトライ
     if (!reportData && sim.value?.status === 'completed') {
@@ -458,6 +488,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopPlaybackLoop()
+  populationNetworkAbort?.abort()
+  populationNetworkAbort = null
   if (copyStateTimer !== null) {
     window.clearTimeout(copyStateTimer)
   }

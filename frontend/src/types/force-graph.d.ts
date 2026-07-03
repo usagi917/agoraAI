@@ -37,7 +37,9 @@ declare module 'force-graph' {
     onLinkClick<TLink = unknown>(fn: (link: TLink) => void): this
     onLinkHover<TLink = unknown>(fn: (link: TLink | null) => void): this
     onEngineStop(fn: () => void): this
+    onBackgroundClick(fn: (event: MouseEvent) => void): this
     d3Force(name: string): unknown
+    d3Force(name: string, force: unknown): this
     width(value: number): this
     height(value: number): this
     graphData(data?: ForceGraphData): this | ForceGraphData

@@ -24,6 +24,12 @@ game_master:
   consistency_check_frequency: 2
   enable_event_injection: true
 
+# 全人口意見伝播（選抜エージェントの意見を未活性化の大衆へネットワーク伝播させる）
+opinion_propagation:
+  enabled: true
+  max_timesteps: 8
+  confidence_threshold: 0.5
+
 tom:
   enabled: true
   update_frequency: 2

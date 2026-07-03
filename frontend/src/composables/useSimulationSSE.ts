@@ -4,6 +4,7 @@ import { useGraphStore } from '../stores/graphStore'
 import { useActivityStore } from '../stores/activityStore'
 import { useSocietyStore } from '../stores/societyStore'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
+import { getPopulationNetwork } from '../api/client'
 import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
 import { useAgentVisualizationStore } from '../stores/agentVisualizationStore'
 import { useCognitiveSSE } from './useCognitiveSSE'
@@ -34,6 +35,7 @@ export function useSimulationSSE(simulationId: string) {
   let reconnectAttempts = 0
   const MAX_RECONNECTS = 3
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let populationNetworkAbort: AbortController | null = null
 
   function start() {
     const e2eEvents = (window as Window & {
@@ -114,6 +116,10 @@ export function useSimulationSSE(simulationId: string) {
       'network_propagation_started',
       'propagation_timestep',
       'network_propagation_completed',
+      // Population Propagation (全人口への意見伝播)
+      'population_propagation_started',
+      'population_propagation_round',
+      'population_propagation_completed',
       // Society ソーシャルグラフ
       'society_social_graph_ready',
       // Unified モード イベント
@@ -746,6 +752,47 @@ export function useSimulationSSE(simulationId: string) {
         })
         break
 
+      case 'population_propagation_started':
+        // 全人口ネットワークを取得して人口レイヤーを表示
+        populationNetworkAbort?.abort()
+        populationNetworkAbort = new AbortController()
+        {
+          const startedGeneration = societyGraphStore.generation
+          const controller = populationNetworkAbort
+          getPopulationNetwork(simulationId, { signal: controller.signal })
+            .then((network) => societyGraphStore.setPopulationNetworkIfCurrent(network, startedGeneration))
+            .catch((err) => {
+              if (err?.name === 'AbortError' || err?.code === 'ERR_CANCELED') return
+              console.warn('population-network の取得に失敗:', err)
+            })
+            .finally(() => {
+              if (populationNetworkAbort === controller) populationNetworkAbort = null
+            })
+        }
+        vizStore.addSystemEvent('◎', '全人口伝播開始', `${payload.population_count}人へ意見が波及中`)
+        activity.addEntry('phase', '◎', `全人口伝播開始 (${payload.population_count}人, ${payload.edge_count}辺)`, {
+          track: 'phase',
+          status: 'running',
+        })
+        break
+
+      case 'population_propagation_round':
+        if (payload.changes?.length) {
+          societyGraphStore.applyPropagationRound(payload.changes)
+        }
+        break
+
+      case 'population_propagation_completed':
+        if (payload.distribution) {
+          store.setOpinionDistribution(payload.distribution)
+        }
+        activity.addEntry('event', '◎', `全人口伝播完了 (${payload.total_rounds}ラウンド, ${payload.converged ? '収束' : '未収束'})`, {
+          detail: `${payload.changed_total || 0}件のスタンス変化`,
+          track: 'phase',
+          status: 'completed',
+        })
+        break
+
       case 'meeting_started':
         store.setSocietyPhase('meeting')
         store.setPhase('society_meeting')
@@ -921,6 +968,8 @@ export function useSimulationSSE(simulationId: string) {
     }
     source?.close()
     source = null
+    populationNetworkAbort?.abort()
+    populationNetworkAbort = null
   }
 
   onUnmounted(close)

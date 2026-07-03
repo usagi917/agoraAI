@@ -9,8 +9,11 @@ import { useSimulationStore } from '../../stores/simulationStore'
 import { useSocietyGraphStore } from '../../stores/societyGraphStore'
 
 describe('LiveSocietyGraph', () => {
+  const firePulseSpy = vi.fn()
+
   beforeEach(() => {
     vi.useFakeTimers()
+    firePulseSpy.mockClear()
     setActivePinia(createPinia())
 
     const simulationStore = useSimulationStore()
@@ -60,6 +63,9 @@ describe('LiveSocietyGraph', () => {
           ForceGraph2D: {
             props: ['highlightedNodeIds'],
             emits: ['select-node'],
+            setup(_props: unknown, { expose }: { expose: (exposed: Record<string, unknown>) => void }) {
+              expose({ firePulse: firePulseSpy })
+            },
             template: `
               <div data-testid="graph-2d">
                 <button data-testid="select-kg-node" @click="$emit('select-node', { id: 'kg-policy' })" />
@@ -111,5 +117,68 @@ describe('LiveSocietyGraph', () => {
     await wrapper.get('[data-testid="highlight-agents"]').trigger('click')
 
     expect(wrapper.get('[data-testid="highlighted-node-ids"]').text()).toBe('agent-1')
+  })
+
+  it('uses visible layer labels', () => {
+    const wrapper = mountGraph()
+
+    expect(wrapper.text()).toContain('社会')
+    expect(wrapper.text()).toContain('知識')
+    expect(wrapper.text()).toContain('リンク')
+  })
+
+  it('fires a synapse pulse when a new addressed dialogue arrives', async () => {
+    const societyGraphStore = useSocietyGraphStore()
+    societyGraphStore.setSelectedAgents([
+      { id: 'agent-1', agent_index: 1, name: '田中', display_name: '田中', occupation: '会社員', age: 35, region: '東京' },
+      { id: 'agent-2', agent_index: 2, name: '佐藤', display_name: '佐藤', occupation: '医師', age: 42, region: '大阪' },
+    ])
+
+    mountGraph()
+    await nextTick()
+
+    societyGraphStore.appendMeetingDialogue(1, {
+      participant_name: '田中',
+      participant_index: 1,
+      role: 'citizen',
+      argument: '賛成です',
+      addressed_to_participant_index: 2,
+    })
+    await nextTick()
+
+    expect(firePulseSpy).toHaveBeenCalledWith('agent-1', 'agent-2')
+  })
+
+  it('does not re-fire the same dialogue on repeated store updates', async () => {
+    const societyGraphStore = useSocietyGraphStore()
+    societyGraphStore.setSelectedAgents([
+      { id: 'agent-1', agent_index: 1, name: '田中', display_name: '田中', occupation: '会社員', age: 35, region: '東京' },
+      { id: 'agent-2', agent_index: 2, name: '佐藤', display_name: '佐藤', occupation: '医師', age: 42, region: '大阪' },
+    ])
+
+    mountGraph()
+    await nextTick()
+
+    societyGraphStore.appendMeetingDialogue(1, {
+      participant_name: '田中',
+      participant_index: 1,
+      role: 'citizen',
+      argument: '賛成です',
+      addressed_to_participant_index: 2,
+    })
+    await nextTick()
+    // A second, unrelated speaker update must not replay the first pulse.
+    societyGraphStore.appendMeetingDialogue(1, {
+      participant_name: '佐藤',
+      participant_index: 2,
+      role: 'citizen',
+      argument: '私も同意します',
+      addressed_to_participant_index: 1,
+    })
+    await nextTick()
+
+    expect(firePulseSpy).toHaveBeenCalledTimes(2)
+    expect(firePulseSpy).toHaveBeenNthCalledWith(1, 'agent-1', 'agent-2')
+    expect(firePulseSpy).toHaveBeenNthCalledWith(2, 'agent-2', 'agent-1')
   })
 })
