@@ -1,5 +1,6 @@
 """活性化レイヤー: 選抜された住民をLLMで活性化し、意見分布を集計する"""
 
+import hashlib
 import logging
 import re
 from collections import Counter
@@ -18,6 +19,12 @@ from src.app.services.society.statistical_inference import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def stable_agent_seed(agent_id: object, fallback_index: int = 0) -> int:
+    """Python hash salt に依存しないエージェント別 seed を返す。"""
+    raw = str(agent_id if agent_id not in (None, "") else fallback_index).encode("utf-8")
+    return int.from_bytes(hashlib.sha256(raw).digest()[:8], "big") % (2**31)
 
 
 def _temperature_from_big_five(big_five: dict, base_temperature: float = 0.5) -> float:
@@ -366,7 +373,7 @@ async def run_activation(
             agent.get("big_five", {}), base_temperature=temperature,
         )
         # エージェント別seedで応答多様性を確保
-        agent_seed = hash(agent.get("id", idx)) % (2**31)
+        agent_seed = stable_agent_seed(agent.get("id"), idx)
         calls.append({
             "provider": agent.get("llm_backend", "openai"),
             "system_prompt": system_prompt,

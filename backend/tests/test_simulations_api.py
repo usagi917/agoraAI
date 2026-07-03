@@ -2,6 +2,7 @@ import uuid
 
 import pytest
 import pytest_asyncio
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -9,6 +10,7 @@ from src.app.api.deps import get_session
 from src.app.config import settings
 from src.app.database import Base
 from src.app.main import app
+from src.app.api.routes.simulations import _ensure_no_running_validation
 from src.app.models import _import_all_models
 from src.app.api.routes.codex import get_codex_review_service
 from src.app.models.codex_review import CodexReview
@@ -772,6 +774,223 @@ async def test_create_simulation_normalizes_legacy_evidence_mode_alias(
 
 
 @pytest.mark.asyncio
+async def test_create_simulation_passes_seed_and_diagnostic(
+    client,
+    session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(type(settings), "live_simulation_available", lambda self: True)
+    monkeypatch.setattr("src.app.api.routes.simulations.spawn_simulation", lambda simulation_id: None)
+
+    response = await client.post(
+        "/simulations",
+        json={
+            "mode": "unified",
+            "prompt_text": "金利政策",
+            "seed": 42,
+            "diagnostic": {
+                "survey_id": "boj_living_2024_economy_金利政策",
+                "anchor_blend": False,
+                "stop_after": "society_pulse",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["seed"] == 42
+
+    async with session_factory() as session:
+        simulation = await session.get(Simulation, payload["id"])
+        assert simulation.seed == 42
+        assert simulation.metadata_json["diagnostic"]["anchor_blend"] is False
+
+
+@pytest.mark.asyncio
+async def test_create_validation_simulation_rejects_invalid_token(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(type(settings), "live_simulation_available", lambda self: True)
+    monkeypatch.setenv("VALIDATION_TOKEN", "secret")
+
+    response = await client.post(
+        "/simulations",
+        json={
+            "mode": "unified",
+            "prompt_text": "金利政策",
+            "diagnostic": {"stop_after": "society_pulse"},
+        },
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_validation_simulation_rejects_mismatched_token(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(type(settings), "live_simulation_available", lambda self: True)
+    monkeypatch.setenv("VALIDATION_TOKEN", "secret")
+
+    response = await client.post(
+        "/simulations",
+        json={
+            "mode": "unified",
+            "prompt_text": "金利政策",
+            "diagnostic": {"stop_after": "society_pulse"},
+        },
+        headers={"X-Validation-Token": "wrong"},
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_validation_simulation_allows_missing_token_when_unconfigured(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(type(settings), "live_simulation_available", lambda self: True)
+    monkeypatch.setattr("src.app.api.routes.simulations.spawn_simulation", lambda simulation_id: None)
+    monkeypatch.delenv("VALIDATION_TOKEN", raising=False)
+
+    response = await client.post(
+        "/simulations",
+        json={
+            "mode": "unified",
+            "prompt_text": "金利政策",
+            "diagnostic": {"stop_after": "society_pulse"},
+        },
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_create_validation_simulation_accepts_valid_token_header(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(type(settings), "live_simulation_available", lambda self: True)
+    monkeypatch.setattr("src.app.api.routes.simulations.spawn_simulation", lambda simulation_id: None)
+    monkeypatch.setenv("VALIDATION_TOKEN", "secret")
+
+    response = await client.post(
+        "/simulations",
+        json={
+            "mode": "unified",
+            "prompt_text": "金利政策",
+            "diagnostic": {"stop_after": "society_pulse"},
+        },
+        headers={"X-Validation-Token": "secret"},
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_create_validation_simulation_rejects_concurrent_run(
+    client,
+    session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(type(settings), "live_simulation_available", lambda self: True)
+    monkeypatch.delenv("VALIDATION_TOKEN", raising=False)
+
+    async with session_factory() as session:
+        session.add(Simulation(
+            id=str(uuid.uuid4()),
+            mode="standard",
+            prompt_text="金利政策",
+            status="running",
+            metadata_json={"diagnostic": {"stop_after": "society_pulse"}},
+        ))
+        await session.commit()
+
+    response = await client.post(
+        "/simulations",
+        json={
+            "mode": "unified",
+            "prompt_text": "老後の生活設計",
+            "diagnostic": {"stop_after": "society_pulse"},
+        },
+    )
+
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_ensure_no_running_validation_excludes_current_simulation(session_factory):
+    own_id = str(uuid.uuid4())
+    other_id = str(uuid.uuid4())
+
+    async with session_factory() as session:
+        session.add(Simulation(
+            id=own_id,
+            mode="standard",
+            prompt_text="金利政策",
+            status="queued",
+            metadata_json={"diagnostic": {"stop_after": "society_pulse"}},
+        ))
+        await session.commit()
+
+        await _ensure_no_running_validation(session, exclude_id=own_id)
+
+        session.add(Simulation(
+            id=other_id,
+            mode="standard",
+            prompt_text="老後の生活設計",
+            status="running",
+            metadata_json={"diagnostic": {"stop_after": "society_pulse"}},
+        ))
+        await session.commit()
+
+        with pytest.raises(HTTPException) as exc_info:
+            await _ensure_no_running_validation(session, exclude_id=own_id)
+
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_create_validation_simulation_rechecks_after_insert(
+    client,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(type(settings), "live_simulation_available", lambda self: True)
+    monkeypatch.setattr("src.app.api.routes.simulations.spawn_simulation", lambda simulation_id: None)
+    monkeypatch.delenv("VALIDATION_TOKEN", raising=False)
+    calls = []
+
+    async def fake_ensure_no_running_validation(session, exclude_id=None):
+        calls.append(exclude_id)
+        if exclude_id is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Validation simulation is already running",
+            )
+
+    monkeypatch.setattr(
+        "src.app.api.routes.simulations._ensure_no_running_validation",
+        fake_ensure_no_running_validation,
+    )
+
+    response = await client.post(
+        "/simulations",
+        json={
+            "mode": "unified",
+            "prompt_text": "老後の生活設計",
+            "diagnostic": {"stop_after": "society_pulse"},
+        },
+    )
+
+    assert response.status_code == 409
+    assert calls[0] is None
+    assert calls[1] is not None
+
+
+@pytest.mark.asyncio
 async def test_create_simulation_accepts_meta_mode(
     client,
     session_factory,
@@ -831,6 +1050,92 @@ async def test_create_simulation_accepts_unified_mode(
         simulation = await session.get(Simulation, payload["id"])
         assert simulation is not None
         assert simulation.mode == "standard"
+
+
+@pytest.mark.asyncio
+async def test_validation_topics_returns_manifest_eval_only(client):
+    response = await client.get("/validation/topics")
+
+    assert response.status_code == 200
+    payload = response.json()
+    survey_ids = {topic["survey_id"] for topic in payload["topics"]}
+    assert "boj_living_2024_economy_金利政策" in survey_ids
+    assert "boj_living_2024_economy_景況感" not in survey_ids
+    assert len(payload["topics"]) >= 4
+    assert all("actual_distribution" not in topic for topic in payload["topics"])
+
+
+@pytest.mark.asyncio
+async def test_validation_topics_rejects_invalid_preset(client):
+    response = await client.get("/validation/topics", params={"preset": "../../../../etc/passwd"})
+
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_validation_topics_returns_404_for_unknown_preset(client):
+    response = await client.get("/validation/topics", params={"preset": "nonexistent_preset_xyz"})
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_validation_report_returns_metrics(client, session_factory):
+    sim_id = str(uuid.uuid4())
+    predicted = {
+        "賛成": 0.15,
+        "条件付き賛成": 0.20,
+        "中立": 0.35,
+        "条件付き反対": 0.18,
+        "反対": 0.12,
+    }
+    async with session_factory() as session:
+        session.add(Simulation(
+            id=sim_id,
+            mode="standard",
+            prompt_text="金利政策",
+            status="completed",
+            metadata_json={
+                "diagnostic": {"survey_id": "boj_living_2024_economy_金利政策"},
+                "pulse_result": {"aggregation": {"stance_distribution": predicted}},
+            },
+        ))
+        await session.commit()
+
+    response = await client.get(f"/simulations/{sim_id}/validation-report")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["predicted"] == predicted
+    assert payload["jsd"] == pytest.approx(0.0)
+    assert payload["emd"] == pytest.approx(0.0)
+    assert payload["brier"] == pytest.approx(0.0)
+    assert payload["verdict"] == "hit"
+
+
+@pytest.mark.asyncio
+async def test_validation_report_missing_sim_is_404(client):
+    response = await client.get(f"/simulations/{uuid.uuid4()}/validation-report")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_validation_report_unfinished_sim_is_409(client, session_factory):
+    sim_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add(Simulation(
+            id=sim_id,
+            mode="standard",
+            prompt_text="金利政策",
+            status="running",
+            metadata_json={},
+        ))
+        await session.commit()
+
+    response = await client.get(f"/simulations/{sim_id}/validation-report")
+
+    assert response.status_code == 409
 
 
 @pytest.mark.asyncio

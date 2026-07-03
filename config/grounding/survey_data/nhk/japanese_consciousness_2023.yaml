@@ -18,6 +18,26 @@ surveys:
       条件付き反対: 0.14
       反対: 0.08
 
+  - theme: "家計の余裕"
+    question: "現在の家計にゆとりがあると思いますか"
+    source: "NHK放送文化研究所「日本人の意識」調査 2023年"
+    survey_date: "2023-06"
+    sample_size: 3600
+    method: "配付回収法"
+    theme_category: "economy"
+    relevance_keywords:
+      - "家計"
+      - "ゆとり"
+      - "生活費"
+      - "暮らし向き"
+      - "所得"
+    stance_distribution:
+      賛成: 0.12
+      条件付き賛成: 0.22
+      中立: 0.24
+      条件付き反対: 0.26
+      反対: 0.16
+
   - theme: "政治への信頼"
     question: "政治家は国民の声を聞いていると思いますか"
     source: "NHK放送文化研究所「日本人の意識」調査 2023年"

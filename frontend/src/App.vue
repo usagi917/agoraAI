@@ -22,6 +22,9 @@
           <router-link to="/populations" class="nav-link" active-class="active">
             母集団
           </router-link>
+          <router-link to="/validate" class="nav-link" active-class="active">
+            検証
+          </router-link>
         </nav>
       </div>
     </header>

@@ -1,6 +1,9 @@
 """活性化レイヤーテスト: プロンプト構築、応答集計（LLMモック）"""
 
 import pytest
+import os
+import subprocess
+import sys
 from unittest.mock import AsyncMock, patch
 
 from src.app.services.society.activation_layer import (
@@ -8,6 +11,7 @@ from src.app.services.society.activation_layer import (
     _parse_activation_response,
     _aggregate_opinions,
     _select_representatives,
+    stable_agent_seed,
 )
 from src.app.services.society.activation_prompts import build_activation_prompt
 
@@ -90,6 +94,41 @@ class TestBuildActivationPrompt:
         assert "エンジニア" in system_prompt
         assert "AIの社会的影響" in user_prompt
         assert "JSON" in system_prompt
+
+    def test_prompt_includes_anchor_prior_when_present(self):
+        agent = {
+            "demographics": {
+                "age": 40,
+                "occupation": "会社員",
+                "region": "関東",
+                "education": "bachelor",
+                "income_bracket": "middle",
+            },
+            "big_five": {},
+            "values": {},
+            "anchor_prior_stance": "条件付き反対",
+        }
+
+        system_prompt, _ = build_activation_prompt(agent, "金利政策")
+
+        assert "当初の立場は「条件付き反対」寄り" in system_prompt
+
+    def test_prompt_without_anchor_prior_does_not_include_prior_text(self):
+        agent = {
+            "demographics": {
+                "age": 40,
+                "occupation": "会社員",
+                "region": "関東",
+                "education": "bachelor",
+                "income_bracket": "middle",
+            },
+            "big_five": {},
+            "values": {},
+        }
+
+        system_prompt, _ = build_activation_prompt(agent, "金利政策")
+
+        assert "当初の立場" not in system_prompt
 
 
 class TestAggregateOpinionsWithStatisticalInference:
@@ -200,6 +239,27 @@ class TestAggregateOpinionsWithStatisticalInference:
 
 
 class TestRunActivation:
+    def test_stable_agent_seed_ignores_python_hash_salt(self):
+        code = (
+            "from src.app.services.society.activation_layer import stable_agent_seed; "
+            "print(stable_agent_seed('agent-1'))"
+        )
+        env_one = {**os.environ, "PYTHONHASHSEED": "1"}
+        env_two = {**os.environ, "PYTHONHASHSEED": "2"}
+        first = subprocess.check_output(
+            [sys.executable, "-c", code],
+            env=env_one,
+            text=True,
+        ).strip()
+        second = subprocess.check_output(
+            [sys.executable, "-c", code],
+            env=env_two,
+            text=True,
+        ).strip()
+
+        assert first == second
+        assert int(first) == stable_agent_seed("agent-1")
+
     @pytest.mark.asyncio
     async def test_run_activation_with_mock(self):
         agents = [

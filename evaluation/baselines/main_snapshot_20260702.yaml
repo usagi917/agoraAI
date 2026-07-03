@@ -1,0 +1,137 @@
+# M1 diagnostic baseline snapshot
+# branch: refactor/p0-p4-cleanup
+# git_hash: 4f313e0
+# captured: 2026-07-02
+# source: evaluation/baselines/diagnostic_20260702.yaml
+
+metadata:
+  git_hash: "4f313e0"
+  branch: "refactor/p0-p4-cleanup"
+  captured_at: "2026-07-02"
+  diagnostic_run_id: "diagnostic_20260702_092429"
+  preset: "economy"
+  eval_cases: 4
+  runs: 3
+  seeds: [42, 43, 44]
+  cross_source_trials: 3
+  status: "completed"
+  partial_failures: 0
+  primary_metric: "jsd"
+  note: >
+    M1 validation-mode diagnostic. Lower metric values are better. Conditions 2 and 3
+    both lost to the single-LLM baseline without overlapping JSD confidence intervals,
+    so the precommitted failure rule stops the M4 ablation ladder.
+
+diagnostic_conditions:
+  "0":
+    label: "null_train_average"
+    description: "train平均分布をそのまま提出するヌルモデル"
+  "1":
+    label: "single_llm_distribution"
+    description: "単一LLMによる5分類分布推定"
+  "2":
+    label: "current_swarm_pure"
+    description: "現行スワーム、事後アンカーブレンドOFF"
+  "3":
+    label: "per_agent_anchor"
+    description: "train平均分布からper-agent priorを注入"
+  "3b":
+    label: "random_unrelated_anchor"
+    description: "無関係security train平均をper-agent priorとして注入"
+  "4":
+    label: "production_blend"
+    description: "現行構成の事後アンカーブレンドON"
+
+baseline_metrics:
+  economy:
+    status: "measured"
+    source: "diagnostic_20260702"
+    primary_condition: "2"
+    n_validated: 18
+    jsd: 0.1791295915662424
+    jsd_ci95: [0.15816643352380008, 0.19969005781634128]
+    emd: 0.5095646255218264
+    brier: 0.04968137799766384
+    ece: 0.18401214437822952
+
+condition_metrics:
+  "0":
+    n: 18
+    mean_jsd: 0.01264069743954232
+    jsd_ci95: [0.01032871566289447, 0.015196715773890979]
+    mean_emd: 0.29277777777777775
+    mean_brier: 0.00433111111111111
+    mean_ece: 0.012000000000000004
+  "1":
+    n: 18
+    mean_jsd: 0.01808313129008372
+    jsd_ci95: [0.014239684029812648, 0.023039753882002703]
+    mean_emd: 0.3633333333333334
+    mean_brier: 0.005973333333333334
+    mean_ece: 0.03844444444444445
+  "2":
+    n: 18
+    mean_jsd: 0.1791295915662424
+    jsd_ci95: [0.15816643352380008, 0.19969005781634128]
+    mean_emd: 0.5095646255218264
+    mean_brier: 0.04968137799766384
+    mean_ece: 0.18401214437822952
+  "3":
+    n: 18
+    mean_jsd: 0.17616082033789315
+    jsd_ci95: [0.15451640741341954, 0.19923235251379431]
+    mean_emd: 0.4798667361321854
+    mean_brier: 0.049077093412515864
+    mean_ece: 0.1841902181889935
+  "3b":
+    n: 18
+    mean_jsd: 0.18254058930387485
+    jsd_ci95: [0.16262857526736968, 0.20018641184550653]
+    mean_emd: 0.5715498588335741
+    mean_brier: 0.055763704787901505
+    mean_ece: 0.1878342180590818
+  "4":
+    n: 18
+    mean_jsd: 0.1632903002998927
+    jsd_ci95: [0.13407961287764836, 0.19202256403773207]
+    mean_emd: 0.5342493302698014
+    mean_brier: 0.045451085002047524
+    mean_ece: 0.17482586794424282
+
+attribution:
+  condition3_minus_condition2_jsd: -0.0029687712283492373
+  condition3_relative_improvement_vs_2: 0.016573321015534615
+  condition3b_minus_condition2_jsd: 0.003410997737632454
+  condition3_minus_condition3b_jsd: -0.006379768075981691
+  condition4_minus_condition2_jsd: -0.015839291266349698
+  decision: "M4_STOP_SWITCH_TO_ERROR_DECOMPOSITION"
+  rationale: >
+    Condition 2 and condition 3 are both worse than condition 1 with non-overlapping
+    JSD 95% confidence intervals. Per-agent anchor improvement over pure swarm is
+    only 1.66%, below the 10% threshold, so the bottleneck is not fixed by
+    initialization. Existing production blend improves the reported JSD by 0.01584,
+    but that is post-hoc blending and should not be counted as swarm accuracy.
+
+ci_gate_reference:
+  command: "uv run python -c 'from src.app.evaluation.gate_runner import run_ci_gate_check; print(run_ci_gate_check(\"tests/fixtures/gate\", seed=42))'"
+  overall: "pass"
+  fixture_count: 2
+  seed: 42
+  categories:
+    economy:
+      gate: "pass"
+      avg_emd: 0.07333333333333333
+      avg_jsd: 0.0014011372424121947
+      avg_brier: 0.0020666666666666676
+      validated_count: 3
+    security:
+      gate: "pass"
+      avg_emd: 0.03000000000000004
+      avg_jsd: 0.0004319697929376352
+      avg_brier: 0.0007000000000000011
+      validated_count: 2
+
+next_action:
+  m2_demo_positioning: "計測と改善のループを持つ意思決定ツール"
+  m4_status: "stopped_by_m1_failure_rule"
+  replacement_track: "swarm_error_decomposition_activation_vs_propagation"

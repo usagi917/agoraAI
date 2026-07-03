@@ -54,9 +54,9 @@ from src.app.services.society.representative_selector import select_representati
 from src.app.services.society.statistical_inference import compute_independence_weights
 from src.app.services.society.stigmergy_service import StigmergyBoard
 from src.app.services.society.survey_anchor import (
-    apply_survey_anchor,
-    get_anchor_distribution,
-    load_survey_data,
+    inject_anchor_prior_stances,
+    resolve_anchor_distribution,
+    resolve_and_apply_anchor,
 )
 from src.app.services.society.theme_category import (
     ANCHOR_MIN_CONFIDENCE,
@@ -351,6 +351,7 @@ async def _get_or_create_population(
         if pop and pop.status == "ready":
             result = await session.execute(
                 select(AgentProfile).where(AgentProfile.population_id == population_id)
+                .order_by(AgentProfile.agent_index, AgentProfile.id)
             )
             agents_db = result.scalars().all()
             if agents_db:
@@ -419,7 +420,12 @@ async def _get_or_create_population(
     return pop_id, agents
 
 
-async def _save_network(session, agents: list[dict], population_id: str) -> None:
+async def _save_network(
+    session,
+    agents: list[dict],
+    population_id: str,
+    seed: int | None = None,
+) -> None:
     """ネットワークを生成して保存する（冪等: 既存エッジを削除してから挿入）。"""
     from sqlalchemy import delete
 
@@ -428,7 +434,7 @@ async def _save_network(session, agents: list[dict], population_id: str) -> None
     )
     await session.flush()
 
-    edges = await generate_network(agents, population_id)
+    edges = await generate_network(agents, population_id, seed=seed)
     for edge_data in edges:
         edge = SocialEdge(**edge_data)
         session.add(edge)
@@ -439,6 +445,7 @@ async def _load_population_edges(session, population_id: str) -> list[dict]:
     """population_id に紐づくエッジを読み込む。"""
     edge_result = await session.execute(
         select(SocialEdge).where(SocialEdge.population_id == population_id)
+        .order_by(SocialEdge.agent_id, SocialEdge.target_id)
     )
     edges_db = edge_result.scalars().all()
     return [
@@ -470,7 +477,12 @@ def _phase_grounding(theme: str, selected_agents: list[dict]) -> list:
     return grounding_facts
 
 
-def _phase_theme_anchor(theme: str, grounding_facts: list, simulation_id: str):
+def _phase_theme_anchor(
+    theme: str,
+    grounding_facts: list,
+    simulation_id: str,
+    diagnostic_cfg: dict | None = None,
+):
     """Phase 2.8: theme_category 推定とアンカー分布の事前準備。
 
     returns: (survey_data_dir, theme_estimate, anchor_distribution)
@@ -484,23 +496,48 @@ def _phase_theme_anchor(theme: str, grounding_facts: list, simulation_id: str):
     )
 
     anchor_distribution: dict[str, float] | None = None
-    if theme_estimate.is_anchor_eligible:
+    anchor_source = "none"
+    anchor_survey_ids: list[str] = []
+    if theme_estimate.is_anchor_eligible or (diagnostic_cfg or {}).get("anchor_source"):
         try:
-            anchor_surveys = load_survey_data(str(survey_data_dir))
-            anchor_distribution = get_anchor_distribution(
-                theme, theme_estimate.category, anchor_surveys
+            anchor_distribution, anchor_source, anchor_survey_ids = resolve_anchor_distribution(
+                theme,
+                theme_estimate.category,
+                diagnostic_cfg=diagnostic_cfg,
+                survey_data_dir=survey_data_dir,
             )
             if anchor_distribution:
                 logger.info(
-                    "Anchor distribution pre-loaded for category=%s",
-                    theme_estimate.category,
+                    "Anchor distribution pre-loaded for category=%s source=%s",
+                    theme_estimate.category, anchor_source,
                 )
         except Exception as exc:
             logger.warning(
                 "Anchor distribution pre-load failed (sim=%s): %s",
                 simulation_id, exc, exc_info=True,
             )
-    return survey_data_dir, theme_estimate, anchor_distribution
+    return survey_data_dir, theme_estimate, anchor_distribution, anchor_source, anchor_survey_ids
+
+
+def _diagnostic_config(sim: Simulation) -> dict:
+    metadata = dict(sim.metadata_json or {})
+    diagnostic = metadata.get("diagnostic")
+    return dict(diagnostic) if isinstance(diagnostic, dict) else {}
+
+
+def _maybe_inject_anchor_prior(
+    selected_agents: list[dict],
+    anchor_distribution: dict[str, float] | None,
+    diagnostic_cfg: dict,
+    seed: int | None,
+) -> None:
+    if not diagnostic_cfg.get("per_agent_anchor"):
+        return
+    if anchor_distribution is None:
+        raise ValueError("diagnostic.per_agent_anchor requires a resolved anchor_distribution")
+    # Diagnostic prior semantics: this is a category-level prior from train surveys,
+    # not an eval-theme-specific ground truth distribution.
+    inject_anchor_prior_stances(selected_agents, anchor_distribution, seed=seed)
 
 
 def _phase_episodic_memory(
@@ -529,6 +566,7 @@ class SocietyRunContext:
     pop_id: str
     selected_agents: list[dict]
     activation_result: dict
+    diagnostic_cfg: dict = field(default_factory=dict)
     eval_metrics: list = field(default_factory=list)
     eval_data: dict = field(default_factory=dict)
     demographic_analysis: dict = field(default_factory=dict)
@@ -540,6 +578,7 @@ class SocietyRunContext:
     responses_with_ids: list = field(default_factory=list)
     # Validation フェーズの出力（Provenance 構築で参照）
     survey_comparison: dict | None = None
+    anchor_application: object | None = None
     # Meeting Layer フェーズの出力（下流フェーズが参照）
     meeting_participants: list = field(default_factory=list)
     meeting_result: dict | None = None
@@ -1406,6 +1445,7 @@ async def run_society(simulation_id: str) -> None:
 
         theme = sim.prompt_text
         scenario_pair_id = getattr(sim, "scenario_pair_id", None)
+        diagnostic_cfg = _diagnostic_config(sim)
         total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
         try:
@@ -1435,7 +1475,7 @@ async def run_society(simulation_id: str) -> None:
             })
 
             # ネットワーク生成（バックグラウンド的に）
-            await _save_network(session, agents, pop_id)
+            await _save_network(session, agents, pop_id, seed=sim.seed)
 
             # === Phase 2: Selection (network centrality-aware) ===
             all_edges = await _load_population_edges(session, pop_id)
@@ -1461,8 +1501,14 @@ async def run_society(simulation_id: str) -> None:
             grounding_facts = _phase_grounding(theme, selected_agents)
 
             # === Phase 2.8: theme_category 推定とアンカー事前準備 ===
-            survey_data_dir, theme_estimate, anchor_distribution = _phase_theme_anchor(
-                theme, grounding_facts, simulation_id
+            (
+                survey_data_dir,
+                theme_estimate,
+                anchor_distribution,
+                anchor_source,
+                anchor_survey_ids,
+            ) = _phase_theme_anchor(
+                theme, grounding_facts, simulation_id, diagnostic_cfg=diagnostic_cfg
             )
 
             # === Phase 2.9: エピソードメモリ選択（二層メモリ Layer B） ===
@@ -1480,6 +1526,12 @@ async def run_society(simulation_id: str) -> None:
                     "percent": round(completed / total * 100, 1),
                 })
 
+            _maybe_inject_anchor_prior(
+                selected_agents,
+                anchor_distribution,
+                diagnostic_cfg,
+                sim.seed,
+            )
             activation_result = await run_activation(
                 selected_agents, theme, on_progress=on_progress,
             )
@@ -1504,15 +1556,36 @@ async def run_society(simulation_id: str) -> None:
             # === Phase 3.1: Survey アンカリング（activation 後・propagation 前）===
             # anchor_distribution が None（not eligible or 調査なし）の場合はスキップ
             stance_dist_pre_anchor = activation_result["aggregation"].get("stance_distribution", {})
-            anchored_stance_dist = apply_survey_anchor(stance_dist_pre_anchor, anchor_distribution)
-            anchor_applied = anchor_distribution is not None and anchored_stance_dist != stance_dist_pre_anchor
+            anchor_application = resolve_and_apply_anchor(
+                stance_dist_pre_anchor,
+                theme,
+                theme_estimate.category,
+                diagnostic_cfg=diagnostic_cfg,
+                survey_data_dir=survey_data_dir,
+                anchor_distribution=anchor_distribution,
+                anchor_source=anchor_source,
+                anchor_survey_ids=anchor_survey_ids,
+            )
+            anchor_applied = anchor_application.applied
+            if anchor_application.anchor_distribution is not None:
+                activation_result["aggregation"]["anchor_distribution"] = (
+                    anchor_application.anchor_distribution
+                )
+                activation_result["aggregation"]["anchor_source"] = anchor_application.source
+                activation_result["aggregation"]["anchor_survey_ids"] = (
+                    anchor_application.source_survey_ids
+                )
             if anchor_applied:
-                activation_result["aggregation"]["stance_distribution_pre_anchor"] = stance_dist_pre_anchor
-                activation_result["aggregation"]["stance_distribution"] = anchored_stance_dist
+                activation_result["aggregation"]["stance_distribution_pre_anchor"] = (
+                    anchor_application.pre_distribution
+                )
+                activation_result["aggregation"]["stance_distribution"] = (
+                    anchor_application.post_distribution
+                )
                 logger.info(
-                    "Survey anchor applied: category=%s alpha=0.3 emd_shift=%s",
+                    "Survey anchor applied: category=%s source=%s",
                     theme_estimate.category,
-                    anchor_applied,
+                    anchor_application.source,
                 )
 
             activation_record = _make_layer_record(
@@ -1543,6 +1616,8 @@ async def run_society(simulation_id: str) -> None:
                 pop_id=pop_id,
                 selected_agents=selected_agents,
                 activation_result=activation_result,
+                diagnostic_cfg=diagnostic_cfg,
+                anchor_application=anchor_application,
             )
 
             # === Phase 3.5: Network Propagation (Swarm Intelligence) ===

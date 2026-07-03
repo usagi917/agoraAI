@@ -1,0 +1,2735 @@
+run_id: diagnostic_20260702_092429
+preset: economy
+created_at: '2026-07-02T09:24:29.042785+00:00'
+seeds:
+- 42
+- 43
+- 44
+runs: 3
+cross_source_trials: 3
+conditions:
+  '0':
+    label: null_train_average
+    description: train平均分布をそのまま提出するヌルモデル
+    diagnostic: null
+  '1':
+    label: single_llm_distribution
+    description: 単一LLMによる5分類分布推定
+    diagnostic: null
+  '2':
+    label: current_swarm_pure
+    description: 現行スワーム、事後アンカーブレンドOFF
+    diagnostic:
+      anchor_blend: false
+      stop_after: society_pulse
+  '3':
+    label: per_agent_anchor
+    description: train平均分布からper-agent priorを注入
+    diagnostic:
+      anchor_blend: false
+      per_agent_anchor: true
+      anchor_source: manifest_train:economy
+      stop_after: society_pulse
+  3b:
+    label: random_unrelated_anchor
+    description: 無関係security train平均をper-agent priorとして注入
+    diagnostic:
+      anchor_blend: false
+      per_agent_anchor: true
+      anchor_source: unrelated:security
+      stop_after: society_pulse
+  '4':
+    label: production_blend
+    description: 現行構成の事後アンカーブレンドON
+    diagnostic:
+      stop_after: society_pulse
+rows:
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: &id001
+    賛成: 0.15
+    条件付き賛成: 0.2
+    中立: 0.35
+    条件付き反対: 0.18
+    反対: 0.12
+  jsd: 0.010065738457570916
+  brier: 0.003924444444444444
+  ece: 0.012000000000000005
+  emd: 0.21
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: *id001
+  jsd: 0.010065738457570916
+  brier: 0.003924444444444444
+  ece: 0.012000000000000005
+  emd: 0.21
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: *id001
+  jsd: 0.010065738457570916
+  brier: 0.003924444444444444
+  ece: 0.012000000000000005
+  emd: 0.21
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 0
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: *id001
+  jsd: 0.010065738457570916
+  brier: 0.003924444444444444
+  ece: 0.012000000000000005
+  emd: 0.21
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 1
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: *id001
+  jsd: 0.010065738457570916
+  brier: 0.003924444444444444
+  ece: 0.012000000000000005
+  emd: 0.21
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 2
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: *id001
+  jsd: 0.010065738457570916
+  brier: 0.003924444444444444
+  ece: 0.012000000000000005
+  emd: 0.21
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 0
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: *id001
+  jsd: 0.010065738457570916
+  brier: 0.003924444444444444
+  ece: 0.012000000000000005
+  emd: 0.21
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 1
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: *id001
+  jsd: 0.010065738457570916
+  brier: 0.003924444444444444
+  ece: 0.012000000000000005
+  emd: 0.21
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 2
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: *id001
+  jsd: 0.010065738457570916
+  brier: 0.003924444444444444
+  ece: 0.012000000000000005
+  emd: 0.21
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: &id002
+    賛成: 0.35
+    条件付き賛成: 0.28
+    中立: 0.15
+    条件付き反対: 0.13
+    反対: 0.09
+  jsd: 0.024332094925443346
+  brier: 0.00827111111111111
+  ece: 0.02400000000000001
+  emd: 0.5533333333333332
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: *id002
+  jsd: 0.024332094925443346
+  brier: 0.00827111111111111
+  ece: 0.02400000000000001
+  emd: 0.5533333333333332
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: *id002
+  jsd: 0.024332094925443346
+  brier: 0.00827111111111111
+  ece: 0.02400000000000001
+  emd: 0.5533333333333332
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: &id003
+    賛成: 0.1
+    条件付き賛成: 0.2
+    中立: 0.25
+    条件付き反対: 0.28
+    反対: 0.17
+  jsd: 0.013274999072229463
+  brier: 0.0036577777777777785
+  ece: 0.007999999999999986
+  emd: 0.33666666666666667
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: *id003
+  jsd: 0.013274999072229463
+  brier: 0.0036577777777777785
+  ece: 0.007999999999999986
+  emd: 0.33666666666666667
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: *id003
+  jsd: 0.013274999072229463
+  brier: 0.0036577777777777785
+  ece: 0.007999999999999986
+  emd: 0.33666666666666667
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: &id004
+    賛成: 0.12
+    条件付き賛成: 0.22
+    中立: 0.24
+    条件付き反対: 0.26
+    反対: 0.16
+  jsd: 0.008039875266868366
+  brier: 0.0022844444444444444
+  ece: 0.0040000000000000036
+  emd: 0.23666666666666672
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: *id004
+  jsd: 0.008039875266868366
+  brier: 0.0022844444444444444
+  ece: 0.0040000000000000036
+  emd: 0.23666666666666672
+- condition_id: '0'
+  condition_label: null_train_average
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.21
+    条件付き賛成: 0.20333333333333337
+    中立: 0.22999999999999998
+    条件付き反対: 0.20666666666666667
+    反対: 0.15
+  actual: *id004
+  jsd: 0.008039875266868366
+  brier: 0.0022844444444444444
+  ece: 0.0040000000000000036
+  emd: 0.23666666666666672
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.08
+    条件付き賛成: 0.25
+    中立: 0.24
+    条件付き反対: 0.22
+    反対: 0.21
+  actual: *id001
+  jsd: 0.019176986757320668
+  brier: 0.00584
+  ece: 0.02799999999999999
+  emd: 0.31
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.08
+    条件付き賛成: 0.25
+    中立: 0.24
+    条件付き反対: 0.26
+    反対: 0.17
+  actual: *id001
+  jsd: 0.01778316876921784
+  brier: 0.00568
+  ece: 0.02800000000000001
+  emd: 0.27
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.18
+    条件付き賛成: 0.3
+    中立: 0.24
+    条件付き反対: 0.16
+    反対: 0.12
+  actual: *id001
+  jsd: 0.011168169047092637
+  brier: 0.004679999999999998
+  ece: 0.003999999999999998
+  emd: 0.17999999999999997
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 0
+  predicted:
+    賛成: 0.23
+    条件付き賛成: 0.27
+    中立: 0.24
+    条件付き反対: 0.15
+    反対: 0.11
+  actual: *id001
+  jsd: 0.012807032251472929
+  brier: 0.004880000000000001
+  ece: 0.016000000000000014
+  emd: 0.2800000000000002
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 1
+  predicted:
+    賛成: 0.23
+    条件付き賛成: 0.27
+    中立: 0.24
+    条件付き反対: 0.15
+    反対: 0.11
+  actual: *id001
+  jsd: 0.012807032251472929
+  brier: 0.004880000000000001
+  ece: 0.016000000000000014
+  emd: 0.2800000000000002
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 2
+  predicted:
+    賛成: 0.23
+    条件付き賛成: 0.27
+    中立: 0.24
+    条件付き反対: 0.15
+    反対: 0.11
+  actual: *id001
+  jsd: 0.012807032251472929
+  brier: 0.004880000000000001
+  ece: 0.016000000000000014
+  emd: 0.2800000000000002
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 0
+  predicted:
+    賛成: 0.26
+    条件付き賛成: 0.24
+    中立: 0.31
+    条件付き反対: 0.11
+    反対: 0.08
+  actual: *id001
+  jsd: 0.015265688198881229
+  brier: 0.00436
+  ece: 0.06
+  emd: 0.41000000000000003
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 1
+  predicted:
+    賛成: 0.26
+    条件付き賛成: 0.24
+    中立: 0.22
+    条件付き反対: 0.17
+    反対: 0.11
+  actual: *id001
+  jsd: 0.016037644597495095
+  brier: 0.00616
+  ece: 0.008
+  emd: 0.2900000000000001
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 2
+  predicted:
+    賛成: 0.26
+    条件付き賛成: 0.24
+    中立: 0.31
+    条件付き反対: 0.11
+    反対: 0.08
+  actual: *id001
+  jsd: 0.015265688198881229
+  brier: 0.00436
+  ece: 0.06
+  emd: 0.41000000000000003
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.22
+    条件付き賛成: 0.34
+    中立: 0.22
+    条件付き反対: 0.14
+    反対: 0.08
+  actual: *id002
+  jsd: 0.012502410015385736
+  brier: 0.005119999999999999
+  ece: 0.028
+  emd: 0.21000000000000008
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.22
+    条件付き賛成: 0.34
+    中立: 0.2
+    条件付き反対: 0.16
+    反対: 0.08
+  actual: *id002
+  jsd: 0.011648036848564329
+  brier: 0.0048
+  ece: 0.03599999999999999
+  emd: 0.22999999999999998
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.22
+    条件付き賛成: 0.34
+    中立: 0.18
+    条件付き反対: 0.16
+    反対: 0.1
+  actual: *id002
+  jsd: 0.010523455028973564
+  brier: 0.00448
+  ece: 0.05199999999999999
+  emd: 0.24999999999999994
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.22
+    条件付き賛成: 0.33
+    中立: 0.25
+    条件付き反対: 0.12
+    反対: 0.08
+  actual: *id003
+  jsd: 0.044324640789643856
+  brier: 0.013000000000000003
+  ece: 0.1
+  emd: 0.71
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.22
+    条件付き賛成: 0.33
+    中立: 0.25
+    条件付き反対: 0.12
+    反対: 0.08
+  actual: *id003
+  jsd: 0.044324640789643856
+  brier: 0.013000000000000003
+  ece: 0.1
+  emd: 0.71
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.15
+    条件付き賛成: 0.25
+    中立: 0.3
+    条件付き反対: 0.2
+    反対: 0.1
+  actual: *id003
+  jsd: 0.012984855014239448
+  brier: 0.0037600000000000003
+  ece: 0.008000000000000012
+  emd: 0.36999999999999994
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.18
+    条件付き賛成: 0.32
+    中立: 0.25
+    条件付き反対: 0.15
+    反対: 0.1
+  actual: *id004
+  jsd: 0.018689960803916224
+  brier: 0.0058800000000000015
+  ece: 0.04400000000000001
+  emd: 0.45
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.18
+    条件付き賛成: 0.32
+    中立: 0.25
+    条件付き反対: 0.15
+    反対: 0.1
+  actual: *id004
+  jsd: 0.018689960803916224
+  brier: 0.0058800000000000015
+  ece: 0.04400000000000001
+  emd: 0.45
+- condition_id: '1'
+  condition_label: single_llm_distribution
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.18
+    条件付き賛成: 0.32
+    中立: 0.25
+    条件付き反対: 0.15
+    反対: 0.1
+  actual: *id004
+  jsd: 0.018689960803916224
+  brier: 0.0058800000000000015
+  ece: 0.04400000000000001
+  emd: 0.45
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.0
+    条件付き賛成: 0.3985250172120084
+    中立: 0.0
+    条件付き反対: 0.5049277922513654
+    反対: 0.09654719053662626
+  actual: *id001
+  jsd: 0.2308313015195793
+  brier: 0.058108057381620004
+  ece: 0.2093811237853495
+  emd: 0.5234528094633739
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.0
+    条件付き賛成: 0.4923554893290997
+    中立: 0.0
+    条件付き反対: 0.3776361445947876
+    反対: 0.13000836607611266
+  actual: *id001
+  jsd: 0.22313707490513207
+  brier: 0.05392638903653252
+  ece: 0.2
+  emd: 0.5100083660761127
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.023762053022208962
+    条件付き賛成: 0.4670237402068878
+    中立: 0.00033488863227582125
+    条件付き反対: 0.38188071276971886
+    反対: 0.12699860536890858
+  actual: *id001
+  jsd: 0.19172203960625334
+  brier: 0.050061637972913096
+  ece: 0.19036122333820613
+  emd: 0.4829016637144237
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 0
+  predicted:
+    賛成: 0.0
+    条件付き賛成: 0.5407242885522093
+    中立: 0.05611647084621941
+    条件付き反対: 0.33831313419047615
+    反対: 0.0648461064110952
+  actual: *id001
+  jsd: 0.16833630984373524
+  brier: 0.05061311399050363
+  ece: 0.19961496909707416
+  emd: 0.4990374227426856
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 1
+  predicted:
+    賛成: 0.0
+    条件付き賛成: 0.6365660506366058
+    中立: 0.010666592892343453
+    条件付き反対: 0.31899430277901747
+    反対: 0.03377305369203328
+  actual: *id001
+  jsd: 0.23545077339149836
+  brier: 0.07099831604447124
+  ece: 0.23022414136624927
+  emd: 0.5755603534156233
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 2
+  predicted:
+    賛成: 0.0
+    条件付き賛成: 0.5450569778177115
+    中立: 0.0
+    条件付き反対: 0.38505633402870687
+    反対: 0.06988668815358175
+  actual: *id001
+  jsd: 0.23718605813206456
+  brier: 0.06172475241804032
+  ece: 0.2200453247385673
+  emd: 0.5501133118464184
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 0
+  predicted:
+    賛成: 0.0
+    条件付き賛成: 0.5861549088908194
+    中立: 0.0
+    条件付き反対: 0.3819670143896642
+    反対: 0.031878076719516334
+  actual: *id001
+  jsd: 0.2550020943499669
+  brier: 0.06853435238492066
+  ece: 0.23524876931219346
+  emd: 0.5881219232804836
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 1
+  predicted:
+    賛成: 0.0036936708165934288
+    条件付き賛成: 0.5252822459090308
+    中立: 1.5067169219389534e-06
+    条件付き反対: 0.350905582651126
+    反対: 0.12011699390632785
+  actual: *id001
+  jsd: 0.2176541725703123
+  brier: 0.05578435172641326
+  ece: 0.19852192898659388
+  emd: 0.49642181637281246
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 2
+  predicted:
+    賛成: 0.03450342068434036
+    条件付き賛成: 0.3796576596753307
+    中立: 0.019083538685020936
+    条件付き反対: 0.38968096707904254
+    反対: 0.1770744138762655
+  actual: *id001
+  jsd: 0.1465177548098634
+  brier: 0.040469127111477037
+  ece: 0.17856521625225552
+  emd: 0.5034874545069041
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.07732265520910941
+    条件付き賛成: 0.7138441818554153
+    中立: 0.0
+    条件付き反対: 0.20883316293547524
+    反対: 0.0
+  actual: *id002
+  jsd: 0.1838576894895775
+  brier: 0.059877675214083215
+  ece: 0.20507093791635622
+  emd: 0.53501101891994
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.07645492356786386
+    条件付き賛成: 0.6887067807755277
+    中立: 0.0
+    条件付き反対: 0.21001336824260738
+    反対: 0.024824927414001115
+  actual: *id002
+  jsd: 0.15856687959272148
+  brier: 0.055003614135255154
+  ece: 0.19548805960725402
+  emd: 0.4887201490181352
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.11050787260656904
+    条件付き賛成: 0.7356604678802954
+    中立: 0.0
+    条件付き反対: 0.138797851329583
+    反対: 0.015033808183552683
+  actual: *id002
+  jsd: 0.15259134653799641
+  brier: 0.05863605463515977
+  ece: 0.18226418715211812
+  emd: 0.5967950001836072
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.018386961803533303
+    条件付き賛成: 0.5981619337674797
+    中立: 0.0015527401154965014
+    条件付き反対: 0.29432701805393546
+    反対: 0.08757134625955501
+  actual: *id003
+  jsd: 0.15668097887482893
+  brier: 0.04678388017060296
+  ece: 0.16499558072856607
+  emd: 0.5486922231944342
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.07054705259800997
+    条件付き賛成: 0.5239071819402685
+    中立: 0.031375772820836985
+    条件付き反対: 0.3680155050756814
+    反対: 0.006154487565203188
+  actual: *id003
+  jsd: 0.13785693789376438
+  brier: 0.03763439448231707
+  ece: 0.16476907480637998
+  emd: 0.5635827017341808
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.01304395433441904
+    条件付き賛成: 0.632139405220418
+    中立: 0.0
+    条件付き反対: 0.34196102664653333
+    反対: 0.012855613798629595
+  actual: *id003
+  jsd: 0.2062090988230023
+  brier: 0.057067869271949824
+  ece: 0.19764017274678056
+  emd: 0.6844671509766255
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.1414808363614375
+    条件付き賛成: 0.41910108514560296
+    中立: 0.0
+    条件付き反対: 0.24796024574733896
+    反対: 0.19145783274562053
+  actual: *id004
+  jsd: 0.10016328283465409
+  brier: 0.01976744387209188
+  ece: 0.10081590170106441
+  emd: 0.2929386691070581
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.14574192194235897
+    条件付き賛成: 0.44678150066816663
+    中立: 0.0
+    条件付き反対: 0.16728681289299815
+    反対: 0.24018976449647633
+  actual: *id004
+  jsd: 0.1125889179817976
+  brier: 0.024943725796826084
+  ece: 0.12278850606585719
+  emd: 0.3709785316598866
+- condition_id: '2'
+  condition_label: current_swarm_pure
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.14618937396617604
+    条件付き賛成: 0.4522458682634782
+    中立: 0.0
+    条件付き反対: 0.18275192301566087
+    反対: 0.218812834754685
+  actual: *id004
+  jsd: 0.10997993703561468
+  brier: 0.024330048312771472
+  ece: 0.11642348120726526
+  emd: 0.3618726931801694
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.007297734450246428
+    条件付き賛成: 0.4762187096677816
+    中立: 0.0008729153673961578
+    条件付き反対: 0.3870338104503507
+    反対: 0.12857683006422507
+  actual: *id001
+  jsd: 0.206763491714404
+  brier: 0.05229739881423405
+  ece: 0.19673174007294297
+  emd: 0.5004061802465825
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.028710714031363067
+    条件付き賛成: 0.5123756815082222
+    中立: 0.0
+    条件付き反対: 0.38971053038868997
+    反対: 0.06920307407172471
+  actual: *id001
+  jsd: 0.20250081828456046
+  brier: 0.056269698305635274
+  ece: 0.20883448475876487
+  emd: 0.5220862118969122
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.007891765685064353
+    条件付き賛成: 0.4238654091373778
+    中立: 0.0
+    条件付き反対: 0.45342911380458223
+    反対: 0.11481371137297565
+  actual: *id001
+  jsd: 0.21142014259860487
+  brier: 0.05352016990680723
+  ece: 0.19891780917678403
+  emd: 0.4972945229419601
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 0
+  predicted:
+    賛成: 0.0
+    条件付き賛成: 0.4648565321495116
+    中立: 0.0
+    条件付き反対: 0.49839840820980635
+    反対: 0.03674505964068209
+  actual: *id001
+  jsd: 0.2509230145828768
+  brier: 0.06469158281340746
+  ece: 0.2333019761437272
+  emd: 0.5832549403593181
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 1
+  predicted:
+    賛成: 0.004010731721891201
+    条件付き賛成: 0.41042511777087026
+    中立: 0.0
+    条件付き反対: 0.5017299864805308
+    反対: 0.08383416402670783
+  actual: *id001
+  jsd: 0.2250172478486735
+  brier: 0.058581949706734374
+  ece: 0.21286204170056044
+  emd: 0.5321551042514011
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 2
+  predicted:
+    賛成: 0.02063561547938562
+    条件付き賛成: 0.449546597344091
+    中立: 0.0
+    条件付き反対: 0.48029225973908013
+    反対: 0.04952552743744328
+  actual: *id001
+  jsd: 0.21655082813969243
+  brier: 0.05933014815411699
+  ece: 0.21993554283326844
+  emd: 0.5498388570831713
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 0
+  predicted:
+    賛成: 0.01998372020594487
+    条件付き賛成: 0.5444746418264972
+    中立: 2.388335743274932e-14
+    条件付き反対: 0.3655040305923212
+    反対: 0.0700376073752128
+  actual: *id001
+  jsd: 0.21026215779293908
+  brier: 0.05899499958315061
+  ece: 0.21199146896752735
+  emd: 0.5299786724188185
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 1
+  predicted:
+    賛成: 0.02734702315985344
+    条件付き賛成: 0.568269456387435
+    中立: 0.0
+    条件付き反対: 0.3903387390490812
+    反対: 0.014044781403630448
+  actual: *id001
+  jsd: 0.2344735980708275
+  brier: 0.06572700774564166
+  ece: 0.23144327817460647
+  emd: 0.5786081954365161
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 2
+  predicted:
+    賛成: 0.002694740725037267
+    条件付き賛成: 0.667857663525219
+    中立: 0.0
+    条件付き反対: 0.2520068931113042
+    反対: 0.07744070263843958
+  actual: *id001
+  jsd: 0.239303900513205
+  brier: 0.07401718383535871
+  ece: 0.2159458226546093
+  emd: 0.5398645566365233
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.09273489998853078
+    条件付き賛成: 0.6464900127366418
+    中立: 0.0
+    条件付き反対: 0.2470128553674423
+    反対: 0.013762231907385113
+  actual: *id002
+  jsd: 0.15395258628352257
+  brier: 0.04850089334492007
+  ece: 0.19340114724163363
+  emd: 0.4835028681040841
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.044077530112070815
+    条件付き賛成: 0.6520239971461136
+    中立: 0.0
+    条件付き反対: 0.25690742890895024
+    反対: 0.0469910438328654
+  actual: *id002
+  jsd: 0.17174105885988353
+  brier: 0.05448913557155384
+  ece: 0.19957257042202553
+  emd: 0.49893142605506385
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.08015752639185306
+    条件付き賛成: 0.6775443864051464
+    中立: 0.0
+    条件付き反対: 0.18503232571863487
+    反対: 0.05726576148436576
+  actual: *id002
+  jsd: 0.14442825782210708
+  brier: 0.05149131739408162
+  ece: 0.18103068484951246
+  emd: 0.45257671212378126
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.09462309000623478
+    条件付き賛成: 0.4657212479818172
+    中立: 0.008876803300376154
+    条件付き反対: 0.39905475918806754
+    反対: 0.03172409952350436
+  actual: *id003
+  jsd: 0.12896586170056534
+  brier: 0.03241426982293108
+  ece: 0.15391040286795388
+  emd: 0.4232182897467409
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.03901913611894903
+    条件付き賛成: 0.5502780497541736
+    中立: 0.01289118249901084
+    条件付き反対: 0.34236015214533166
+    反対: 0.05545147948253494
+  actual: *id003
+  jsd: 0.13164317456024732
+  brier: 0.039928824272862595
+  ece: 0.16505528075980208
+  emd: 0.517014938643772
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.02851931887885482
+    条件付き賛成: 0.4687183930699231
+    中立: 0.013139265387922299
+    条件付き反対: 0.40450359344268594
+    反対: 0.0851194292206139
+  actual: *id003
+  jsd: 0.11629576375545214
+  brier: 0.03122558524491472
+  ece: 0.15728879460504358
+  emd: 0.39322198651260903
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.12620893658798663
+    条件付き賛成: 0.46628872110720365
+    中立: 0.0
+    条件付き反対: 0.26196974129855005
+    反対: 0.14553260100625973
+  actual: *id004
+  jsd: 0.10598698943699311
+  brier: 0.023701974110520573
+  ece: 0.09930338496230148
+  emd: 0.28567165097210756
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.07985453018079222
+    条件付き賛成: 0.5250721962303793
+    中立: 0.0
+    条件付き反対: 0.25585212001333657
+    反対: 0.13922115357549195
+  actual: *id004
+  jsd: 0.11774201430302081
+  brier: 0.030545933805389808
+  ece: 0.12202887849215172
+  emd: 0.350777769066059
+- condition_id: '3'
+  condition_label: per_agent_anchor
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.13162509331388472
+    条件付き賛成: 0.5046715467966686
+    中立: 0.00494943107928463
+    条件付き反対: 0.22878449207980278
+    反対: 0.12996943673035932
+  actual: *id004
+  jsd: 0.10292385981450108
+  brier: 0.027659608993024838
+  ece: 0.11386861871866744
+  emd: 0.39919836788391694
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.021156561963849786
+    条件付き賛成: 0.5265241878079305
+    中立: 0.0
+    条件付き反対: 0.37895406246348873
+    反対: 0.073365187764731
+  actual: *id001
+  jsd: 0.20758085184259498
+  brier: 0.0574952402863097
+  ece: 0.21019130010856774
+  emd: 0.5254782502714194
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.011811562318522312
+    条件付き賛成: 0.561416002590093
+    中立: 0.0
+    条件付き反対: 0.3949476972310291
+    反対: 0.03182473786035539
+  actual: *id001
+  jsd: 0.23512951125481846
+  brier: 0.06523899212707339
+  ece: 0.23054547992844887
+  emd: 0.5763636998211223
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.0
+    条件付き賛成: 0.511231580841026
+    中立: 0.01217009155002867
+    条件付き反対: 0.402682435225509
+    反対: 0.07391589238343628
+  actual: *id001
+  jsd: 0.21069418743111756
+  brier: 0.05704107117777964
+  ece: 0.21356560642661404
+  emd: 0.5339140160665351
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 0
+  predicted:
+    賛成: 0.08402190230878351
+    条件付き賛成: 0.4478607210261873
+    中立: 0.011734434028955108
+    条件付き反対: 0.31595531005896205
+    反対: 0.1404276325771121
+  actual: *id001
+  jsd: 0.1383560970472935
+  brier: 0.039822554806043686
+  ece: 0.16169746546490457
+  emd: 0.42467129623937344
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 1
+  predicted:
+    賛成: 3.0772107656920186e-05
+    条件付き賛成: 0.5229383223685267
+    中立: 0.0
+    条件付き反対: 0.3800501562409341
+    反対: 0.0969807492828824
+  actual: *id001
+  jsd: 0.22939948673483945
+  brier: 0.05796597605688473
+  ece: 0.2091953914437843
+  emd: 0.5229884786094608
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 2
+  predicted:
+    賛成: 0.014537214459288543
+    条件付き賛成: 0.4789364360222553
+    中立: 0.0
+    条件付き反対: 0.3975393411027975
+    反対: 0.10898700841565871
+  actual: *id001
+  jsd: 0.20439790441490296
+  brier: 0.05322007050366451
+  ece: 0.1985903108500211
+  emd: 0.4964757771250528
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 0
+  predicted:
+    賛成: 0.014255897480250286
+    条件付き賛成: 0.6533994713238669
+    中立: 2.453833811107647e-11
+    条件付き反対: 0.1413028078119766
+    反対: 0.19104182335936792
+  actual: *id001
+  jsd: 0.22268930509922263
+  brier: 0.07060839105958758
+  ece: 0.19429764099808455
+  emd: 0.5567859258545793
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 1
+  predicted:
+    賛成: 0.024291706550206866
+    条件付き賛成: 0.7014204589690033
+    中立: 0.0
+    条件付き反対: 0.15816689488045185
+    反対: 0.11612093960033808
+  actual: *id001
+  jsd: 0.22074495121198925
+  brier: 0.07804335666069813
+  ece: 0.2005681835876013
+  emd: 0.5310116848878754
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 2
+  predicted:
+    賛成: 0.00014012340696461763
+    条件付き賛成: 0.627643299847846
+    中立: 0.0
+    条件付き反対: 0.2576813785153448
+    反対: 0.11453519822984466
+  actual: *id001
+  jsd: 0.23428001847272753
+  brier: 0.06678020702873316
+  ece: 0.20212987134527632
+  emd: 0.5053246783631906
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.10518773494689253
+    条件付き賛成: 0.7336015713202563
+    中立: 0.0
+    条件付き反対: 0.14233220477395495
+    反対: 0.018878488958896215
+  actual: *id002
+  jsd: 0.1520681615381885
+  brier: 0.05867955664639901
+  ece: 0.18144062852810253
+  emd: 0.5835123886285088
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.15947120438748427
+    条件付き賛成: 0.6671926438875868
+    中立: 0.0
+    条件付き反対: 0.14157281776649464
+    反対: 0.03176333395843439
+  actual: *id002
+  jsd: 0.11837157430880091
+  brier: 0.04244896096418174
+  ece: 0.1548770575550347
+  emd: 0.4920931582042237
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.14953682289980144
+    条件付き賛成: 0.7055553706093743
+    中立: 0.0
+    条件付き反対: 0.12031434346866456
+    反対: 0.024593463022159603
+  actual: *id002
+  jsd: 0.1301732681929309
+  brier: 0.04963093716989282
+  ece: 0.17022214824374976
+  emd: 0.5660541010963906
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.007519694777403962
+    条件付き賛成: 0.6287539944193438
+    中立: 0.0
+    条件付き反対: 0.33834140378558786
+    反対: 0.025384907017664448
+  actual: *id003
+  jsd: 0.19987868023242397
+  brier: 0.055839967819713954
+  ece: 0.19483815928197265
+  emd: 0.659642776598427
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.05969792074734704
+    条件付き賛成: 0.609557510432344
+    中立: 0.012334650371273655
+    条件付き反対: 0.2737051559029609
+    反対: 0.04470476254607449
+  actual: *id003
+  jsd: 0.14239505275182396
+  brier: 0.0483169903897226
+  ece: 0.1638230041729376
+  emd: 0.6664428294372342
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.005740337253451201
+    条件付き賛成: 0.7305461652684037
+    中立: 0.0
+    条件付き反対: 0.18729352620844497
+    反対: 0.07641997126970027
+  actual: *id003
+  jsd: 0.20624605203483987
+  brier: 0.07404316591242587
+  ece: 0.21221846610736145
+  emd: 0.810412696520558
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.09395136917763203
+    条件付き賛成: 0.632071830164404
+    中立: 0.0
+    条件付き反対: 0.10869248851850881
+    反対: 0.16528431213945521
+  actual: *id004
+  jsd: 0.15195685591946334
+  brier: 0.050200722273654054
+  ece: 0.16482873206576162
+  emd: 0.5633793416458953
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.24866426160698127
+    条件付き賛成: 0.5662116935371907
+    中立: 0.0
+    条件付き反対: 0.08310022251113787
+    反対: 0.10202382234469018
+  actual: *id004
+  jsd: 0.16126784028200147
+  brier: 0.045734359481577676
+  ece: 0.18995038205766882
+  emd: 0.8963923495506352
+- condition_id: 3b
+  condition_label: random_unrelated_anchor
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.09260775618631457
+    条件付き賛成: 0.5400902422439504
+    中立: 0.0
+    条件付き反対: 0.21146777097937244
+    反対: 0.15583423059036253
+  actual: *id004
+  jsd: 0.12010080869976807
+  brier: 0.03263616581788483
+  ece: 0.1280360968975802
+  emd: 0.3769540100838529
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.0
+    条件付き賛成: 0.5171039785549182
+    中立: 0.00997067861470086
+    条件付き反対: 0.3789646436989947
+    反対: 0.09396069913138626
+  actual: *id001
+  jsd: 0.20913978429610888
+  brier: 0.05578796944981983
+  ece: 0.20642744890156514
+  emd: 0.5160686222539128
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.0
+    条件付き賛成: 0.44442729241782986
+    中立: 0.009413547101003599
+    条件付き反対: 0.4396634444789806
+    反対: 0.10649571600218598
+  actual: *id001
+  jsd: 0.20679060280836856
+  brier: 0.05317026065240277
+  ece: 0.2016362947587242
+  emd: 0.5040907368968106
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.0
+    条件付き賛成: 0.5321331685350316
+    中立: 0.0
+    条件付き反対: 0.3069799105754317
+    反対: 0.1608869208895367
+  actual: *id001
+  jsd: 0.22223395993330494
+  brier: 0.0546216159261383
+  ece: 0.2
+  emd: 0.5408869208895367
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 0
+  predicted:
+    賛成: 0.0
+    条件付き賛成: 0.5114004351758653
+    中立: 0.003930511355335717
+    条件付き反対: 0.45377810376080674
+    反対: 0.03089094970799221
+  actual: *id001
+  jsd: 0.24372438963782292
+  brier: 0.06442583898826086
+  ece: 0.23407141557466882
+  emd: 0.585178538936672
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 1
+  predicted:
+    賛成: 0.018338922509817238
+    条件付き賛成: 0.5207954000285144
+    中立: 0.0016363546920328909
+    条件付き反対: 0.35078007204541156
+    反対: 0.10844925072422384
+  actual: *id001
+  jsd: 0.1971274826712675
+  brier: 0.05418016203885068
+  ece: 0.19663018882957042
+  emd: 0.491575472073926
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 43
+  run_index: 2
+  predicted:
+    賛成: 0.0015252830842522572
+    条件付き賛成: 0.37033304122442917
+    中立: 0.029369473191965832
+    条件付き反対: 0.5060105966228737
+    反対: 0.09276160587647897
+  actual: *id001
+  jsd: 0.182183954500581
+  brier: 0.052177372088400474
+  ece: 0.19853745513892118
+  emd: 0.49634363784730295
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 0
+  predicted:
+    賛成: 0.0
+    条件付き賛成: 0.6188644460206028
+    中立: 0.0032135042504247966
+    条件付き反対: 0.3190087454535413
+    反対: 0.05891330427543114
+  actual: *id001
+  jsd: 0.23656623438595598
+  brier: 0.068252662696306
+  ece: 0.2231492765896576
+  emd: 0.5578731914741442
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 1
+  predicted:
+    賛成: 0.0020259765466291405
+    条件付き賛成: 0.5449150805944986
+    中立: 0.0
+    条件付き反対: 0.39816905506525135
+    反対: 0.0548898877936209
+  actual: *id001
+  jsd: 0.23740824862988563
+  brier: 0.06303995754761602
+  ece: 0.22523365426389996
+  emd: 0.5630841356597499
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: boj_living_2024_economy_金利政策
+  theme: 金利政策
+  source: 日本銀行「生活意識に関するアンケート調査」2024年
+  source_origin: same_source_as_train
+  seed: 44
+  run_index: 2
+  predicted:
+    賛成: 0.0
+    条件付き賛成: 0.439504039469334
+    中立: 0.0032395380213238057
+    条件付き反対: 0.39690797624689855
+    反対: 0.16034844626244368
+  actual: *id001
+  jsd: 0.2105333152630165
+  brier: 0.04975641403782232
+  ece: 0.1987041847914705
+  emd: 0.5371089082411198
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.15254689899978438
+    条件付き賛成: 0.5944952656616885
+    中立: 0.060000000000000005
+    条件付き反対: 0.14673754667172564
+    反対: 0.04622028866680148
+  actual: *id002
+  jsd: 0.06264282677155586
+  brier: 0.029638361562244746
+  ece: 0.1257981062646754
+  emd: 0.38531714165636005
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.1315909614286282
+    条件付き賛成: 0.5404947495803311
+    中立: 0.06
+    条件付き反対: 0.19308587480551426
+    反対: 0.07482841418552645
+  actual: *id002
+  jsd: 0.06013963777339022
+  brier: 0.02557400546093866
+  ece: 0.10419789983213243
+  emd: 0.3235806243858454
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: cabinet_aging_2023_economy_老後の生活設計
+  theme: 老後の生活設計
+  source: 内閣府「高齢社会に関する世論調査」2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.1520703721163485
+    条件付き賛成: 0.5637090617196135
+    中立: 0.06
+    条件付き反対: 0.179012781474567
+    反対: 0.045207784689470995
+  actual: *id002
+  jsd: 0.06006294346293446
+  brier: 0.026435112919256532
+  ece: 0.1134836246878454
+  emd: 0.3327218431941806
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.03673934878013391
+    条件付き賛成: 0.6344833206326802
+    中立: 0.0
+    条件付き反対: 0.29937255068986934
+    反対: 0.029404779897316602
+  actual: *id003
+  jsd: 0.1812485751238455
+  brier: 0.055083995507343095
+  ece: 0.18154234852901982
+  emd: 0.6963012101481778
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.014802697449994491
+    条件付き賛成: 0.6479212906648335
+    中立: 0.03791355359902961
+    条件付き反対: 0.27787877227992136
+    反対: 0.021483686006220963
+  actual: *id003
+  jsd: 0.15644626137783837
+  brier: 0.05498686377379567
+  ece: 0.17916851626593344
+  emd: 0.7470751463724702
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: cabinet_social_2024_economy_暮らし向き
+  theme: 暮らし向き
+  source: 内閣府「社会意識に関する世論調査」2024年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.14038231726960404
+    条件付き賛成: 0.5662921870180565
+    中立: 0.030260934923598444
+    条件付き反対: 0.24750029588278463
+    反対: 0.01556426490595639
+  actual: *id003
+  jsd: 0.13456664885968325
+  brier: 0.04179851631618581
+  ece: 0.16266980171506423
+  emd: 0.7884279958625672
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 0
+  predicted:
+    賛成: 0.2950349888652219
+    条件付き賛成: 0.31705030925198435
+    中立: 0.0
+    条件付き反対: 0.0959428910402835
+    反対: 0.2919718108425103
+  actual: *id004
+  jsd: 0.13604403203158946
+  brier: 0.02839746074204515
+  ece: 0.1616228435838866
+  emd: 0.6111773959421447
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 1
+  predicted:
+    賛成: 0.23230508042088086
+    条件付き賛成: 0.36248428976580543
+    中立: 0.0
+    条件付き反対: 0.1445735700273716
+    反対: 0.2606370597859421
+  actual: *id004
+  jsd: 0.11551469229920361
+  brier: 0.02279305649139838
+  ece: 0.14217057198905136
+  emd: 0.4825208805801956
+- condition_id: '4'
+  condition_label: production_blend
+  survey_id: nhk_consciousness_2023_economy_家計の余裕
+  theme: 家計の余裕
+  source: NHK放送文化研究所「日本人の意識」調査 2023年
+  source_origin: cross_source
+  seed: 42
+  run_index: 2
+  predicted:
+    賛成: 0.2667595103256254
+    条件付き賛成: 0.3333366106663535
+    中立: 0.010445021799288374
+    条件付き反対: 0.20970008887629532
+    反対: 0.17975876833243737
+  actual: *id004
+  jsd: 0.08685181557171563
+  brier: 0.01799990383803013
+  ece: 0.09182199128028463
+  emd: 0.457155542441309
+summary:
+  status: completed
+  by_condition:
+    '0':
+      n: 18
+      mean_jsd: 0.01264069743954232
+      jsd_ci95:
+      - 0.01032871566289447
+      - 0.015196715773890979
+      mean_emd: 0.29277777777777775
+      emd_ci95:
+      - 0.23907407407407405
+      - 0.35259259259259257
+      mean_brier: 0.00433111111111111
+      brier_ci95:
+      - 0.00356
+      - 0.0052081481481481475
+      mean_ece: 0.012000000000000004
+      ece_ci95:
+      - 0.009333333333333336
+      - 0.014888888888888892
+    '1':
+      n: 18
+      mean_jsd: 0.01808313129008372
+      jsd_ci95:
+      - 0.014239684029812648
+      - 0.023039753882002703
+      mean_emd: 0.3633333333333334
+      emd_ci95:
+      - 0.3005555555555556
+      - 0.42944444444444446
+      mean_brier: 0.005973333333333334
+      brier_ci95:
+      - 0.004904444444444444
+      - 0.007317777777777778
+      mean_ece: 0.03844444444444445
+      ece_ci95:
+      - 0.026666666666666672
+      - 0.051777777777777784
+    '2':
+      n: 18
+      mean_jsd: 0.1791295915662424
+      jsd_ci95:
+      - 0.15816643352380008
+      - 0.19969005781634128
+      mean_emd: 0.5095646255218264
+      emd_ci95:
+      - 0.46520925994002016
+      - 0.5493928789409265
+      mean_brier: 0.04968137799766384
+      brier_ci95:
+      - 0.04289350369848372
+      - 0.05572293217176215
+      mean_ece: 0.18401214437822952
+      ece_ci95:
+      - 0.16670391195669193
+      - 0.19921961499184002
+    '3':
+      n: 18
+      mean_jsd: 0.17616082033789315
+      jsd_ci95:
+      - 0.15451640741341954
+      - 0.19923235251379431
+      mean_emd: 0.4798667361321854
+      emd_ci95:
+      - 0.442935736579757
+      - 0.5143790952912615
+      mean_brier: 0.049077093412515864
+      brier_ci95:
+      - 0.04267284787394999
+      - 0.05572309776531982
+      mean_ece: 0.1841902181889935
+      ece_ci95:
+      - 0.1652530908234956
+      - 0.2006008814431608
+    3b:
+      n: 18
+      mean_jsd: 0.18254058930387485
+      jsd_ci95:
+      - 0.16262857526736968
+      - 0.20018641184550653
+      mean_emd: 0.5715498588335741
+      emd_ci95:
+      - 0.5213721609331057
+      - 0.6308626058907658
+      mean_brier: 0.055763704787901505
+      brier_ci95:
+      - 0.0501654206262519
+      - 0.06074960001706878
+      mean_ece: 0.1878342180590818
+      ece_ci95:
+      - 0.17597197017993135
+      - 0.19871367561883768
+    '4':
+      n: 18
+      mean_jsd: 0.1632903002998927
+      jsd_ci95:
+      - 0.13407961287764836
+      - 0.19202256403773207
+      mean_emd: 0.5342493302698014
+      emd_ci95:
+      - 0.4796387815550652
+      - 0.5898551620858696
+      mean_brier: 0.045451085002047524
+      brier_ci95:
+      - 0.03817446829060839
+      - 0.052696408319462984
+      mean_ece: 0.17482586794424282
+      ece_ci95:
+      - 0.1563159956443706
+      - 0.19449039038225208
+  cases:
+  - condition_id: '0'
+    survey_id: boj_living_2024_economy_金利政策
+    theme: 金利政策
+    source_origin: same_source_as_train
+    n: 9
+    mean_jsd: 0.010065738457570916
+    jsd_ci95:
+    - 0.010065738457570916
+    - 0.010065738457570916
+    mean_emd: 0.21
+    emd_ci95:
+    - 0.21
+    - 0.21
+    mean_brier: 0.003924444444444444
+    brier_ci95:
+    - 0.003924444444444444
+    - 0.003924444444444444
+    mean_ece: 0.012000000000000005
+    ece_ci95:
+    - 0.012000000000000005
+    - 0.012000000000000005
+  - condition_id: '0'
+    survey_id: cabinet_aging_2023_economy_老後の生活設計
+    theme: 老後の生活設計
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.024332094925443346
+    jsd_ci95:
+    - 0.024332094925443346
+    - 0.024332094925443346
+    mean_emd: 0.5533333333333332
+    emd_ci95:
+    - 0.5533333333333332
+    - 0.5533333333333332
+    mean_brier: 0.00827111111111111
+    brier_ci95:
+    - 0.00827111111111111
+    - 0.00827111111111111
+    mean_ece: 0.02400000000000001
+    ece_ci95:
+    - 0.02400000000000001
+    - 0.02400000000000001
+  - condition_id: '0'
+    survey_id: cabinet_social_2024_economy_暮らし向き
+    theme: 暮らし向き
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.013274999072229463
+    jsd_ci95:
+    - 0.013274999072229463
+    - 0.013274999072229463
+    mean_emd: 0.33666666666666667
+    emd_ci95:
+    - 0.33666666666666667
+    - 0.33666666666666667
+    mean_brier: 0.0036577777777777785
+    brier_ci95:
+    - 0.0036577777777777785
+    - 0.0036577777777777785
+    mean_ece: 0.007999999999999986
+    ece_ci95:
+    - 0.007999999999999986
+    - 0.007999999999999986
+  - condition_id: '0'
+    survey_id: nhk_consciousness_2023_economy_家計の余裕
+    theme: 家計の余裕
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.008039875266868366
+    jsd_ci95:
+    - 0.008039875266868366
+    - 0.008039875266868366
+    mean_emd: 0.23666666666666672
+    emd_ci95:
+    - 0.23666666666666672
+    - 0.23666666666666672
+    mean_brier: 0.0022844444444444444
+    brier_ci95:
+    - 0.0022844444444444444
+    - 0.0022844444444444444
+    mean_ece: 0.0040000000000000036
+    ece_ci95:
+    - 0.0040000000000000036
+    - 0.0040000000000000036
+  - condition_id: '1'
+    survey_id: boj_living_2024_economy_金利政策
+    theme: 金利政策
+    source_origin: same_source_as_train
+    n: 9
+    mean_jsd: 0.014790938035923054
+    jsd_ci95:
+    - 0.013251842365507568
+    - 0.01640043061185841
+    mean_emd: 0.3011111111111112
+    emd_ci95:
+    - 0.26000000000000006
+    - 0.34333333333333343
+    mean_brier: 0.0050799999999999994
+    brier_ci95:
+    - 0.004715555555555555
+    - 0.005493333333333333
+    mean_ece: 0.026222222222222227
+    ece_ci95:
+    - 0.01466666666666667
+    - 0.03911111111111112
+  - condition_id: '1'
+    survey_id: cabinet_aging_2023_economy_老後の生活設計
+    theme: 老後の生活設計
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.011557967297641211
+    jsd_ci95:
+    - 0.01089831563550382
+    - 0.012502410015385735
+    mean_emd: 0.22999999999999998
+    emd_ci95:
+    - 0.21000000000000008
+    - 0.2433333333333333
+    mean_brier: 0.0048
+    brier_ci95:
+    - 0.004586666666666666
+    - 0.005119999999999999
+    mean_ece: 0.03866666666666666
+    ece_ci95:
+    - 0.028
+    - 0.046666666666666655
+  - condition_id: '1'
+    survey_id: cabinet_social_2024_economy_暮らし向き
+    theme: 暮らし向き
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.03387804553117572
+    jsd_ci95:
+    - 0.023431450272707585
+    - 0.044324640789643856
+    mean_emd: 0.5966666666666666
+    emd_ci95:
+    - 0.4833333333333332
+    - 0.71
+    mean_brier: 0.009920000000000002
+    brier_ci95:
+    - 0.0068400000000000015
+    - 0.013000000000000003
+    mean_ece: 0.06933333333333334
+    ece_ci95:
+    - 0.038666666666666676
+    - 0.10000000000000002
+  - condition_id: '1'
+    survey_id: nhk_consciousness_2023_economy_家計の余裕
+    theme: 家計の余裕
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.018689960803916224
+    jsd_ci95:
+    - 0.018689960803916224
+    - 0.018689960803916224
+    mean_emd: 0.45
+    emd_ci95:
+    - 0.45
+    - 0.45
+    mean_brier: 0.005880000000000001
+    brier_ci95:
+    - 0.005880000000000001
+    - 0.005880000000000001
+    mean_ece: 0.04400000000000001
+    ece_ci95:
+    - 0.04400000000000001
+    - 0.04400000000000001
+  - condition_id: '2'
+    survey_id: boj_living_2024_economy_金利政策
+    theme: 金利政策
+    source_origin: same_source_as_train
+    n: 9
+    mean_jsd: 0.21175973101426726
+    jsd_ci95:
+    - 0.1903088843499072
+    - 0.23302667617560965
+    mean_emd: 0.5254561246020931
+    emd_ci95:
+    - 0.5039566452078762
+    - 0.5493701313396172
+    mean_brier: 0.05669112200743241
+    brier_ci95:
+    - 0.051032374530860035
+    - 0.06276379159905705
+    mean_ece: 0.2068847440973877
+    ece_ci95:
+    - 0.1958575262931267
+    - 0.2188643157770356
+  - condition_id: '2'
+    survey_id: cabinet_aging_2023_economy_老後の生活設計
+    theme: 老後の生活設計
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.16500530520676512
+    jsd_ci95:
+    - 0.15458319088957143
+    - 0.1838576894895775
+    mean_emd: 0.5401753893738941
+    emd_ci95:
+    - 0.4887201490181352
+    - 0.5762003397623848
+    mean_brier: 0.05783911466149938
+    brier_ci95:
+    - 0.055003614135255154
+    - 0.059877675214083215
+    mean_ece: 0.19427439489190945
+    ece_ci95:
+    - 0.18667214463716342
+    - 0.20507093791635622
+  - condition_id: '2'
+    survey_id: cabinet_social_2024_economy_暮らし向き
+    theme: 暮らし向き
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.16691567186386522
+    jsd_ci95:
+    - 0.13785693789376438
+    - 0.1896997255069445
+    mean_emd: 0.5989140253017468
+    emd_ci95:
+    - 0.5486922231944342
+    - 0.6441723345624772
+    mean_brier: 0.04716204797495662
+    brier_ci95:
+    - 0.03763439448231707
+    - 0.053639872904834206
+    mean_ece: 0.1758016094272422
+    ece_ci95:
+    - 0.16476907480637998
+    - 0.18675864207404239
+  - condition_id: '2'
+    survey_id: nhk_consciousness_2023_economy_家計の余裕
+    theme: 家計の余裕
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.10757737928402211
+    jsd_ci95:
+    - 0.10016328283465409
+    - 0.1125889179817976
+    mean_emd: 0.3419299646490381
+    emd_ci95:
+    - 0.2929386691070581
+    - 0.3709785316598866
+    mean_brier: 0.023013739327229814
+    brier_ci95:
+    - 0.01976744387209188
+    - 0.024943725796826088
+    mean_ece: 0.11334262965806229
+    ece_ci95:
+    - 0.10081590170106441
+    - 0.12278850606585719
+  - condition_id: '3'
+    survey_id: boj_living_2024_economy_金利政策
+    theme: 金利政策
+    source_origin: same_source_as_train
+    n: 9
+    mean_jsd: 0.2219127999495315
+    jsd_ci95:
+    - 0.21202775544358707
+    - 0.2316822519809302
+    mean_emd: 0.5370541379190226
+    emd_ci95:
+    - 0.5191225285287149
+    - 0.5545859635060668
+    mean_brier: 0.060381126540565155
+    brier_ci95:
+    - 0.056205218373962404
+    - 0.06439441478695568
+    mean_ece: 0.21444046272031012
+    ece_ci95:
+    - 0.20680684170064312
+    - 0.22172207019510218
+  - condition_id: '3'
+    survey_id: cabinet_aging_2023_economy_老後の生活設計
+    theme: 老後の生活設計
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.15670730098850438
+    jsd_ci95:
+    - 0.14760303397591223
+    - 0.17174105885988353
+    mean_emd: 0.4783370020943097
+    emd_ci95:
+    - 0.46288543078388217
+    - 0.49893142605506385
+    mean_brier: 0.051493782103518515
+    brier_ci95:
+    - 0.04850089334492006
+    - 0.05448913557155385
+    mean_ece: 0.1913348008377239
+    ece_ci95:
+    - 0.18515417231355283
+    - 0.19957257042202556
+  - condition_id: '3'
+    survey_id: cabinet_social_2024_economy_暮らし向き
+    theme: 暮らし向き
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.12563493333875494
+    jsd_ci95:
+    - 0.12051912973715655
+    - 0.13164317456024732
+    mean_emd: 0.444485071634374
+    emd_ci95:
+    - 0.4032207542573197
+    - 0.517014938643772
+    mean_brier: 0.034522893113569465
+    brier_ci95:
+    - 0.03162181343758684
+    - 0.039928824272862595
+    mean_ece: 0.1587514927442665
+    ece_ci95:
+    - 0.15391040286795388
+    - 0.16505528075980208
+  - condition_id: '3'
+    survey_id: nhk_consciousness_2023_economy_家計の余裕
+    theme: 家計の余裕
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.108884287851505
+    jsd_ci95:
+    - 0.10394490302199844
+    - 0.11774201430302082
+    mean_emd: 0.34521592930736117
+    emd_ci95:
+    - 0.28567165097210756
+    - 0.3830581682779643
+    mean_brier: 0.02730250563631174
+    brier_ci95:
+    - 0.02370197411052057
+    - 0.030545933805389808
+    mean_ece: 0.1117336273910402
+    ece_ci95:
+    - 0.09930338496230147
+    - 0.12202887849215172
+  - condition_id: 3b
+    survey_id: boj_living_2024_economy_金利政策
+    theme: 金利政策
+    source_origin: same_source_as_train
+    n: 9
+    mean_jsd: 0.21147470150105627
+    jsd_ci95:
+    - 0.1919884128633368
+    - 0.22551203920618418
+    mean_emd: 0.5192237563598455
+    emd_ci95:
+    - 0.49178475418309
+    - 0.5430127029521112
+    mean_brier: 0.06069065107853051
+    brier_ci95:
+    - 0.05419947353943174
+    - 0.06727966492844657
+    mean_ece: 0.2023090277948114
+    ece_ci95:
+    - 0.1912546441319794
+    - 0.21243289271160382
+  - condition_id: 3b
+    survey_id: cabinet_aging_2023_economy_老後の生活設計
+    theme: 老後の生活設計
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.13353766801330677
+    jsd_ci95:
+    - 0.11837157430880091
+    - 0.1520681615381885
+    mean_emd: 0.5472198826430411
+    emd_ci95:
+    - 0.4920931582042238
+    - 0.5835123886285088
+    mean_brier: 0.0502531515934912
+    brier_ci95:
+    - 0.04244896096418174
+    - 0.05867955664639901
+    mean_ece: 0.16884661144229565
+    ece_ci95:
+    - 0.1548770575550347
+    - 0.18144062852810253
+  - condition_id: 3b
+    survey_id: cabinet_social_2024_economy_暮らし向き
+    theme: 暮らし向き
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.18283992833969595
+    jsd_ci95:
+    - 0.14239505275182396
+    - 0.20412359476736788
+    mean_emd: 0.7121661008520731
+    emd_ci95:
+    - 0.659642776598427
+    - 0.7624227408261168
+    mean_brier: 0.05940004137395414
+    brier_ci95:
+    - 0.0483169903897226
+    - 0.06797543321485523
+    mean_ece: 0.19029320985409057
+    ece_ci95:
+    - 0.1638230041729376
+    - 0.20642503049889852
+  - condition_id: 3b
+    survey_id: nhk_consciousness_2023_economy_家計の余裕
+    theme: 家計の余裕
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.14444183496707763
+    jsd_ci95:
+    - 0.13071949110633316
+    - 0.16126784028200147
+    mean_emd: 0.6122419004267945
+    emd_ci95:
+    - 0.4390957872712004
+    - 0.8963923495506352
+    mean_brier: 0.04285708252437218
+    brier_ci95:
+    - 0.03700223037244912
+    - 0.050200722273654054
+    mean_ece: 0.1609384036736702
+    ece_ci95:
+    - 0.14030030862030732
+    - 0.18995038205766882
+  - condition_id: '4'
+    survey_id: boj_living_2024_economy_金利政策
+    theme: 金利政策
+    source_origin: same_source_as_train
+    n: 9
+    mean_jsd: 0.21618977468070133
+    jsd_ci95:
+    - 0.20219279225712306
+    - 0.228298592052671
+    mean_emd: 0.5324677960303528
+    emd_ci95:
+    - 0.5118675646120255
+    - 0.551756792509557
+    mean_brier: 0.057268028158401915
+    brier_ci95:
+    - 0.05362874681942538
+    - 0.06159718675104843
+    mean_ece: 0.20937665764983088
+    ece_ci95:
+    - 0.20135667057599066
+    - 0.21866177209724957
+  - condition_id: '4'
+    survey_id: cabinet_aging_2023_economy_老後の生活設計
+    theme: 老後の生活設計
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.06094846933596018
+    jsd_ci95:
+    - 0.06008850823308639
+    - 0.06264282677155586
+    mean_emd: 0.3472065364121287
+    emd_ci95:
+    - 0.3235806243858454
+    - 0.38531714165636005
+    mean_brier: 0.02721582664747998
+    brier_ci95:
+    - 0.02557400546093866
+    - 0.029638361562244742
+    mean_ece: 0.11449321026155108
+    ece_ci95:
+    - 0.10419789983213242
+    - 0.1257981062646754
+  - condition_id: '4'
+    survey_id: cabinet_social_2024_economy_暮らし向き
+    theme: 暮らし向き
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.15742049512045572
+    jsd_ci95:
+    - 0.14185985303240164
+    - 0.1812485751238455
+    mean_emd: 0.7439347841277385
+    emd_ci95:
+    - 0.6963012101481777
+    - 0.7746437126992015
+    mean_brier: 0.05062312519910819
+    brier_ci95:
+    - 0.046194632135389095
+    - 0.05508399550734309
+    mean_ece: 0.1744602221700058
+    ece_ci95:
+    - 0.16816937323202064
+    - 0.18154234852901982
+  - condition_id: '4'
+    survey_id: nhk_consciousness_2023_economy_家計の余裕
+    theme: 家計の余裕
+    source_origin: cross_source
+    n: 3
+    mean_jsd: 0.11280351330083623
+    jsd_ci95:
+    - 0.09640610781421162
+    - 0.13604403203158946
+    mean_emd: 0.5169512729878831
+    emd_ci95:
+    - 0.4656106551542712
+    - 0.6111773959421447
+    mean_brier: 0.02306347369049122
+    brier_ci95:
+    - 0.01959762138915288
+    - 0.02839746074204515
+    mean_ece: 0.13187180228440754
+    ece_ci95:
+    - 0.1086048515165402
+    - 0.1616228435838866
+  partial_failures: []

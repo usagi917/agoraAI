@@ -1,9 +1,10 @@
 """統一 Simulation API エンドポイント"""
 
 import logging
+import os
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -74,6 +75,8 @@ class SimulationCreate(BaseModel):
     mode: str = "standard"  # quick | standard | deep | research | baseline (旧モード名も受付)
     prompt_text: str = ""
     evidence_mode: str = "prefer"  # strict | prefer | off (legacy aliases accepted)
+    seed: int | None = None
+    diagnostic: dict | None = None
 
 
 class HistoricalOutcome(BaseModel):
@@ -112,6 +115,7 @@ class BacktestCreate(BaseModel):
 @router.post("")
 async def create_simulation(
     body: SimulationCreate,
+    x_validation_token: str | None = Header(default=None, alias="X-Validation-Token"),
     session: AsyncSession = Depends(get_session),
 ):
     """Simulation を作成して実行を開始する。"""
@@ -124,6 +128,9 @@ async def create_simulation(
     normalized_evidence_mode = normalize_evidence_mode(body.evidence_mode)
     if not settings.live_simulation_available():
         raise HTTPException(status_code=400, detail=settings.live_simulation_message())
+    if body.diagnostic is not None:
+        _require_validation_token(x_validation_token)
+        await _ensure_no_running_validation(session)
 
     sim = Simulation(
         id=str(uuid.uuid4()),
@@ -133,14 +140,24 @@ async def create_simulation(
         template_name=body.template_name,
         execution_profile=body.execution_profile,
         status="queued",
+        seed=body.seed,
         metadata_json={
             "run_config": {
                 "evidence_mode": normalized_evidence_mode,
                 "trust_mode": "strict",
-            }
+            },
+            **({"diagnostic": body.diagnostic} if body.diagnostic is not None else {}),
         },
     )
     session.add(sim)
+    if body.diagnostic is not None:
+        await session.flush()
+        try:
+            await _ensure_no_running_validation(session, exclude_id=sim.id)
+        except HTTPException:
+            await session.rollback()
+            raise
+
     await session.commit()
     await session.refresh(sim)
 
@@ -154,8 +171,35 @@ async def create_simulation(
         "template_name": sim.template_name,
         "execution_profile": sim.execution_profile,
         "evidence_mode": normalized_evidence_mode,
+        "seed": sim.seed,
         "created_at": sim.created_at.isoformat(),
     }
+
+
+def _require_validation_token(x_validation_token: str | None) -> None:
+    # Temporary local/demo guard. Replace with proper authentication before public deployment.
+    expected = os.environ.get("VALIDATION_TOKEN")
+    if expected and x_validation_token != expected:
+        raise HTTPException(status_code=403, detail="Invalid validation token")
+
+
+async def _ensure_no_running_validation(session: AsyncSession, exclude_id: str | None = None) -> None:
+    """Reject an already queued/running diagnostic simulation.
+
+    This is an optimistic double-check guard and is not a full replacement for a
+    database-level constraint under every transaction isolation behavior.
+    """
+    query = select(Simulation).where(Simulation.status.in_(["queued", "running"]))
+    if exclude_id is not None:
+        query = query.where(Simulation.id != exclude_id)
+
+    result = await session.execute(
+        query
+    )
+    for sim in result.scalars().all():
+        metadata = sim.metadata_json if isinstance(sim.metadata_json, dict) else {}
+        if isinstance(metadata.get("diagnostic"), dict):
+            raise HTTPException(status_code=409, detail="Validation simulation is already running")
 
 
 @router.get("")

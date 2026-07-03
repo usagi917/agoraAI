@@ -161,6 +161,11 @@ def _drop_stale_metadata_after_fresh_pulse(metadata: dict | None) -> dict:
     }
 
 
+def _diagnostic_stop_after(sim: Simulation, phase: str) -> bool:
+    diagnostic = dict(sim.metadata_json or {}).get("diagnostic")
+    return isinstance(diagnostic, dict) and diagnostic.get("stop_after") == phase
+
+
 def _build_time_axis_base_responses(pulse: SocietyPulseResult) -> list[dict]:
     base_responses: list[dict] = []
     for idx, resp in enumerate(pulse.responses):
@@ -326,6 +331,30 @@ async def run_unified(simulation_id: str) -> None:
                     },
                 }
                 await session.commit()
+
+            if _diagnostic_stop_after(sim, "society_pulse"):
+                sim.metadata_json = {
+                    **dict(sim.metadata_json or {}),
+                    "diagnostic_result": {
+                        "stopped_after": "society_pulse",
+                        "aggregation": pulse.aggregation,
+                        "evaluation": pulse.evaluation,
+                        "usage": pulse.usage,
+                    },
+                }
+                sim.status = "completed"
+                sim.pipeline_stage = "completed"
+                sim.completed_at = datetime.now(UTC)
+                await refresh_scenario_pair_status(session, scenario_pair_id)
+                await session.commit()
+                await sse_manager.publish(simulation_id, "simulation_completed", {
+                    "simulation_id": simulation_id,
+                    "mode": "unified",
+                    "diagnostic_stop_after": "society_pulse",
+                    "time_axis_available": False,
+                })
+                logger.info("Unified diagnostic simulation %s stopped after society_pulse", simulation_id)
+                return
 
             # === Phase 2: Council Deliberation ===
             council = _load_council_checkpoint(sim)

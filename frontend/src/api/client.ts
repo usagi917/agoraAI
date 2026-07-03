@@ -4,6 +4,16 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
 })
 
+function validationHeaders(): Record<string, string> | undefined {
+  const token = import.meta.env.VITE_VALIDATION_TOKEN
+  return token ? { 'X-Validation-Token': token } : undefined
+}
+
+function withValidationHeaders<T extends Record<string, unknown>>(config: T): T & { headers?: Record<string, string> } {
+  const headers = validationHeaders()
+  return headers ? { ...config, headers } : config
+}
+
 export interface TemplateResponse {
   id: string
   name: string
@@ -643,6 +653,52 @@ export interface SimulationTimelineEvent {
   created_at?: string | null
 }
 
+export interface ValidationTopic {
+  survey_id: string
+  theme: string
+  question: string
+  source: string
+  survey_date: string
+  sample_size: number
+  quality_rank?: string
+  source_origin?: string
+  actual_distribution: Record<string, number>
+}
+
+export interface ValidationTopicsResponse {
+  preset: string
+  topics: ValidationTopic[]
+}
+
+export interface ValidationEvaluation {
+  survey_id: string
+  theme: string
+  question: string
+  source: string
+  source_origin?: string
+  predicted: Record<string, number>
+  actual: Record<string, number>
+  jsd: number
+  emd: number
+  brier: number
+  ece: number | null
+  verdict: 'hit' | 'partial' | 'miss'
+}
+
+export interface ValidationReportResponse {
+  simulation_id: string
+  preset: string
+  predicted: Record<string, number>
+  actual: Record<string, number>
+  jsd: number
+  emd: number
+  brier: number
+  ece: number | null
+  verdict: 'hit' | 'partial' | 'miss'
+  sample_reasons?: Array<{ agent_id?: string; stance?: string; reason: string }>
+  evaluations: ValidationEvaluation[]
+}
+
 export async function createSimulation(
   options: {
     projectId?: string
@@ -651,16 +707,24 @@ export async function createSimulation(
     promptText?: string
     mode?: string
     evidenceMode?: string
+    seed?: number
+    diagnostic?: Record<string, any>
   } = {},
 ): Promise<SimulationResponse> {
-  const { data } = await api.post('/simulations', {
+  const payload = {
     project_id: options.projectId || null,
     template_name: options.templateName || '',
     execution_profile: options.executionProfile || 'standard',
     mode: options.mode || 'unified',
     prompt_text: options.promptText || '',
     evidence_mode: options.evidenceMode || 'strict',
-  })
+    seed: options.seed ?? null,
+    diagnostic: options.diagnostic ?? null,
+  }
+  const headers = validationHeaders()
+  const { data } = headers
+    ? await api.post('/simulations', payload, { headers })
+    : await api.post('/simulations', payload)
   return data
 }
 
@@ -691,6 +755,24 @@ export async function getSimulationColonies(simId: string): Promise<ColonyRespon
 
 export async function getSimulationTimeline(simId: string): Promise<SimulationTimelineEvent[]> {
   const { data } = await api.get(`/simulations/${simId}/timeline`)
+  return data
+}
+
+export async function getValidationTopics(preset = 'economy'): Promise<ValidationTopicsResponse> {
+  const { data } = await api.get('/validation/topics', withValidationHeaders({ params: { preset } }))
+  return data
+}
+
+export async function getValidationReport(
+  simId: string,
+  surveyId?: string,
+): Promise<ValidationReportResponse> {
+  const { data } = await api.get(
+    `/simulations/${simId}/validation-report`,
+    withValidationHeaders({
+      params: surveyId ? { survey_id: surveyId } : undefined,
+    }),
+  )
   return data
 }
 
@@ -859,6 +941,25 @@ interface ConversationsResponse {
 
 export async function getSocialGraph(simId: string): Promise<SocialGraphResponse> {
   const { data } = await api.get(`/society/simulations/${simId}/social-graph`)
+  return data
+}
+
+export interface PopulationNetworkResponse {
+  population_id: string
+  node_count: number
+  edge_count: number
+  nodes: Array<{ id: string; agent_index: number }>
+  /** [source_index, target_index, strength] の圧縮形式 */
+  edges: Array<[number, number, number]>
+}
+
+export async function getPopulationNetwork(
+  simId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PopulationNetworkResponse> {
+  const { data } = await api.get(`/society/simulations/${simId}/population-network`, {
+    signal: options?.signal,
+  })
   return data
 }
 
