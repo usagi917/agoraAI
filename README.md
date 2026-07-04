@@ -14,7 +14,7 @@
 - `quick` / `standard` / `deep` / `research` / `baseline` の5つのプリセットで、速度と深さを切り替えられます。
 - `.txt` / `.md` / `.pdf` をプロジェクトに添付し、エビデンス付きの分析フローに載せられます。
 - ライブ画面では SSE で進捗を配信し、Activity Feed、社会反応、会話、グラフの変化を追跡できます。
-- 結果画面では Decision Brief、シナリオ比較、伝播分析、Transcript、再実行、Codex Review Agent への質問を扱えます。
+- 結果画面では Decision Brief、シナリオ比較、伝播分析、Transcript、グラフパネル（Social / Knowledge Graph、折りたたみ可）、再実行、Codex Review Agent への質問を扱えます。
 - `/populations` では人口生成、一覧確認、世代 fork ができます。
 - `/compare` から Decision Lab を開始し、2つのシナリオを同一人口で並行実行して意見シフト・連合変動・監査証跡を比較できます。
 - Theater UI ではディベートカード、ライブ対話ストリーム、スタンス変化をリアルタイムに可視化します。
@@ -53,7 +53,7 @@ flowchart LR
 | --- | --- | --- |
 | `/` | LaunchPad | 質問テンプレート、自由入力、ファイル添付、プリセット選択、実行履歴 |
 | `/sim/:id` | Live Simulation | SSE 進捗、Activity Feed、社会反応、会話、ライブグラフ、Theater UI（ディベートカード・対話ストリーム） |
-| `/sim/:id/results` | Results | Decision Brief、シナリオ比較、Propagation、Transcript、Codex Review |
+| `/sim/:id/results` | Results | Decision Brief、シナリオ比較、Propagation、Transcript、グラフパネル（Social / Knowledge Graph、折りたたみ可）、Codex Review |
 | `/populations` | Populations | 人口生成、人口一覧、詳細表示、fork |
 | `/compare` | Compare Setup | 2つのシナリオ、実行プリセット、人口設定を指定して比較実行を開始 |
 | `/scenario/:id` | Decision Lab | シナリオペア比較、意見シフト表、連合マップ、監査タイムライン |
