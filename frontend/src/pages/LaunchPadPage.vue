@@ -576,49 +576,6 @@ function getPipelineStageLabel(stage: string) {
 .section-note-warning { color: var(--warning); }
 .section-toggle { margin-left: auto; font-size: 0.78rem; }
 
-.default-flow-card {
-  background: linear-gradient(135deg, var(--accent-subtle), rgba(16,185,129,0.08));
-  border: 1px solid var(--border-active);
-  border-radius: var(--radius);
-  padding: var(--panel-padding);
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.default-flow-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.default-flow-eyebrow {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.default-flow-title {
-  margin-top: 0.2rem;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.default-flow-copy {
-  font-size: 0.84rem;
-  color: var(--text-secondary);
-  line-height: 1.65;
-}
-
-.default-flow-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
 /* === Unified Input Section === */
 .input-section {
   background: linear-gradient(170deg, var(--accent-subtle) 0%, var(--bg-card) 40%);
@@ -1120,10 +1077,6 @@ function getPipelineStageLabel(stage: string) {
   .template-grid,
   .profile-grid {
     grid-template-columns: 1fr;
-  }
-
-  .default-flow-top {
-    flex-direction: column;
   }
 
   .launch-section {
