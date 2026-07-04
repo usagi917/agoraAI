@@ -1518,42 +1518,14 @@ function renderMarkdown(content: string): string {
 .content-title { font-size: 0.9rem; font-weight: 600; margin-bottom: 1.25rem; }
 .empty-state { text-align: center; padding: 3rem; color: var(--text-muted); font-size: 0.85rem; }
 
-.graph-tab-layout { display: flex; flex-direction: column; gap: 1rem; }
-.graph-snapshot-large {
-  height: clamp(20rem, 40vw, 32rem);
-  background: radial-gradient(ellipse at 30% 40%, #0d0d2b 0%, #060614 50%, #020208 100%);
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(100,100,255,0.12);
-}
-
-.cognitive-subtabs { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.5rem; }
 .subtab-btn { padding: 0.4rem 0.8rem; background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-muted); font-family: var(--font-sans); font-size: 0.75rem; cursor: pointer; transition: all 0.2s; }
 .subtab-btn.active { background: var(--accent-subtle); color: var(--accent); border-color: var(--accent); }
-.cognitive-content { margin-top: 0.5rem; }
 
 .results-side { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
 .side-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--panel-padding); }
 .side-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; gap: 0.75rem; flex-wrap: wrap; }
 .side-header h3 { font-size: 0.82rem; font-weight: 600; }
 .secondary-switcher-buttons { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-
-.graph-snapshot {
-  height: clamp(14rem, 26vw, 18rem);
-  background: radial-gradient(ellipse at 30% 40%, #0d0d2b 0%, #060614 50%, #020208 100%);
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(100,100,255,0.12);
-  margin-bottom: 0.5rem;
-}
-.graph-error-note {
-  margin-bottom: 0.75rem;
-  padding: 0.75rem 0.9rem;
-  border: 1px solid rgba(245,158,11,0.24);
-  border-radius: var(--radius-sm);
-  background: rgba(245,158,11,0.08);
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-  line-height: 1.6;
-}
 
 .ai-check-panel { display: flex; flex-direction: column; gap: 1rem; }
 .ai-check-header { margin-bottom: 0; }
@@ -1738,10 +1710,6 @@ function renderMarkdown(content: string): string {
     justify-content: center;
   }
 
-  .graph-snapshot {
-    height: 14rem;
-  }
-
   .ai-check-input-area {
     flex-wrap: wrap;
   }
@@ -1863,16 +1831,11 @@ function renderMarkdown(content: string): string {
 .society-participant-chip.citizen_representative { border-color: rgba(34,197,94,0.3); color: var(--success); }
 .participant-stance-tag { font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-muted); }
 .society-disagreement { margin-bottom: 0.5rem; }
-.disagreement-topic { font-size: 0.82rem; font-weight: 600; color: var(--text-primary); }
-.disagreement-positions { display: flex; flex-direction: column; gap: 0.2rem; margin-top: 0.25rem; }
-.disagreement-pos { font-size: 0.78rem; color: var(--text-secondary); }
 .society-scenario-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem; margin-bottom: 0.5rem; }
 .scenario-name { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.25rem; }
 .scenario-desc { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5; }
 .scenario-prob { font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent); margin-top: 0.25rem; }
 .society-shift { display: flex; align-items: center; gap: 0.75rem; font-size: 0.82rem; margin-bottom: 0.35rem; }
-.shift-name { font-weight: 600; }
-.shift-flow { font-family: var(--font-mono); color: var(--accent); }
 .society-assessment { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.7; }
 
 /* Decision Brief council section */
@@ -1912,17 +1875,11 @@ function renderMarkdown(content: string): string {
   .decision-brief { break-inside: avoid; }
   .brief-section { break-inside: avoid; page-break-inside: avoid; }
   .reason-card,
-  .detail-card,
-  .option-card,
-  .horizon-card { break-inside: avoid; }
-
-  .graph-container,
-  .canvas-wrapper { display: none !important; }
+  .detail-card { break-inside: avoid; }
 
   .evidence-panel { break-before: page; }
   .evidence-card { break-inside: avoid; }
 
-  .stakeholder-bar-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .confidence-gauge-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .recommendation-badge { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }
