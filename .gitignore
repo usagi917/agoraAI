@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
 dist/
 build/
 
@@ -16,6 +19,8 @@ frontend/test-results/
 # Environment
 .env
 .env.local
+.env.*
+!.env.example
 
 # Data
 data/
@@ -42,6 +47,7 @@ plans/
 .context/
 TODOS.md
 .amplifier/
+amplifier/
 .gstack/
 
 # Vendored generated artifacts (re-generate via `codex app-server`; see spec.md)

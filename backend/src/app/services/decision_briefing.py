@@ -5,6 +5,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
+# 判定リテラル（Go / 条件付きGo / No-Go）。schema 正規化のデフォルト
+# （decision_brief_schema）と共有し、値のハードコード重複を避ける。
+RECOMMENDATION_GO = "Go"
+RECOMMENDATION_CONDITIONAL_GO = "条件付きGo"
+RECOMMENDATION_NO_GO = "No-Go"
+
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
@@ -148,18 +154,18 @@ def _legacy_fields(
 
 def _recommendation_from_score(score: float) -> str:
     if score >= 0.72:
-        return "Go"
+        return RECOMMENDATION_GO
     if score <= 0.42:
-        return "No-Go"
-    return "条件付きGo"
+        return RECOMMENDATION_NO_GO
+    return RECOMMENDATION_CONDITIONAL_GO
 
 
 def _recommendation_from_text(text: str, *, default_score: float = 0.58) -> str:
     cleaned = _clean_text(text)
     if re.search(r"見送|撤退|中止|No-Go|不採算|不可", cleaned, flags=re.IGNORECASE):
-        return "No-Go"
+        return RECOMMENDATION_NO_GO
     if re.search(r"推奨|実行|参入|着手|拡大|Go", cleaned, flags=re.IGNORECASE):
-        return "Go"
+        return RECOMMENDATION_GO
     return _recommendation_from_score(default_score)
 
 
