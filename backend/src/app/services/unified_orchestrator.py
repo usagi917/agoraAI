@@ -5,23 +5,23 @@ Decision Brief 付きの統合レポートを生成する。
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
 from src.app.database import async_session
 from src.app.models.agent_profile import AgentProfile
-from src.app.models.kg_node import KGNode
 from src.app.models.kg_edge import KGEdge
+from src.app.models.kg_node import KGNode
 from src.app.models.simulation import Simulation
 from src.app.models.social_edge import SocialEdge
 from src.app.models.society_result import SocietyResult
-from src.app.services.phases.society_pulse import SocietyPulseResult, run_society_pulse
 from src.app.services.phases.council_deliberation import CouncilResult, run_council
+from src.app.services.phases.society_pulse import SocietyPulseResult, run_society_pulse
 from src.app.services.phases.synthesis import SynthesisResult, run_synthesis
 from src.app.services.scenario_pair_status import refresh_scenario_pair_status
-from src.app.services.society.representative_selector import select_representatives
 from src.app.services.society import accuracy_config as _acc_flags
+from src.app.services.society.representative_selector import select_representatives
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -159,6 +159,11 @@ def _drop_stale_metadata_after_fresh_pulse(metadata: dict | None) -> dict:
         for key, value in dict(metadata or {}).items()
         if key not in FRESH_PULSE_STALE_METADATA_KEYS
     }
+
+
+def _diagnostic_stop_after(sim: Simulation, phase: str) -> bool:
+    diagnostic = dict(sim.metadata_json or {}).get("diagnostic")
+    return isinstance(diagnostic, dict) and diagnostic.get("stop_after") == phase
 
 
 def _build_time_axis_base_responses(pulse: SocietyPulseResult) -> list[dict]:
@@ -327,6 +332,30 @@ async def run_unified(simulation_id: str) -> None:
                 }
                 await session.commit()
 
+            if _diagnostic_stop_after(sim, "society_pulse"):
+                sim.metadata_json = {
+                    **dict(sim.metadata_json or {}),
+                    "diagnostic_result": {
+                        "stopped_after": "society_pulse",
+                        "aggregation": pulse.aggregation,
+                        "evaluation": pulse.evaluation,
+                        "usage": pulse.usage,
+                    },
+                }
+                sim.status = "completed"
+                sim.pipeline_stage = "completed"
+                sim.completed_at = datetime.now(UTC)
+                await refresh_scenario_pair_status(session, scenario_pair_id)
+                await session.commit()
+                await sse_manager.publish(simulation_id, "simulation_completed", {
+                    "simulation_id": simulation_id,
+                    "mode": "unified",
+                    "diagnostic_stop_after": "society_pulse",
+                    "time_axis_available": False,
+                })
+                logger.info("Unified diagnostic simulation %s stopped after society_pulse", simulation_id)
+                return
+
             # === Phase 2: Council Deliberation ===
             council = _load_council_checkpoint(sim)
             council_from_checkpoint = council is not None
@@ -409,7 +438,7 @@ async def run_unified(simulation_id: str) -> None:
             )
 
             sim.status = "completed"
-            sim.completed_at = datetime.now(timezone.utc)
+            sim.completed_at = datetime.now(UTC)
             await refresh_scenario_pair_status(session, scenario_pair_id)
             await session.commit()
 

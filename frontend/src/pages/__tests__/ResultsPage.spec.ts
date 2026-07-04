@@ -10,7 +10,6 @@ const apiMocks = vi.hoisted(() => ({
   getSimulation: vi.fn(),
   getSimulationReport: vi.fn(),
   getSimulationGraph: vi.fn(),
-  getSimulationGraphHistory: vi.fn(),
   getSimulationColonies: vi.fn(),
   submitCodexReview: vi.fn(),
   getCodexHealth: vi.fn(),
@@ -80,7 +79,6 @@ describe('ResultsPage', () => {
         issues: ['strict_document_evidence_required'],
       },
     })
-    apiMocks.getSimulationGraphHistory.mockResolvedValue([])
     apiMocks.getSimulationGraph.mockResolvedValue({ nodes: [], edges: [] })
     apiMocks.getSimulationColonies.mockResolvedValue([])
     apiMocks.getCodexHealth.mockResolvedValue({
@@ -207,19 +205,111 @@ describe('ResultsPage', () => {
       ],
       backtest: {
         schema_version: 1,
-        input_format: {},
+        input_format: {
+          schema_version: 1,
+          historical_cases: [
+            {
+              case_id: 'case-001',
+              title: '2025 関西ローンチ',
+              observed_at: '2025-10-01',
+              baseline_metrics: {
+                adoption_rate: 0.18,
+                conversion_rate: 0.09,
+              },
+              outcome: {
+                issue_label: '価格受容性',
+                summary: '価格改定後も本格導入は遅れたが試験導入は増えた',
+                actual_scenario: '価格障壁で導入が遅れる',
+                metrics: {
+                  adoption_rate: 0.27,
+                  conversion_rate: 0.13,
+                },
+                tags: ['価格', '導入'],
+              },
+              interventions: [
+                {
+                  intervention_id: 'price_reduction',
+                  label: '価格変更',
+                  baseline_metrics: { adoption_rate: 0.18 },
+                  outcome_metrics: { adoption_rate: 0.27 },
+                  evidence: ['初月の採用率が改善した'],
+                },
+              ],
+            },
+            {
+              case_id: 'case-002',
+              title: '2025 自治体 PoC 規制調整',
+              observed_at: '2025-11-15',
+              baseline_metrics: {
+                approval_rate: 0.36,
+                regulatory_risk: 0.68,
+              },
+              outcome: {
+                issue_label: '規制対応',
+                summary: '事前調整で承認率が改善した',
+                actual_scenario: '制度整合で採用が回復する',
+                metrics: {
+                  approval_rate: 0.52,
+                  regulatory_risk: 0.49,
+                },
+                tags: ['規制', '承認'],
+              },
+              interventions: [
+                {
+                  intervention_id: 'regulatory_alignment',
+                  label: '規制対応',
+                  baseline_metrics: { approval_rate: 0.36, regulatory_risk: 0.68 },
+                  outcome_metrics: { approval_rate: 0.52, regulatory_risk: 0.49 },
+                  evidence: ['自治体レビュー通過率が改善した'],
+                },
+              ],
+            },
+          ],
+        },
         matching_rules: {},
-        historical_cases: [],
+        historical_cases: [
+          {
+            case_id: 'case-001',
+            title: '2025 関西ローンチ',
+            observed_at: '2025-10-01',
+            baseline_metrics: { adoption_rate: 0.18, conversion_rate: 0.09 },
+            outcome: {
+              issue_label: '価格受容性',
+              summary: '価格改定後も本格導入は遅れたが試験導入は増えた',
+              actual_scenario: '価格障壁で導入が遅れる',
+              metrics: { adoption_rate: 0.27, conversion_rate: 0.13 },
+              tags: ['価格', '導入'],
+            },
+            interventions: [],
+          },
+          {
+            case_id: 'case-002',
+            title: '2025 自治体 PoC 規制調整',
+            observed_at: '2025-11-15',
+            baseline_metrics: { approval_rate: 0.36, regulatory_risk: 0.68 },
+            outcome: {
+              issue_label: '規制対応',
+              summary: '事前調整で承認率が改善した',
+              actual_scenario: '制度整合で採用が回復する',
+              metrics: { approval_rate: 0.52, regulatory_risk: 0.49 },
+              tags: ['規制', '承認'],
+            },
+            interventions: [],
+          },
+        ],
         status: 'ready',
         summary: {
-          case_count: 1,
-          compared_case_count: 1,
+          case_count: 2,
+          compared_case_count: 2,
           hit_count: 1,
-          partial_hit_count: 0,
+          partial_hit_count: 1,
           miss_count: 0,
-          hit_rate: 1,
-          issue_hit_count: 1,
+          hit_rate: 0.5,
+          partial_hit_rate: 0.5,
+          issue_hit_count: 2,
           issue_hit_rate: 1,
+          scenario_probability_brier: 0.08,
+          mean_reciprocal_rank: 0.75,
         },
         cases: [
           {
@@ -252,6 +342,37 @@ describe('ResultsPage', () => {
             scenario_matches: [],
             issue_results: [],
             summary: { hit_count: 1, partial_hit_count: 0, miss_count: 0 },
+          },
+          {
+            case_id: 'case-2',
+            title: '2025 自治体 PoC 規制調整',
+            observed_at: '2025-11-15',
+            baseline_metrics: {},
+            outcome: {
+              issue_label: '規制対応',
+              summary: '事前調整で承認率が改善した',
+              actual_scenario: '制度整合で採用が回復する',
+              metrics: {},
+              tags: [],
+            },
+            interventions: [],
+            best_match: {
+              issue_id: 'issue-2',
+              issue_label: '規制対応',
+              scenario_description: '制度整合で採用が回復する',
+              predicted_score: 0.63,
+              actual_summary: '事前調整で承認率が改善した',
+              actual_scenario: '制度整合で採用が回復する',
+              match_score: 0.61,
+              label_match: 1,
+              text_overlap: 0.42,
+              tag_overlap: 0,
+              verdict: 'partial_hit',
+              reasons: ['issue_label_match', 'scenario_text_overlap'],
+            },
+            scenario_matches: [],
+            issue_results: [],
+            summary: { hit_count: 0, partial_hit_count: 1, miss_count: 0 },
           },
         ],
       },
@@ -299,6 +420,8 @@ describe('ResultsPage', () => {
     expect(wrapper.text()).toContain('実測比較')
     expect(wrapper.text()).toContain('Backtest')
     expect(wrapper.text()).toContain('2025 関西ローンチ')
+    expect(wrapper.text()).toContain('2025 自治体 PoC 規制調整')
     expect(wrapper.text()).toContain('Hit')
+    expect(wrapper.text()).toContain('Partial')
   })
 })

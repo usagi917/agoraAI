@@ -926,7 +926,7 @@ class TestMeetingLayerDevilAdvocate:
     """meeting_layer に devil_advocate ロール対応が追加されていることのテスト。"""
 
     def test_build_meeting_system_prompt_devil_advocate(self):
-        from src.app.services.society.meeting_layer import _build_meeting_system_prompt
+        from src.app.services.society.meeting_prompts import _build_meeting_system_prompt
 
         participant = {
             "role": "citizen_representative",

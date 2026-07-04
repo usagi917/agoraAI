@@ -28,10 +28,11 @@ References:
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import optuna
@@ -507,7 +508,7 @@ def save_estimated_params(
     data: dict[str, Any] = {
         "params": {k: float(v) for k, v in params.items()},
         "best_emd": float(best_emd),
-        "saved_at": datetime.now(timezone.utc).isoformat(),
+        "saved_at": datetime.now(UTC).isoformat(),
     }
     if category is not None:
         data["category"] = category

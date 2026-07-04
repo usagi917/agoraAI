@@ -6,38 +6,90 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.app.config import settings
+from src.app.models.conversation_log import ConversationLog
+from src.app.models.evaluation_result import EvaluationResult
 from src.app.models.simulation import Simulation
 from src.app.models.society_result import SocietyResult
-from src.app.models.evaluation_result import EvaluationResult
-from src.app.services.society.society_orchestrator import (
-    _estimate_theme_category,
-    _get_or_create_population,
-    _save_network,
-    _load_population_edges,
-)
-from src.app.services.society.population_generator import get_default_population_size
-from src.app.services.society.agent_selector import select_agents
+from src.app.services.conversation_log_store import persist_conversation_logs
 from src.app.services.society.activation_layer import run_activation
+from src.app.services.society.agent_selector import select_agents
+from src.app.services.society.demographic_analyzer import analyze_demographics
 from src.app.services.society.evaluation import evaluate_society_simulation
+from src.app.services.society.kg_enricher import enrich_agents_from_kg
+from src.app.services.society.kg_evolution_service import KGEvolutionService
 from src.app.services.society.persona_generator import (
     generate_persona_narratives_post_activation,
 )
+from src.app.services.society.population_generator import get_default_population_size
+from src.app.services.society.population_propagation import run_population_propagation
 from src.app.services.society.representative_selector import select_representatives
-from src.app.services.society.demographic_analyzer import analyze_demographics
-from src.app.services.society.kg_enricher import enrich_agents_from_kg
-from src.app.services.society.kg_evolution_service import KGEvolutionService
-from src.app.models.conversation_log import ConversationLog
-from src.app.services.conversation_log_store import persist_conversation_logs
-from src.app.services.validation_summary import build_validation_summary
+from src.app.services.society.society_orchestrator import (
+    _diagnostic_config,
+    _estimate_theme_category,
+    _get_or_create_population,
+    _load_population_edges,
+    _maybe_inject_anchor_prior,
+    _phase_theme_anchor,
+    _save_network,
+)
+from src.app.services.society.survey_anchor import resolve_and_apply_anchor
 from src.app.services.society.validation_pipeline import (
     auto_compare,
     build_distribution_prediction_payload,
     register_prediction_evaluation,
     register_result,
 )
+from src.app.services.validation_summary import build_validation_summary
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
+
+
+def _phase_limits(cognitive_config: dict | None = None) -> dict[str, int]:
+    """選抜数・活性化同時実行数を cognitive config (game_master) から導出する。
+
+    値が欠損・不正な場合は従来のハードコード値にフォールバックする。
+    """
+    defaults = {"target_count": 100, "max_concurrency": 30}
+    try:
+        config = cognitive_config if cognitive_config is not None else settings.load_cognitive_config()
+        gm = config.get("game_master") or {}
+    except Exception:
+        logger.warning("Failed to load cognitive config; using default phase limits")
+        return defaults
+
+    limits = dict(defaults)
+    for key, cfg_key in (("target_count", "max_active_agents"), ("max_concurrency", "max_concurrent_agents")):
+        value = gm.get(cfg_key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and int(value) > 0:
+            limits[key] = int(value)
+    return limits
+
+
+def _propagation_config(cognitive_config: dict | None = None) -> dict:
+    """全人口意見伝播の設定を cognitive config (opinion_propagation) から導出する。
+
+    値が欠損・不正な場合はデフォルトにフォールバックする。
+    """
+    defaults: dict = {"enabled": True, "max_timesteps": 8, "confidence_threshold": 0.5}
+    try:
+        config = cognitive_config if cognitive_config is not None else settings.load_cognitive_config()
+        section = config.get("opinion_propagation") or {}
+    except Exception:
+        logger.warning("Failed to load cognitive config; using default propagation config")
+        return defaults
+
+    result = dict(defaults)
+    enabled = section.get("enabled")
+    if isinstance(enabled, bool):
+        result["enabled"] = enabled
+    timesteps = section.get("max_timesteps")
+    if isinstance(timesteps, (int, float)) and not isinstance(timesteps, bool) and int(timesteps) > 0:
+        result["max_timesteps"] = int(timesteps)
+    threshold = section.get("confidence_threshold")
+    if isinstance(threshold, (int, float)) and not isinstance(threshold, bool) and 0 < float(threshold) <= 1:
+        result["confidence_threshold"] = float(threshold)
+    return result
 
 
 @dataclass
@@ -50,6 +102,89 @@ class SocietyPulseResult:
     usage: dict
     population_count: int = 0
     validation_summary: dict | None = None
+
+
+async def _run_population_propagation_phase(
+    *,
+    simulation_id: str,
+    pop_id: str,
+    agents: list[dict],
+    selected_agents: list[dict],
+    individual_responses: list[dict],
+    all_edges: list[dict],
+    aggregation: dict,
+    session: Any,
+    seed: int | None,
+    propagation_cfg: dict,
+) -> None:
+    """全人口意見伝播フェーズ。失敗しても本流を止めない（警告ログのみ）。
+
+    activation 完了後、未活性化の大衆へ意見を伝播させ、ラウンドごとに SSE 配信し、
+    結果を population_propagation レイヤーとして永続化する。aggregation には
+    population_stance_distribution を in-place で追記する。
+
+    伝播が無効、または未活性化の大衆が居ない（全員選抜済み）場合は何もしない。
+    """
+    if not (propagation_cfg["enabled"] and len(agents) > len(selected_agents)):
+        return
+    try:
+        await sse_manager.publish(simulation_id, "population_propagation_started", {
+            "population_count": len(agents),
+            "edge_count": len(all_edges),
+            "max_timesteps": propagation_cfg["max_timesteps"],
+        })
+
+        async def on_propagation_round(delta):
+            await sse_manager.publish(simulation_id, "population_propagation_round", {
+                "round": delta.round,
+                "changes": [
+                    {"i": c["agent_index"], "s": c["stance"]}
+                    for c in delta.changes
+                ],
+                "changed_count": delta.changed_count,
+                "distribution": delta.distribution,
+            })
+
+        propagation_result = await run_population_propagation(
+            agents,
+            individual_responses,
+            all_edges,
+            seed=seed,
+            max_timesteps=propagation_cfg["max_timesteps"],
+            confidence_threshold=propagation_cfg["confidence_threshold"],
+            on_round=on_propagation_round,
+        )
+
+        session.add(SocietyResult(
+            id=str(uuid.uuid4()),
+            simulation_id=simulation_id,
+            population_id=pop_id,
+            layer="population_propagation",
+            phase_data={
+                "population_count": len(agents),
+                "distribution": propagation_result.distribution,
+                "total_rounds": propagation_result.total_rounds,
+                "converged": propagation_result.converged,
+                "changed_per_round": [d.changed_count for d in propagation_result.rounds],
+            },
+            usage={},
+        ))
+        await session.commit()
+
+        aggregation["population_stance_distribution"] = propagation_result.distribution
+
+        await sse_manager.publish(simulation_id, "population_propagation_completed", {
+            "distribution": propagation_result.distribution,
+            "converged": propagation_result.converged,
+            "total_rounds": propagation_result.total_rounds,
+            "changed_total": sum(d.changed_count for d in propagation_result.rounds),
+        })
+    except Exception as e:
+        try:
+            await session.rollback()
+        except Exception as rollback_error:
+            logger.warning("Population propagation rollback failed: %s", rollback_error)
+        logger.warning("Population propagation failed, continuing: %s", e)
 
 
 async def run_society_pulse(
@@ -65,6 +200,7 @@ async def run_society_pulse(
     session は呼び出し元が管理する（自分で開かない）。
     """
     simulation_id = sim.id
+    diagnostic_cfg = _diagnostic_config(sim)
     total_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
     # === Population ===
@@ -88,11 +224,17 @@ async def run_society_pulse(
         "population_id": pop_id,
     })
 
-    await _save_network(session, agents, pop_id)
+    await _save_network(session, agents, pop_id, seed=sim.seed)
 
     # === Selection (network centrality-aware) ===
+    limits = _phase_limits()
     all_edges = await _load_population_edges(session, pop_id)
-    selected_agents = await select_agents(agents, theme, target_count=100, edges=all_edges)
+    selected_agents = await select_agents(
+        agents, theme,
+        target_count=limits["target_count"],
+        edges=all_edges,
+        seed=sim.seed,
+    )
 
     await sse_manager.publish(simulation_id, "society_selection_completed", {
         "selected_count": len(selected_agents),
@@ -120,6 +262,26 @@ async def run_society_pulse(
         )
         logger.info("KG enrichment applied to %d selected agents", len(selected_agents))
 
+    survey_data_dir = settings.config_dir / "grounding" / "survey_data"
+    theme_estimate = _estimate_theme_category(theme, [])
+    anchor_distribution: dict[str, float] | None = None
+    anchor_source = "none"
+    anchor_survey_ids: list[str] = []
+    if diagnostic_cfg:
+        (
+            survey_data_dir,
+            theme_estimate,
+            anchor_distribution,
+            anchor_source,
+            anchor_survey_ids,
+        ) = _phase_theme_anchor(theme, [], simulation_id, diagnostic_cfg=diagnostic_cfg)
+        _maybe_inject_anchor_prior(
+            selected_agents,
+            anchor_distribution,
+            diagnostic_cfg,
+            sim.seed,
+        )
+
     # === Activation ===
     await sse_manager.publish(simulation_id, "society_activation_started", {
         "agent_count": len(selected_agents),
@@ -133,8 +295,37 @@ async def run_society_pulse(
         })
 
     activation_result = await run_activation(
-        selected_agents, theme, on_progress=on_progress,
+        selected_agents, theme,
+        max_concurrency=limits["max_concurrency"],
+        on_progress=on_progress,
     )
+
+    if diagnostic_cfg:
+        anchor_application = resolve_and_apply_anchor(
+            activation_result["aggregation"].get("stance_distribution", {}),
+            theme,
+            theme_estimate.category,
+            diagnostic_cfg=diagnostic_cfg,
+            survey_data_dir=survey_data_dir,
+            anchor_distribution=anchor_distribution,
+            anchor_source=anchor_source,
+            anchor_survey_ids=anchor_survey_ids,
+        )
+        if anchor_application.anchor_distribution is not None:
+            activation_result["aggregation"]["anchor_distribution"] = (
+                anchor_application.anchor_distribution
+            )
+            activation_result["aggregation"]["anchor_source"] = anchor_application.source
+            activation_result["aggregation"]["anchor_survey_ids"] = (
+                anchor_application.source_survey_ids
+            )
+        if anchor_application.applied:
+            activation_result["aggregation"]["stance_distribution_pre_anchor"] = (
+                anchor_application.pre_distribution
+            )
+            activation_result["aggregation"]["stance_distribution"] = (
+                anchor_application.post_distribution
+            )
 
     for key in total_usage:
         total_usage[key] += activation_result["usage"].get(key, 0)
@@ -216,6 +407,20 @@ async def run_society_pulse(
         "usage": activation_result["usage"],
     })
 
+    # === Population Propagation: 全人口への意見伝播 ===
+    await _run_population_propagation_phase(
+        simulation_id=simulation_id,
+        pop_id=pop_id,
+        agents=agents,
+        selected_agents=selected_agents,
+        individual_responses=individual_responses,
+        all_edges=all_edges,
+        aggregation=activation_result["aggregation"],
+        session=session,
+        seed=sim.seed,
+        propagation_cfg=_propagation_config(),
+    )
+
     # === Post-Activation Persona Narrative Generation ===
     await sse_manager.publish(simulation_id, "persona_generation_started", {
         "agent_count": len(selected_agents),
@@ -274,7 +479,6 @@ async def run_society_pulse(
     })
 
     # === Validation Summary ===
-    theme_estimate = _estimate_theme_category(theme, [])
     validation_summary = build_validation_summary(
         theme=theme,
         theme_category=theme_estimate.category,

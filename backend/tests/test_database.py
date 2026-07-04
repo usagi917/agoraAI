@@ -213,11 +213,23 @@ class _FakeResult:
     def fetchall(self):
         return self._rows
 
+    def scalar(self):
+        if not self._rows:
+            return None
+        row = self._rows[0]
+        return row[0] if isinstance(row, tuple) else row
+
 
 class _FakePostgresConn:
-    def __init__(self, tables: list[str] | None = None):
+    def __init__(
+        self,
+        tables: list[str] | None = None,
+        *,
+        society_result_layer_length: int | None = None,
+    ):
         self.executed_sql: list[str] = []
         self.tables = tables or ["simulations"]
+        self.society_result_layer_length = society_result_layer_length
 
     async def run_sync(self, fn):
         tables = self.tables
@@ -235,6 +247,11 @@ class _FakePostgresConn:
     async def execute(self, statement, params=None):
         sql = str(statement)
         self.executed_sql.append(sql)
+        if (
+            "SELECT character_maximum_length" in sql
+            and "table_name = 'society_results'" in sql
+        ):
+            return _FakeResult([(self.society_result_layer_length,)])
         if "information_schema.columns" in sql:
             return _FakeResult(
                 [
@@ -279,6 +296,36 @@ async def test_postgres_compatibility_migration_preserves_legacy_followups():
     await _apply_postgres_compatibility_migrations(conn)
 
     assert not any("DROP TABLE IF EXISTS followups" in sql for sql in conn.executed_sql)
+
+
+@pytest.mark.asyncio
+async def test_postgres_compatibility_migration_expands_society_result_layer_length():
+    conn = _FakePostgresConn(
+        tables=["society_results"],
+        society_result_layer_length=20,
+    )
+
+    await _apply_postgres_compatibility_migrations(conn)
+
+    assert any(
+        "ALTER TABLE society_results ALTER COLUMN layer TYPE VARCHAR(50)" in sql
+        for sql in conn.executed_sql
+    )
+
+
+@pytest.mark.asyncio
+async def test_postgres_compatibility_migration_keeps_wide_society_result_layer_length():
+    conn = _FakePostgresConn(
+        tables=["society_results"],
+        society_result_layer_length=50,
+    )
+
+    await _apply_postgres_compatibility_migrations(conn)
+
+    assert not any(
+        "ALTER TABLE society_results ALTER COLUMN layer TYPE VARCHAR(50)" in sql
+        for sql in conn.executed_sql
+    )
 
 
 def test_simulation_model_excludes_legacy_swarm_columns():

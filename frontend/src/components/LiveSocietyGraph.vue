@@ -4,10 +4,14 @@ import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
 import { useSimulationStore } from '../stores/simulationStore'
 import { STANCE_COLORS } from '../constants/stances'
+import { societyPhaseLabel, unifiedPhaseLabel } from '../constants/phases'
 import ConversationToast from './ConversationToast.vue'
 import NodeDetailPanel from './NodeDetailPanel.vue'
 import TemporalSlider from './TemporalSlider.vue'
 import ForceGraph2D from './ForceGraph2D.vue'
+import GraphSettingsPanel from './GraphSettingsPanel.vue'
+import { DEFAULT_PHYSICS, type GraphPhysics } from './forceGraphHelpers'
+import { derivePulseUpdate, type PulseCursor } from './liveGraphPulses'
 
 interface GraphEdgePayload {
   id?: string
@@ -18,13 +22,13 @@ interface GraphEdgePayload {
 }
 
 const RELATION_TYPE_STYLES: Record<string, { color: string; width: number; particleColor: string }> = {
-  friend: { color: '#4FC3F7', width: 1.4, particleColor: '#81D4FA' },
-  family: { color: '#FFB74D', width: 1.6, particleColor: '#FFE0B2' },
-  colleague: { color: '#81C784', width: 1.2, particleColor: '#A5D6A7' },
-  neighbor: { color: '#4DB6AC', width: 1.1, particleColor: '#80CBC4' },
-  acquaintance: { color: '#90A4AE', width: 0.9, particleColor: '#CFD8DC' },
-  mentions: { color: '#BA68C8', width: 1.0, particleColor: '#CE93D8' },
-  default: { color: '#90A4AE', width: 1.0, particleColor: '#CFD8DC' },
+  friend: { color: '#5aa0c8', width: 1.4, particleColor: '#8fc4e0' },
+  family: { color: '#c9a373', width: 1.6, particleColor: '#e0c9a0' },
+  colleague: { color: '#6faa8f', width: 1.2, particleColor: '#a0cbb8' },
+  neighbor: { color: '#5fa0a6', width: 1.1, particleColor: '#94cbcf' },
+  acquaintance: { color: '#8593a8', width: 0.9, particleColor: '#b8c2d0' },
+  mentions: { color: '#8a7fbf', width: 1.0, particleColor: '#b8aed8' },
+  default: { color: '#7c8aa0', width: 1.0, particleColor: '#b0bccc' },
 }
 
 const props = defineProps<{
@@ -41,30 +45,38 @@ const societyGraphStore = useSocietyGraphStore()
 const kgStore = useKGEvolutionStore()
 const selectedAgentId = ref<string | null>(null)
 const highlightedAgentIds = ref<string[]>([])
+const graphPhysics = ref<GraphPhysics>({ ...DEFAULT_PHYSICS })
+const showPhysicsPanel = ref(false)
+
+const graphRef = ref<InstanceType<typeof ForceGraph2D> | null>(null)
+// Cursor into the streaming argument buffer so each update only scans newly
+// appended dialogue (O(new) per SSE event, not O(n²) over the whole round).
+let pulseCursor: PulseCursor = { round: -1, count: 0 }
+
+watch(
+  [() => societyGraphStore.currentArguments.length, () => societyGraphStore.currentRound],
+  () => {
+    const { pulses, cursor } = derivePulseUpdate(
+      societyGraphStore.currentArguments,
+      societyGraphStore.currentRound,
+      societyGraphStore.liveAgents.values(),
+      pulseCursor,
+    )
+    pulseCursor = cursor
+    for (const pulse of pulses) {
+      graphRef.value?.firePulse?.(pulse.sourceId, pulse.targetId)
+    }
+  },
+)
 
 const selectedGraphNodeId = computed(() => selectedAgentId.value ?? props.spotlightAgentId ?? null)
 
 const phaseLabel = computed(() => {
   // Unified mode phase labels
   if (store.isUnifiedMode) {
-    switch (store.unifiedPhase) {
-      case 'society_pulse': return '社会の脈動を測定中'
-      case 'council': return `評議会 Round ${societyGraphStore.currentRound}`
-      case 'synthesis': return '分析を統合中'
-      case 'completed': return 'Completed'
-      default: return 'Unified Simulation'
-    }
+    return unifiedPhaseLabel(store.unifiedPhase, societyGraphStore.currentRound)
   }
-  const phase = store.societyPhase
-  switch (phase) {
-    case 'population': return 'Population Generation'
-    case 'selection': return 'Agent Selection'
-    case 'activation': return 'Activation Layer'
-    case 'evaluation': return 'Evaluation'
-    case 'meeting': return `Meeting Round ${societyGraphStore.currentRound}`
-    case 'completed': return 'Completed'
-    default: return 'Society Simulation'
-  }
+  return societyPhaseLabel(store.societyPhase, societyGraphStore.currentRound)
 })
 
 const showConversationToast = computed(() =>
@@ -136,7 +148,12 @@ function handleNodeSelect(node: { id: string }) {
     return
   }
   emit('select-agent', node.id)
-  selectedAgentId.value = null
+  selectedAgentId.value = node.id
+}
+
+function handleBackgroundClick() {
+  clearSelection()
+  clearEdgeSelection()
 }
 
 function handleEdgeHover(edge: GraphEdgePayload | null) {
@@ -230,6 +247,7 @@ watch(showScrubber, (visible) => {
 
 onUnmounted(() => {
   stopScrubberPlayback()
+  pulseCursor = { round: -1, count: 0 }
   societyGraphStore.reset()
   kgStore.reset()
 })
@@ -238,14 +256,33 @@ onUnmounted(() => {
 <template>
   <div class="live-society-graph">
     <ForceGraph2D
+      ref="graphRef"
       :nodes="societyGraphStore.graphNodes"
       :edges="societyGraphStore.graphEdges"
       :selected-node-id="selectedGraphNodeId"
       :highlighted-node-ids="highlightedAgentIds"
+      :physics="graphPhysics"
       @select-node="handleNodeSelect"
       @hover-edge="handleEdgeHover"
       @select-edge="handleEdgeSelect"
+      @background-click="handleBackgroundClick"
     />
+
+    <!-- Physics settings -->
+    <button
+      v-if="societyGraphStore.nodeCount > 0"
+      class="physics-toggle"
+      :class="{ active: showPhysicsPanel }"
+      title="グラフ物理設定"
+      data-testid="physics-toggle"
+      @click="showPhysicsPanel = !showPhysicsPanel"
+    >⚙</button>
+    <div v-if="showPhysicsPanel" class="physics-panel">
+      <GraphSettingsPanel
+        :physics="graphPhysics"
+        @update:physics="graphPhysics = $event"
+      />
+    </div>
 
     <!-- Empty state (before selection) -->
     <div
@@ -298,13 +335,13 @@ onUnmounted(() => {
     <!-- Stance legend -->
     <div v-if="societyGraphStore.nodeCount > 0" class="stance-legend">
       <div v-for="[stance, color] in stanceLegend" :key="stance" class="legend-item">
-        <span class="legend-dot" :style="{ background: color, boxShadow: `0 0 6px ${color}` }" />
+        <span class="legend-dot" :style="{ background: color, boxShadow: `0 0 3px ${color}` }" />
         <span class="legend-label">{{ stance }}</span>
       </div>
       <!-- Edge type legend -->
       <div class="legend-divider" />
       <div v-for="[type, style] in edgeLegend" :key="type" class="legend-item">
-        <span class="legend-line" :style="{ background: style.color, boxShadow: `0 0 4px ${style.color}` }" />
+        <span class="legend-line" :style="{ background: style.color, boxShadow: `0 0 2px ${style.color}` }" />
         <span class="legend-label">{{ type }}</span>
       </div>
     </div>
@@ -354,25 +391,33 @@ onUnmounted(() => {
     </div>
 
     <!-- Layer toggles -->
-    <div v-if="kgStore.entityCount > 0" class="layer-toggles">
+    <div v-if="kgStore.entityCount > 0 || societyGraphStore.populationNodeCount > 0" class="layer-toggles">
+      <button
+        v-if="societyGraphStore.populationNodeCount > 0"
+        class="layer-btn"
+        :class="{ active: societyGraphStore.populationVisible }"
+        title="全人口レイヤー"
+        data-testid="population-toggle"
+        @click="societyGraphStore.populationVisible = !societyGraphStore.populationVisible"
+      >人口</button>
       <button
         class="layer-btn"
         :class="{ active: societyGraphStore.socialEdgesVisible }"
         title="ソーシャルエッジ"
         @click="societyGraphStore.socialEdgesVisible = !societyGraphStore.socialEdgesVisible"
-      >S</button>
+      >社会</button>
       <button
         class="layer-btn"
         :class="{ active: kgStore.layerVisible }"
         title="ナレッジグラフ"
         @click="kgStore.toggleLayerVisible()"
-      >K</button>
+      >知識</button>
       <button
         class="layer-btn"
         :class="{ active: societyGraphStore.agentEntityLinksVisible }"
         title="エージェント⇔エンティティリンク"
         @click="societyGraphStore.agentEntityLinksVisible = !societyGraphStore.agentEntityLinksVisible"
-      >L</button>
+      >リンク</button>
     </div>
 
     <!-- KG Time scrubber -->
@@ -391,6 +436,16 @@ onUnmounted(() => {
       <span class="kg-badge-label">KG</span>
       <span class="kg-badge-count">{{ kgStore.entityCount }} entities</span>
       <span class="kg-badge-count">{{ kgStore.relationCount }} relations</span>
+    </div>
+
+    <!-- Population stats badge -->
+    <div
+      v-if="societyGraphStore.populationVisible && societyGraphStore.populationNodeCount > 0"
+      class="kg-stats-badge population-stats-badge"
+      data-testid="population-stats"
+    >
+      <span class="kg-badge-label">人口</span>
+      <span class="kg-badge-count">{{ societyGraphStore.populationNodeCount.toLocaleString() }} 人</span>
     </div>
 
     <!-- Conversation toast -->
@@ -533,7 +588,7 @@ onUnmounted(() => {
 
 .activation-bar {
   height: 100%;
-  background: linear-gradient(90deg, #66bb6a, #00e5ff);
+  background: linear-gradient(90deg, #5aa0c8, #6faa8f);
   border-radius: 2px;
   transition: width 0.3s ease;
 }
@@ -582,33 +637,73 @@ onUnmounted(() => {
   right: 3rem;
   margin-top: 1.4rem;
   display: flex;
-  gap: 0.2rem;
+  gap: 0.35rem;
   z-index: 5;
 }
-.layer-btn {
-  width: 24px;
-  height: 24px;
+
+.physics-toggle {
+  position: absolute;
+  top: 2.15rem;
+  right: 0.75rem;
+  z-index: 6;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.7rem;
-  font-weight: 700;
-  font-family: var(--font-mono);
+  width: 24px;
+  height: 24px;
+  font-size: 0.85rem;
+  color: rgba(200, 200, 220, 0.4);
+  cursor: pointer;
   background: rgba(16, 16, 30, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 4px;
-  color: rgba(200, 200, 220, 0.4);
+  transition: all 0.2s;
+}
+
+.physics-toggle:hover {
+  color: rgba(230, 230, 245, 0.7);
+  background: rgba(30, 30, 50, 0.9);
+}
+
+.physics-toggle.active {
+  color: rgba(138, 127, 191, 0.95);
+  background: rgba(138, 127, 191, 0.12);
+  border-color: rgba(138, 127, 191, 0.45);
+}
+
+.physics-panel {
+  position: absolute;
+  top: 3.9rem;
+  right: 0.75rem;
+  z-index: 10;
+  pointer-events: auto;
+}
+
+.layer-btn {
+  min-width: 3rem;
+  height: 1.75rem;
+  padding: 0 0.55rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  background: rgba(10, 10, 15, 0.78);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.2s;
 }
 .layer-btn:hover {
-  background: rgba(30, 30, 50, 0.9);
-  color: rgba(230, 230, 245, 0.7);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 .layer-btn.active {
-  border-color: rgba(186, 104, 200, 0.4);
-  color: rgba(186, 104, 200, 0.9);
-  background: rgba(186, 104, 200, 0.1);
+  border-color: var(--border-active);
+  color: var(--accent);
+  background: var(--accent-subtle);
 }
 
 .kg-scrubber {
@@ -630,15 +725,21 @@ onUnmounted(() => {
   padding: 0.35rem 0.75rem;
   background: rgba(10, 10, 30, 0.8);
   backdrop-filter: blur(8px);
-  border: 1px solid rgba(186, 104, 200, 0.25);
+  border: 1px solid rgba(138, 127, 191, 0.25);
   border-radius: 6px;
   z-index: 5;
   font-family: var(--font-mono);
   font-size: 0.65rem;
   color: rgba(200, 200, 255, 0.6);
 }
+
+.population-stats-badge {
+  bottom: 2.9rem;
+  border-color: rgba(90, 160, 200, 0.25);
+}
+
 .kg-badge-label {
-  color: rgba(186, 104, 200, 0.9);
+  color: rgba(138, 127, 191, 0.9);
   font-weight: 700;
   font-size: 0.7rem;
 }
@@ -711,8 +812,8 @@ onUnmounted(() => {
 }
 
 .interaction-chip {
-  border-color: rgba(0, 229, 255, 0.4) !important;
-  color: rgba(0, 229, 255, 0.8) !important;
+  border-color: rgba(90, 160, 200, 0.4) !important;
+  color: rgba(143, 196, 224, 0.85) !important;
 }
 
 .edge-transcript {

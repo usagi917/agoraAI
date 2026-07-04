@@ -1,6 +1,6 @@
 export const STANCE_ORDER = ['賛成', '条件付き賛成', '中立', '条件付き反対', '反対'] as const
 
-export type StanceLabel = typeof STANCE_ORDER[number]
+type StanceLabel = typeof STANCE_ORDER[number]
 
 export const STANCE_COLORS: Record<string, string> = {
   '賛成': '#22c55e',
@@ -10,10 +10,9 @@ export const STANCE_COLORS: Record<string, string> = {
   '反対': '#ef4444',
 }
 
-export const DEFAULT_STANCE_COLOR = '#6366f1'
-export const UNKNOWN_STANCE_COLOR = '#a3a3a3'
+const DEFAULT_STANCE_COLOR = '#6366f1'
 
-export const NUMERIC_STANCE_LABELS: ReadonlyArray<readonly [number, StanceLabel]> = [
+const NUMERIC_STANCE_LABELS: ReadonlyArray<readonly [number, StanceLabel]> = [
   [1.0, '賛成'],
   [0.7, '条件付き賛成'],
   [0.5, '中立'],

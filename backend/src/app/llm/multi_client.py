@@ -5,9 +5,9 @@ import logging
 import os
 
 from src.app.config import settings
+from src.app.llm.adapters.anthropic_adapter import AnthropicAdapter
 from src.app.llm.adapters.base import LLMAdapter
 from src.app.llm.adapters.openai_adapter import OpenAIAdapter
-from src.app.llm.adapters.anthropic_adapter import AnthropicAdapter
 from src.app.llm.json_extraction import extract_json as _extract_json
 from src.app.llm.rate_limiter import RateLimiter
 

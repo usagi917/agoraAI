@@ -4,6 +4,16 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
 })
 
+function validationHeaders(): Record<string, string> | undefined {
+  const token = import.meta.env.VITE_VALIDATION_TOKEN
+  return token ? { 'X-Validation-Token': token } : undefined
+}
+
+function withValidationHeaders<T extends Record<string, unknown>>(config: T): T & { headers?: Record<string, string> } {
+  const headers = validationHeaders()
+  return headers ? { ...config, headers } : config
+}
+
 export interface TemplateResponse {
   id: string
   name: string
@@ -109,13 +119,6 @@ export interface SimulationListItem {
   swarm_id: string | null
   created_at: string
   completed_at: string | null
-}
-
-export interface GraphSnapshot {
-  round: number
-  nodes: any[]
-  edges: any[]
-  focus_entities?: string[]
 }
 
 export interface EvidenceRef {
@@ -650,6 +653,52 @@ export interface SimulationTimelineEvent {
   created_at?: string | null
 }
 
+export interface ValidationTopic {
+  survey_id: string
+  theme: string
+  question: string
+  source: string
+  survey_date: string
+  sample_size: number
+  quality_rank?: string
+  source_origin?: string
+  actual_distribution: Record<string, number>
+}
+
+export interface ValidationTopicsResponse {
+  preset: string
+  topics: ValidationTopic[]
+}
+
+export interface ValidationEvaluation {
+  survey_id: string
+  theme: string
+  question: string
+  source: string
+  source_origin?: string
+  predicted: Record<string, number>
+  actual: Record<string, number>
+  jsd: number
+  emd: number
+  brier: number
+  ece: number | null
+  verdict: 'hit' | 'partial' | 'miss'
+}
+
+export interface ValidationReportResponse {
+  simulation_id: string
+  preset: string
+  predicted: Record<string, number>
+  actual: Record<string, number>
+  jsd: number
+  emd: number
+  brier: number
+  ece: number | null
+  verdict: 'hit' | 'partial' | 'miss'
+  sample_reasons?: Array<{ agent_id?: string; stance?: string; reason: string }>
+  evaluations: ValidationEvaluation[]
+}
+
 export async function createSimulation(
   options: {
     projectId?: string
@@ -658,16 +707,24 @@ export async function createSimulation(
     promptText?: string
     mode?: string
     evidenceMode?: string
+    seed?: number
+    diagnostic?: Record<string, any>
   } = {},
 ): Promise<SimulationResponse> {
-  const { data } = await api.post('/simulations', {
+  const payload = {
     project_id: options.projectId || null,
     template_name: options.templateName || '',
     execution_profile: options.executionProfile || 'standard',
     mode: options.mode || 'unified',
     prompt_text: options.promptText || '',
     evidence_mode: options.evidenceMode || 'strict',
-  })
+    seed: options.seed ?? null,
+    diagnostic: options.diagnostic ?? null,
+  }
+  const headers = validationHeaders()
+  const { data } = headers
+    ? await api.post('/simulations', payload, { headers })
+    : await api.post('/simulations', payload)
   return data
 }
 
@@ -686,11 +743,6 @@ export async function getSimulationGraph(simId: string) {
   return data
 }
 
-export async function getSimulationGraphHistory(simId: string): Promise<GraphSnapshot[]> {
-  const { data } = await api.get(`/simulations/${simId}/graph/history`)
-  return data
-}
-
 export async function getSimulationReport(simId: string): Promise<SimulationReportResponse> {
   const { data } = await api.get(`/simulations/${simId}/report`)
   return data
@@ -703,6 +755,24 @@ export async function getSimulationColonies(simId: string): Promise<ColonyRespon
 
 export async function getSimulationTimeline(simId: string): Promise<SimulationTimelineEvent[]> {
   const { data } = await api.get(`/simulations/${simId}/timeline`)
+  return data
+}
+
+export async function getValidationTopics(preset = 'economy'): Promise<ValidationTopicsResponse> {
+  const { data } = await api.get('/validation/topics', withValidationHeaders({ params: { preset } }))
+  return data
+}
+
+export async function getValidationReport(
+  simId: string,
+  surveyId?: string,
+): Promise<ValidationReportResponse> {
+  const { data } = await api.get(
+    `/simulations/${simId}/validation-report`,
+    withValidationHeaders({
+      params: surveyId ? { survey_id: surveyId } : undefined,
+    }),
+  )
   return data
 }
 
@@ -874,6 +944,25 @@ export async function getSocialGraph(simId: string): Promise<SocialGraphResponse
   return data
 }
 
+export interface PopulationNetworkResponse {
+  population_id: string
+  node_count: number
+  edge_count: number
+  nodes: Array<{ id: string; agent_index: number }>
+  /** [source_index, target_index, strength] の圧縮形式 */
+  edges: Array<[number, number, number]>
+}
+
+export async function getPopulationNetwork(
+  simId: string,
+  options?: { signal?: AbortSignal },
+): Promise<PopulationNetworkResponse> {
+  const { data } = await api.get(`/society/simulations/${simId}/population-network`, {
+    signal: options?.signal,
+  })
+  return data
+}
+
 export async function getAgentDetail(
   simId: string,
   agentId: string,
@@ -894,59 +983,6 @@ export async function getConversations(
 }
 
 // === Narrative API ===
-
-export interface AgentQuote {
-  agent_id: string
-  agent_index: number
-  occupation: string
-  age: number
-  region: string
-  stance: string
-  confidence: number
-  quote: string
-}
-
-export interface NarrativeFinding {
-  finding: string
-  type: string
-  supporting_evidence?: AgentQuote[]
-  confidence: number
-  probability?: number
-  key_factors?: string[]
-}
-
-export interface NarrativeConsensus {
-  point: string
-  supporting_agents: AgentQuote[]
-}
-
-export interface NarrativeControversy {
-  point: string
-  positions: Array<Record<string, any>>
-  supporting_quotes: AgentQuote[]
-  opposing_quotes: AgentQuote[]
-  demographic_split: Record<string, any>
-}
-
-export interface NarrativeRecommendation {
-  recommendation: string
-  evidence_chain: Array<Record<string, any>>
-  supporting_agents: AgentQuote[]
-}
-
-export interface NarrativeResponse {
-  executive_summary: string
-  key_findings: NarrativeFinding[]
-  consensus_areas: NarrativeConsensus[]
-  controversy_areas: NarrativeControversy[]
-  recommendations: NarrativeRecommendation[]
-  stance_shifts: Array<Record<string, any>>
-}
-
-export async function getNarrative(simId: string): Promise<{ phase_data: NarrativeResponse }> {
-  const { data } = await api.get(`/society/simulations/${simId}/narrative`)
-  return data
-}
 
 export interface PropagationData {
   converged: boolean
@@ -1035,22 +1071,7 @@ export interface TimeAxisReport {
   what_if?: WhatIfEntry[]
 }
 
-export interface EnsembleResponse {
-  bands: { key: string; label: string; distribution: Record<string, number>; credible_intervals?: TimelineEntry['credible_intervals'] }[]
-  horizons: number
-}
-
 export async function getTimeAxis(simId: string): Promise<TimeAxisReport> {
   const { data } = await api.get(`/society/simulations/${simId}/time-axis`)
-  return data
-}
-
-export async function getEnsemble(simId: string): Promise<EnsembleResponse> {
-  const { data } = await api.get(`/society/simulations/${simId}/ensemble`)
-  return data
-}
-
-export async function getTemporalReport(simId: string): Promise<TimeAxisReport> {
-  const { data } = await api.get(`/society/simulations/${simId}/report`)
   return data
 }

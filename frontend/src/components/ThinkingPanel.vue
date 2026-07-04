@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useCognitiveStore } from '../stores/cognitiveStore'
 import { useAgentVisualizationStore } from '../stores/agentVisualizationStore'
+import { formatPercent } from '../utils/format'
 
 const cognitiveStore = useCognitiveStore()
 const vizStore = useAgentVisualizationStore()
@@ -174,7 +175,7 @@ onBeforeUnmount(() => {
                 :style="{ width: `${b.confidence * 100}%` }"
               />
             </div>
-            <span class="bdi-value">{{ (b.confidence * 100).toFixed(0) }}%</span>
+            <span class="bdi-value">{{ formatPercent(b.confidence, 0) }}</span>
           </div>
           <div v-if="sortedBeliefs.length === 0" class="bdi-empty">データなし</div>
         </div>
@@ -190,7 +191,7 @@ onBeforeUnmount(() => {
                 :style="{ width: `${d.priority * 100}%` }"
               />
             </div>
-            <span class="bdi-value">{{ (d.priority * 100).toFixed(0) }}%</span>
+            <span class="bdi-value">{{ formatPercent(d.priority, 0) }}</span>
           </div>
           <div v-if="sortedDesires.length === 0" class="bdi-empty">データなし</div>
         </div>
@@ -206,7 +207,7 @@ onBeforeUnmount(() => {
                 :style="{ width: `${i.commitment_strength * 100}%` }"
               />
             </div>
-            <span class="bdi-value">{{ (i.commitment_strength * 100).toFixed(0) }}%</span>
+            <span class="bdi-value">{{ formatPercent(i.commitment_strength, 0) }}</span>
           </div>
           <div v-if="sortedIntentions.length === 0" class="bdi-empty">データなし</div>
         </div>

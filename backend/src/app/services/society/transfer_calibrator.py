@@ -13,7 +13,6 @@ import math
 from collections import defaultdict
 from typing import TypedDict
 
-
 from src.app.services.society.constants import STANCE_ORDER as STANCES
 
 

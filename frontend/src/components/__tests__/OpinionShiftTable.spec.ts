@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
 import OpinionShiftTable from '../OpinionShiftTable.vue'
-import type { OpinionShift } from '../OpinionShiftTable.vue'
+import type { OpinionShift } from '../timelineTypes'
 
 const MOCK_SHIFTS: OpinionShift[] = [
   {

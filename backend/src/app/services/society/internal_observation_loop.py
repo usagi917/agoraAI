@@ -9,7 +9,7 @@ Phase 3 のベイジアン更新 (ParticleFilter.step) の observation として
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Iterable
+from collections.abc import Iterable
 
 from src.app.services.society.particle_filter import ParticleFilter
 

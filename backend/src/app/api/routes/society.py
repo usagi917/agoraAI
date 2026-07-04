@@ -9,23 +9,34 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.api.deps import get_session
-from src.app.models.population import Population
 from src.app.models.agent_profile import AgentProfile
-from src.app.models.social_edge import SocialEdge
-from src.app.models.simulation import Simulation
-from src.app.models.society_result import SocietyResult
-from src.app.models.evaluation_result import EvaluationResult
 from src.app.models.conversation_log import ConversationLog
-from src.app.services.society.validation_pipeline import summarize_prediction_evaluations
+from src.app.models.evaluation_result import EvaluationResult
+from src.app.models.population import Population
+from src.app.models.simulation import Simulation
+from src.app.models.social_edge import SocialEdge
+from src.app.models.society_result import SocietyResult
 from src.app.services.society.population_generator import (
     generate_population,
     get_default_population_size,
     validate_population_size,
 )
+from src.app.services.society.validation_pipeline import summarize_prediction_evaluations
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+async def _latest_layer(session: AsyncSession, sim_id: str, layer: str) -> SocietyResult | None:
+    """Return the most recent SocietyResult for a given simulation+layer, or None."""
+    result = await session.execute(
+        select(SocietyResult)
+        .where(SocietyResult.simulation_id == sim_id, SocietyResult.layer == layer)
+        .order_by(SocietyResult.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 @router.get("/populations")
@@ -95,13 +106,7 @@ async def get_activation_result(
     session: AsyncSession = Depends(get_session),
 ):
     """活性化レイヤーの結果を取得する。"""
-    result = await session.execute(
-        select(SocietyResult)
-        .where(SocietyResult.simulation_id == sim_id, SocietyResult.layer == "activation")
-        .order_by(SocietyResult.created_at.desc())
-        .limit(1)
-    )
-    record = result.scalar_one_or_none()
+    record = await _latest_layer(session, sim_id, "activation")
     if not record:
         raise HTTPException(status_code=404, detail="活性化結果が見つかりません")
 
@@ -228,13 +233,7 @@ async def get_meeting_result(
     session: AsyncSession = Depends(get_session),
 ):
     """Meeting Layer の結果を取得する。"""
-    result = await session.execute(
-        select(SocietyResult)
-        .where(SocietyResult.simulation_id == sim_id, SocietyResult.layer == "meeting")
-        .order_by(SocietyResult.created_at.desc())
-        .limit(1)
-    )
-    record = result.scalar_one_or_none()
+    record = await _latest_layer(session, sim_id, "meeting")
     if not record:
         raise HTTPException(status_code=404, detail="Meeting結果が見つかりません")
 
@@ -292,8 +291,8 @@ async def get_evaluation_summary(
     validation_records が存在しない場合は inconclusive を返す。
     """
     from src.app.repositories.validation_repo import ValidationRepository
-    from src.app.services.society.validation_pipeline import build_validation_summary
     from src.app.services.society.baseline_comparator import build_evaluation_summary_response
+    from src.app.services.society.validation_pipeline import build_validation_summary
 
     sim = await session.get(Simulation, sim_id)
     if not sim:
@@ -345,13 +344,7 @@ async def get_narrative(
     session: AsyncSession = Depends(get_session),
 ):
     """構造化ナラティブレポートを返す。"""
-    result = await session.execute(
-        select(SocietyResult)
-        .where(SocietyResult.simulation_id == sim_id, SocietyResult.layer == "narrative")
-        .order_by(SocietyResult.created_at.desc())
-        .limit(1)
-    )
-    record = result.scalar_one_or_none()
+    record = await _latest_layer(session, sim_id, "narrative")
     if not record:
         raise HTTPException(status_code=404, detail="ナラティブレポートが見つかりません")
 
@@ -369,13 +362,7 @@ async def get_demographics(
     session: AsyncSession = Depends(get_session),
 ):
     """デモグラフィック・クロス分析結果を返す。"""
-    result = await session.execute(
-        select(SocietyResult)
-        .where(SocietyResult.simulation_id == sim_id, SocietyResult.layer == "demographic_analysis")
-        .order_by(SocietyResult.created_at.desc())
-        .limit(1)
-    )
-    record = result.scalar_one_or_none()
+    record = await _latest_layer(session, sim_id, "demographic_analysis")
     if not record:
         raise HTTPException(status_code=404, detail="デモグラフィック分析結果が見つかりません")
 
@@ -393,13 +380,7 @@ async def get_propagation(
     session: AsyncSession = Depends(get_session),
 ):
     """ネットワーク伝播結果を返す（クラスタ、エコーチェンバー、タイムステップ履歴）。"""
-    result = await session.execute(
-        select(SocietyResult)
-        .where(SocietyResult.simulation_id == sim_id, SocietyResult.layer == "network_propagation")
-        .order_by(SocietyResult.created_at.desc())
-        .limit(1)
-    )
-    record = result.scalar_one_or_none()
+    record = await _latest_layer(session, sim_id, "network_propagation")
     if not record:
         return {"phase_data": None}
 
@@ -435,13 +416,7 @@ async def get_social_graph(
     pop_id = await _resolve_population_id(sim_id, session)
 
     # activation 結果からエージェント情報を取得
-    act_result = await session.execute(
-        select(SocietyResult)
-        .where(SocietyResult.simulation_id == sim_id, SocietyResult.layer == "activation")
-        .order_by(SocietyResult.created_at.desc())
-        .limit(1)
-    )
-    act_record = act_result.scalar_one_or_none()
+    act_record = await _latest_layer(session, sim_id, "activation")
 
     # activation の個別回答から agent_id → response のマップを作成
     response_map: dict[str, dict] = {}
@@ -519,6 +494,50 @@ async def get_social_graph(
     }
 
 
+@router.get("/simulations/{sim_id}/population-network")
+async def get_population_network(
+    sim_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """全人口ネットワークをコンパクト形式で返す。
+
+    10,000 ノード規模の描画用にペイロードを圧縮する:
+    - nodes: agent_index 順の [{id, agent_index}]
+    - edges: [source_index, target_index, strength] の配列
+    """
+    pop_id = await _resolve_population_id(sim_id, session)
+
+    agents_result = await session.execute(
+        select(AgentProfile.id, AgentProfile.agent_index)
+        .where(AgentProfile.population_id == pop_id)
+        .order_by(AgentProfile.agent_index)
+    )
+    agent_rows = agents_result.all()
+
+    id_to_index = {row.id: row.agent_index for row in agent_rows}
+    nodes = [{"id": row.id, "agent_index": row.agent_index} for row in agent_rows]
+
+    edges_result = await session.execute(
+        select(SocialEdge.agent_id, SocialEdge.target_id, SocialEdge.strength)
+        .where(SocialEdge.population_id == pop_id)
+    )
+    edges = []
+    for agent_id, target_id, strength in edges_result.all():
+        si = id_to_index.get(agent_id)
+        ti = id_to_index.get(target_id)
+        if si is None or ti is None:
+            continue
+        edges.append([si, ti, round(float(strength), 3)])
+
+    return {
+        "population_id": pop_id,
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
 @router.get("/simulations/{sim_id}/agents")
 async def get_agents(
     sim_id: str,
@@ -530,16 +549,10 @@ async def get_agents(
     session: AsyncSession = Depends(get_session),
 ):
     """選抜済みエージェント一覧（activation 回答付き、フィルター対応）。"""
-    pop_id = await _resolve_population_id(sim_id, session)
+    await _resolve_population_id(sim_id, session)
 
     # activation 結果を取得
-    act_result = await session.execute(
-        select(SocietyResult)
-        .where(SocietyResult.simulation_id == sim_id, SocietyResult.layer == "activation")
-        .order_by(SocietyResult.created_at.desc())
-        .limit(1)
-    )
-    act_record = act_result.scalar_one_or_none()
+    act_record = await _latest_layer(session, sim_id, "activation")
 
     responses = act_record.phase_data.get("responses", []) if act_record and act_record.phase_data else []
 
@@ -607,13 +620,7 @@ async def get_agent_detail(
         raise HTTPException(status_code=404, detail="エージェントが見つかりません")
 
     # activation 回答を取得
-    act_result = await session.execute(
-        select(SocietyResult)
-        .where(SocietyResult.simulation_id == sim_id, SocietyResult.layer == "activation")
-        .order_by(SocietyResult.created_at.desc())
-        .limit(1)
-    )
-    act_record = act_result.scalar_one_or_none()
+    act_record = await _latest_layer(session, sim_id, "activation")
 
     activation_response = None
     if act_record and act_record.phase_data:
@@ -623,13 +630,7 @@ async def get_agent_detail(
                 break
 
     # meeting 発言を取得
-    mtg_result = await session.execute(
-        select(SocietyResult)
-        .where(SocietyResult.simulation_id == sim_id, SocietyResult.layer == "meeting")
-        .order_by(SocietyResult.created_at.desc())
-        .limit(1)
-    )
-    mtg_record = mtg_result.scalar_one_or_none()
+    mtg_record = await _latest_layer(session, sim_id, "meeting")
 
     meeting_contributions = []
     meeting_participant_info = None
@@ -748,13 +749,7 @@ async def get_conversations(
     session: AsyncSession = Depends(get_session),
 ):
     """Meeting ラウンド会話を返す（フィルター対応）。"""
-    mtg_result = await session.execute(
-        select(SocietyResult)
-        .where(SocietyResult.simulation_id == sim_id, SocietyResult.layer == "meeting")
-        .order_by(SocietyResult.created_at.desc())
-        .limit(1)
-    )
-    mtg_record = mtg_result.scalar_one_or_none()
+    mtg_record = await _latest_layer(session, sim_id, "meeting")
     if not mtg_record or not mtg_record.phase_data:
         raise HTTPException(status_code=404, detail="Meeting結果が見つかりません")
 

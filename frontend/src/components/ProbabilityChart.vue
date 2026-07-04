@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { formatPercent } from '../utils/format'
 
 interface Scenario {
   description: string
@@ -54,12 +55,12 @@ const barColor = (score: number) => {
           ></div>
         </div>
         <span class="probability-value">
-          {{ (scenario.scenarioScore * 100).toFixed(0) }}%
+          {{ formatPercent(scenario.scenarioScore, 0) }}
         </span>
       </div>
       <div class="scenario-meta" v-if="scenario.supportRatio !== undefined">
         <span class="agreement" title="支持率">
-          支持 {{ (scenario.supportRatio * 100).toFixed(0) }}%
+          支持 {{ formatPercent(scenario.supportRatio, 0) }}
         </span>
       </div>
     </div>

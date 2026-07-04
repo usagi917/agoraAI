@@ -13,6 +13,7 @@ import {
   type SimulationListItem,
 } from '../api/client'
 import InputPanel from '../components/InputPanel.vue'
+import { parseServerDate } from '../utils/format'
 
 const router = useRouter()
 
@@ -34,6 +35,11 @@ const bootstrapError = ref('')
 const examplesOpen = ref(false)
 const advancedOpen = ref(false)
 // advanced options removed for simplicity
+
+function formatServerDateTime(value?: string | null) {
+  const ms = parseServerDate(value)
+  return ms != null ? new Date(ms).toLocaleString('ja-JP') : ''
+}
 
 // Question Wizard state
 const questionTemplates = [
@@ -430,7 +436,7 @@ function getPipelineStageLabel(stage: string) {
           </div>
           <div class="history-right">
             <span class="status-badge" :class="getStatusColor(sim.status)">{{ getStatusLabel(sim.status) }}</span>
-            <span class="history-date">{{ new Date(sim.created_at).toLocaleString('ja-JP') }}</span>
+            <span class="history-date">{{ formatServerDateTime(sim.created_at) }}</span>
           </div>
         </router-link>
       </div>
@@ -569,49 +575,6 @@ function getPipelineStageLabel(stage: string) {
 .section-note { margin-top: 0.75rem; font-size: 0.78rem; color: var(--text-muted); line-height: 1.6; }
 .section-note-warning { color: var(--warning); }
 .section-toggle { margin-left: auto; font-size: 0.78rem; }
-
-.default-flow-card {
-  background: linear-gradient(135deg, var(--accent-subtle), rgba(16,185,129,0.08));
-  border: 1px solid var(--border-active);
-  border-radius: var(--radius);
-  padding: var(--panel-padding);
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.default-flow-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.default-flow-eyebrow {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.default-flow-title {
-  margin-top: 0.2rem;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.default-flow-copy {
-  font-size: 0.84rem;
-  color: var(--text-secondary);
-  line-height: 1.65;
-}
-
-.default-flow-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
 
 /* === Unified Input Section === */
 .input-section {
@@ -1114,10 +1077,6 @@ function getPipelineStageLabel(stage: string) {
   .template-grid,
   .profile-grid {
     grid-template-columns: 1fr;
-  }
-
-  .default-flow-top {
-    flex-direction: column;
   }
 
   .launch-section {

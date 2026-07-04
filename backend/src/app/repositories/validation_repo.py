@@ -4,11 +4,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.database import utcnow_naive
-from src.app.models.validation_record import ValidationRecord
 from src.app.evaluation.metrics import _jsd
+from src.app.models.validation_record import ValidationRecord
 from src.app.utils.distribution_metrics import (
-    kl_divergence_symmetric,
     earth_movers_distance,
+    kl_divergence_symmetric,
 )
 
 

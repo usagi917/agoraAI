@@ -13,8 +13,9 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 
@@ -339,10 +340,6 @@ async def run_network_propagation(
     _events = events or []
 
     for t in range(max_timesteps):
-        prev_opinions = [ea["opinion_vector"] for ea in engine_agents] if t == 0 else [
-            list(row) for row in engine._opinions
-        ]
-
         # Phase 1: Compute per-agent cumulative event delta for this timestep.
         # New events that fire at step t are computed and added to residuals.
         cumulative_deltas = [0.0] * len(agents)

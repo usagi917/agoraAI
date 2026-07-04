@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useSimulationStore } from '../stores/simulationStore'
+import { formatPercent } from '../utils/format'
 
 const store = useSimulationStore()
 
@@ -92,7 +93,7 @@ const progressInfo = computed(() => {
     return ''
   }
   if (store.isMetaMode) {
-    const score = store.metaBestScore > 0 ? `score ${(store.metaBestScore * 100).toFixed(0)}%` : ''
+    const score = store.metaBestScore > 0 ? `score ${formatPercent(store.metaBestScore, 0)}` : ''
     return `Cycle ${store.metaCycleIndex}/${store.metaMaxCycles || '?'}${score ? ` · ${score}` : ''}`
   }
   if (store.mode === 'swarm' || store.mode === 'hybrid') {

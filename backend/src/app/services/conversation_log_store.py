@@ -1,8 +1,9 @@
 """ConversationLog の保存ヘルパー。"""
 
-from inspect import isawaitable
 import logging
-from typing import Any, Iterable
+from collections.abc import Iterable
+from inspect import isawaitable
+from typing import Any
 
 from src.app.models.conversation_log import (
     CONVERSATION_LOG_ADDRESSED_TO_MAX_LENGTH,

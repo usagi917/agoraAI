@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useSimulationStore } from '../stores/simulationStore'
 import ClusterEvolutionChart from './ClusterEvolutionChart.vue'
 import { getStanceColor, STANCE_ORDER } from '../constants/stances'
+import { formatPercent } from '../utils/format'
 
 /**
  * Props for hydration from API (completed simulations).
@@ -196,7 +197,7 @@ const lastEntropy = computed(() => {
       <div v-if="echoMetrics.homophily_index > 0" class="metric-card">
         <span class="metric-label">Echo Chamber</span>
         <span class="metric-value" :class="{ warning: echoMetrics.homophily_index > 0.6 }">
-          {{ (echoMetrics.homophily_index * 100).toFixed(0) }}%
+          {{ formatPercent(echoMetrics.homophily_index, 0) }}
         </span>
       </div>
     </div>
@@ -318,7 +319,7 @@ const lastEntropy = computed(() => {
               :style="{ width: (Number(price) * 100) + '%', backgroundColor: getStanceColor(String(outcome), '#818cf8') }"
             />
           </div>
-          <span class="market-price">{{ (Number(price) * 100).toFixed(1) }}%</span>
+          <span class="market-price">{{ formatPercent(Number(price), 1) }}</span>
         </div>
       </div>
     </div>
@@ -331,7 +332,7 @@ const lastEntropy = computed(() => {
           t{{ pt.timestep }}: {{ pt.type }}
         </div>
         <div v-for="tp in tippingPoints" :key="'tp' + tp.timestep" class="event-badge cascade">
-          t{{ tp.timestep }}: cascade ({{ (tp.cascade_ratio * 100).toFixed(0) }}%)
+          t{{ tp.timestep }}: cascade ({{ formatPercent(tp.cascade_ratio, 0) }})
         </div>
       </div>
     </div>

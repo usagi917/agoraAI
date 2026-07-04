@@ -1,6 +1,7 @@
 import pytest
 
 from src.app.services.society.backtest import (
+    build_empty_backtest_result,
     overlay_observed_intervention_comparison,
     run_backtest_analysis,
 )
@@ -47,6 +48,21 @@ def _society_first_payload() -> dict:
                 ],
             },
         ],
+    }
+
+
+def test_empty_backtest_result_exposes_rich_historical_case_mock():
+    backtest = build_empty_backtest_result()
+    sample_cases = backtest["input_format"]["historical_cases"]
+
+    assert len(sample_cases) >= 3
+    assert {case["case_id"] for case in sample_cases} >= {"case-001", "case-002", "case-003"}
+    assert all(case["outcome"]["metrics"] for case in sample_cases)
+    assert all(case["interventions"] for case in sample_cases)
+    assert {case["interventions"][0]["intervention_id"] for case in sample_cases} >= {
+        "price_reduction",
+        "regulatory_alignment",
+        "message_refinement",
     }
 
 

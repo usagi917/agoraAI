@@ -24,6 +24,7 @@ import ActivityFeed from '../components/ActivityFeed.vue'
 import SocietyProgress from '../components/SocietyProgress.vue'
 import OpinionDistribution from '../components/OpinionDistribution.vue'
 import LiveSocietyGraph from '../components/LiveSocietyGraph.vue'
+import SocietyLiveFeed from '../components/SocietyLiveFeed.vue'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useSocietyStore } from '../stores/societyStore'
 import { useCognitiveStore } from '../stores/cognitiveStore'
@@ -36,6 +37,8 @@ import ForceGraph2D from '../components/ForceGraph2D.vue'
 import AgentStoryDrawer from '../components/AgentStoryDrawer.vue'
 import ConversationsTab from '../components/ConversationsTab.vue'
 import { useTheaterStore } from '../stores/theaterStore'
+import { unifiedPhaseLabel } from '../constants/phases'
+import { formatPercent, parseServerDate } from '../utils/format'
 import {
   getDefaultLiveSecondaryTab,
   getLivePrimaryView,
@@ -62,6 +65,7 @@ const simId = route.params.id as string
 const sim = ref<SimulationResponse | null>(null)
 const selectedEntity = ref<any>(null)
 const elapsedTime = ref(0)
+const isBootstrapping = ref(true)
 const activeSecondaryTab = ref<LiveSecondaryTab>('progress')
 const selectedAgentForStory = ref<string | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
@@ -108,13 +112,7 @@ const theaterStore = useTheaterStore()
 const stageLabel = computed(() => {
   if (store.isSocietyMode) {
     if (store.isUnifiedMode) {
-      switch (store.unifiedPhase) {
-        case 'society_pulse': return '社会の脈動を測定中'
-        case 'council': return `評議会 Round ${societyGraphStore.currentRound}`
-        case 'synthesis': return '統合分析中'
-        case 'completed': return '完了'
-        default: return '準備中...'
-      }
+      return unifiedPhaseLabel(store.unifiedPhase, societyGraphStore.currentRound)
     }
     if (store.mode === 'society_first') {
       if (store.phase === 'issue_mining') return '重要論点を抽出中'
@@ -360,13 +358,6 @@ function handleConnectionHighlight(sourceId: string, targetId: string) {
 
 function liveStateKey(id: string) {
   return `agent-ai:live:${id}`
-}
-
-function parseServerDate(value?: string | null) {
-  if (!value) return null
-  const normalized = /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`
-  const timestamp = Date.parse(normalized)
-  return Number.isFinite(timestamp) ? timestamp : null
 }
 
 function stopElapsedTimer() {
@@ -648,12 +639,15 @@ async function bootstrapSimulation() {
 }
 
 onMounted(async () => {
+  isBootstrapping.value = true
   try {
     await bootstrapSimulation()
   } catch (error) {
     console.error('Simulation bootstrap failed:', error)
     store.init(simId, store.mode, store.promptText)
     store.setError('シミュレーション状態の取得に失敗しました。少し待ってから再読み込みしてください。')
+  } finally {
+    isBootstrapping.value = false
   }
 })
 
@@ -676,7 +670,9 @@ watch(
     }
     if (newStatus === 'completed') {
       clearPersistedLiveState()
-      router.push(`/sim/${simId}/results`)
+      if (!isBootstrapping.value) {
+        router.push(`/sim/${simId}/results`)
+      }
     }
   },
 )
@@ -765,7 +761,7 @@ function goToResults() {
                 :style="{ width: `${(share as number) * 100}%` }"
               />
             </div>
-            <span class="stance-bar-value">{{ ((share as number) * 100).toFixed(0) }}%</span>
+            <span class="stance-bar-value">{{ formatPercent(share as number, 0) }}</span>
           </div>
         </div>
       </div>
@@ -900,7 +896,7 @@ function goToResults() {
             <div class="entity-name">{{ selectedEntity.label }}</div>
             <div class="entity-meta">
               <span class="entity-type-badge">{{ selectedEntity.type }}</span>
-              <span class="entity-score">重要度 {{ ((selectedEntity.importance_score || 0) * 100).toFixed(0) }}%</span>
+              <span class="entity-score">重要度 {{ formatPercent(selectedEntity.importance_score || 0, 0) }}</span>
             </div>
             <div class="detail-grid">
               <div v-if="selectedEntity.stance" class="detail-item">
@@ -989,6 +985,9 @@ function goToResults() {
         </div>
       </div>
     </div>
+
+    <!-- SNS-style live feed (society mode) -->
+    <SocietyLiveFeed v-if="store.isSocietyMode" />
 
     <!-- Agent Story Drawer (society mode) -->
     <AgentStoryDrawer
@@ -1300,8 +1299,6 @@ function goToResults() {
 
 .panel-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--panel-padding); }
 .thinking-tab { min-height: 20rem; max-height: 36rem; overflow-y: auto; }
-.dialogue-tab { flex: 1; min-height: 20rem; overflow: hidden; }
-.connections-tab { flex: 1; min-height: 20rem; overflow: hidden; }
 .panel-count { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); background: rgba(255,255,255,0.04); padding: 0.1rem 0.4rem; border-radius: 4px; }
 .panel-count.live { color: var(--success); background: rgba(34,197,94,0.1); }
 
@@ -1526,8 +1523,8 @@ function goToResults() {
 }
 
 .stepper-step.stepper-active {
-  background: rgba(var(--accent-rgb, 99, 102, 241), 0.12);
-  color: var(--accent, #6366f1);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
   font-weight: 600;
 }
 

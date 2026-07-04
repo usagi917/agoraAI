@@ -506,7 +506,6 @@ def _generate_hidden_motivation(
 ) -> str:
     """life_event と income/occupation から隠された動機を生成する（ルールベース）。"""
     income = demographics.get("income_bracket", "")
-    occupation = demographics.get("occupation", "")
     age = demographics.get("age", 40)
 
     motivations = []

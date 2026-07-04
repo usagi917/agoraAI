@@ -1,6 +1,6 @@
 import logging
-from pathlib import Path
 import shlex
+from pathlib import Path
 
 import yaml
 from pydantic import AliasChoices, Field

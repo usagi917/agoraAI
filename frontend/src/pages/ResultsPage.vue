@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DOMPurify from 'dompurify'
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -30,6 +31,7 @@ import {
   getPropagation,
   type PropagationData,
   type CodexHealthResponse,
+  getPopulationNetwork,
 } from '../api/client'
 import DecisionBriefComponent from '../components/DecisionBrief.vue'
 import ProbabilityChart from '../components/ProbabilityChart.vue'
@@ -38,6 +40,8 @@ import AgreementHeatmap from '../components/AgreementHeatmap.vue'
 import PropagationDashboard from '../components/PropagationDashboard.vue'
 import IntegratedReport from '../components/IntegratedReport.vue'
 import { useTimeAxis } from '../composables/useTimeAxis'
+import { useSocietyGraphStore } from '../stores/societyGraphStore'
+import { formatPercent } from '../utils/format'
 import {
   getDefaultResultsSecondaryTab,
   getResultsPrimaryView,
@@ -49,6 +53,7 @@ import {
 const route = useRoute()
 const router = useRouter()
 const simId = route.params.id as string
+const societyGraphStore = useSocietyGraphStore()
 
 const sim = ref<SimulationResponse | null>(null)
 const report = ref<SimulationReportResponse | null>(null)
@@ -61,6 +66,7 @@ const transcriptLoading = ref(false)
 const transcriptPhaseFilter = ref<string>('')
 const activeSecondaryTab = ref<ResultsSecondaryTab>('society')
 let playbackFrame: number | null = null
+let populationNetworkAbort: AbortController | null = null
 
 // Time-axis (t0..t5) prediction view — lazily attached if backend produced it.
 const { report: timeAxisReport, loading: timeAxisLoading, error: timeAxisError, fetch: fetchTimeAxis } = useTimeAxis()
@@ -276,7 +282,7 @@ const predictionAccuracyCards = computed(() => {
   if (intervention?.count) {
     cards.push({
       label: '介入効果',
-      value: typeof intervention.direction_accuracy === 'number' ? `${(intervention.direction_accuracy * 100).toFixed(0)}%` : 'pending',
+      value: typeof intervention.direction_accuracy === 'number' ? formatPercent(intervention.direction_accuracy, 0) : 'pending',
       detail: typeof intervention.mae === 'number' ? `MAE ${intervention.mae.toFixed(3)}` : `${intervention.validated_count}/${intervention.count} validated`,
     })
   }
@@ -311,7 +317,7 @@ const validationLabel = computed(() => {
   if (!summary) return ''
   const anchor = summary.survey_anchor_status || '未検証'
   const scenario = summary.scenario_backtest_status === '過去ケース検証あり'
-    ? `過去ケース Hit ${(Number(summary.hit_rate || 0) * 100).toFixed(0)}%`
+    ? `過去ケース Hit ${formatPercent(Number(summary.hit_rate || 0), 0)}`
     : '過去ケース未検証'
   return `${anchor} · ${scenario}`
 })
@@ -383,6 +389,31 @@ const secondaryTabLabels: Record<ResultsSecondaryTab, string> = {
   evidence: 'Evidence',
 }
 
+async function hydratePopulationNetwork() {
+  const mode = sim.value?.mode
+  if (mode !== 'unified' && mode !== 'society' && mode !== 'society_first' && !layoutContext.value.hasSociety) {
+    return
+  }
+
+  populationNetworkAbort?.abort()
+  populationNetworkAbort = new AbortController()
+  const controller = populationNetworkAbort
+  const startedGeneration = societyGraphStore.generation
+  try {
+    const network = await getPopulationNetwork(simId, { signal: controller.signal }).catch((err) => {
+      if (err?.name === 'AbortError' || err?.code === 'ERR_CANCELED') return null
+      return null
+    })
+    if (network && network.nodes.length > 0) {
+      societyGraphStore.setPopulationNetworkIfCurrent(network, startedGeneration)
+    }
+  } catch {
+    /* グラフは補助表示なので、取得失敗時は空状態に委ねる */
+  } finally {
+    if (populationNetworkAbort === controller) populationNetworkAbort = null
+  }
+}
+
 function stopPlaybackLoop() {
   if (playbackFrame !== null) {
     cancelAnimationFrame(playbackFrame)
@@ -413,6 +444,7 @@ onMounted(async () => {
     const reportData = await getSimulationReport(simId).catch(() => null)
 
     report.value = reportData
+    void hydratePopulationNetwork()
 
     // レポートが未取得かつシミュレーション完了済みなら数秒後にリトライ
     if (!reportData && sim.value?.status === 'completed') {
@@ -456,6 +488,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopPlaybackLoop()
+  populationNetworkAbort?.abort()
+  populationNetworkAbort = null
   if (copyStateTimer !== null) {
     window.clearTimeout(copyStateTimer)
   }
@@ -612,7 +646,7 @@ const filteredTranscript = computed(() => {
 })
 
 function renderMarkdown(content: string): string {
-  return content
+  const html = content
     .replace(/^### (.+)$/gm, '<h4>$1</h4>')
     .replace(/^## (.+)$/gm, '<h3>$1</h3>')
     .replace(/^# (.+)$/gm, '<h2>$1</h2>')
@@ -621,6 +655,8 @@ function renderMarkdown(content: string): string {
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     .replace(/^---$/gm, '<hr/>')
     .replace(/\n\n/g, '</p><p>')
+
+  return DOMPurify.sanitize(html)
 }
 </script>
 
@@ -671,7 +707,7 @@ function renderMarkdown(content: string): string {
         <span>{{ reportQualityMessage }}</span>
         <span v-if="evidenceSummary" class="quality-meta">{{ evidenceSummary }}</span>
         <span v-if="verification" class="quality-meta">
-          verification={{ verification.status }} ({{ (verification.score * 100).toFixed(0) }}%)
+          verification={{ verification.status }} ({{ formatPercent(verification.score, 0) }})
         </span>
       </div>
 
@@ -707,7 +743,7 @@ function renderMarkdown(content: string): string {
       <div v-if="hasScenarios && report" class="stats-row">
         <div class="stat-card">
           <span class="stat-label">多様性スコア</span>
-          <span class="stat-value">{{ ((report.diversity_score || 0) * 100).toFixed(0) }}%</span>
+          <span class="stat-value">{{ formatPercent(report.diversity_score || 0, 0) }}</span>
         </div>
         <div class="stat-card">
           <span class="stat-label">エントロピー</span>
@@ -734,7 +770,7 @@ function renderMarkdown(content: string): string {
             <div class="workspace-highlights">
               <div v-if="primaryViewKind === 'scenarios' && primaryScenarioSummary" class="workspace-highlight-card">
                 <span class="workspace-highlight-label">Top Scenario</span>
-                <strong class="workspace-highlight-value">{{ (primaryScenarioSummary.scenarioScore * 100).toFixed(1) }}%</strong>
+                <strong class="workspace-highlight-value">{{ formatPercent(primaryScenarioSummary.scenarioScore, 1) }}</strong>
                 <p>{{ primaryScenarioSummary.description }}</p>
               </div>
               <div v-else-if="primaryViewKind === 'decision_brief' && decisionBriefData" class="workspace-highlight-card">
@@ -858,7 +894,7 @@ function renderMarkdown(content: string): string {
                 </div>
                 <div class="stat-card">
                   <span class="stat-label">最良スコア</span>
-                  <span class="stat-value">{{ ((metaReport.final_state?.best_objective_score || 0) * 100).toFixed(0) }}%</span>
+                  <span class="stat-value">{{ formatPercent(metaReport.final_state?.best_objective_score || 0, 0) }}</span>
                 </div>
                 <div class="stat-card">
                   <span class="stat-label">停止理由</span>
@@ -932,7 +968,7 @@ function renderMarkdown(content: string): string {
                 </span>
                 <span class="society-stat">
                   <span class="society-stat-label">平均信頼度</span>
-                  <span class="society-stat-value">{{ ((societyResult.aggregation?.average_confidence || 0) * 100).toFixed(1) }}%</span>
+                  <span class="society-stat-value">{{ formatPercent(societyResult.aggregation?.average_confidence || 0, 1) }}</span>
                 </span>
               </div>
               <div v-if="societyResult.aggregation?.top_concerns?.length" class="society-section">
@@ -987,7 +1023,7 @@ function renderMarkdown(content: string): string {
                       class="society-intervention-metrics"
                     >
                       <span v-if="intervention.directionAccuracy !== null && intervention.directionAccuracy !== undefined">
-                        方向一致 {{ (intervention.directionAccuracy * 100).toFixed(0) }}%
+                        方向一致 {{ formatPercent(intervention.directionAccuracy, 0) }}
                       </span>
                       <span v-if="intervention.effectMae !== null && intervention.effectMae !== undefined">
                         MAE {{ intervention.effectMae.toFixed(3) }}
@@ -1005,11 +1041,11 @@ function renderMarkdown(content: string): string {
                   </div>
                   <div class="society-metric-card">
                     <span class="society-metric-label">hit rate</span>
-                    <span class="society-metric-score">{{ (societyBacktest.summary.hit_rate * 100).toFixed(0) }}%</span>
+                    <span class="society-metric-score">{{ formatPercent(societyBacktest.summary.hit_rate, 0) }}</span>
                   </div>
                   <div class="society-metric-card">
                     <span class="society-metric-label">issue hit rate</span>
-                    <span class="society-metric-score">{{ (societyBacktest.summary.issue_hit_rate * 100).toFixed(0) }}%</span>
+                    <span class="society-metric-score">{{ formatPercent(societyBacktest.summary.issue_hit_rate, 0) }}</span>
                   </div>
                   <div v-if="societyBacktest.summary.scenario_probability_brier !== null && societyBacktest.summary.scenario_probability_brier !== undefined" class="society-metric-card">
                     <span class="society-metric-label">scenario brier</span>
@@ -1108,7 +1144,7 @@ function renderMarkdown(content: string): string {
                 <div v-for="(a, i) in pmBoardData.sections.assumptions.slice(0, 3)" :key="i" class="pm-card">
                   <div class="pm-card-header">
                     <span class="pm-card-label">{{ a.assumption }}</span>
-                    <span class="pm-confidence">{{ (a.confidence * 100).toFixed(0) }}%</span>
+                    <span class="pm-confidence">{{ formatPercent(a.confidence, 0) }}</span>
                   </div>
                   <p v-if="a.evidence" class="pm-card-detail">根拠: {{ a.evidence }}</p>
                 </div>
@@ -1482,42 +1518,14 @@ function renderMarkdown(content: string): string {
 .content-title { font-size: 0.9rem; font-weight: 600; margin-bottom: 1.25rem; }
 .empty-state { text-align: center; padding: 3rem; color: var(--text-muted); font-size: 0.85rem; }
 
-.graph-tab-layout { display: flex; flex-direction: column; gap: 1rem; }
-.graph-snapshot-large {
-  height: clamp(20rem, 40vw, 32rem);
-  background: radial-gradient(ellipse at 30% 40%, #0d0d2b 0%, #060614 50%, #020208 100%);
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(100,100,255,0.12);
-}
-
-.cognitive-subtabs { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.5rem; }
 .subtab-btn { padding: 0.4rem 0.8rem; background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-muted); font-family: var(--font-sans); font-size: 0.75rem; cursor: pointer; transition: all 0.2s; }
 .subtab-btn.active { background: var(--accent-subtle); color: var(--accent); border-color: var(--accent); }
-.cognitive-content { margin-top: 0.5rem; }
 
 .results-side { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
 .side-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--panel-padding); }
 .side-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; gap: 0.75rem; flex-wrap: wrap; }
 .side-header h3 { font-size: 0.82rem; font-weight: 600; }
 .secondary-switcher-buttons { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-
-.graph-snapshot {
-  height: clamp(14rem, 26vw, 18rem);
-  background: radial-gradient(ellipse at 30% 40%, #0d0d2b 0%, #060614 50%, #020208 100%);
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(100,100,255,0.12);
-  margin-bottom: 0.5rem;
-}
-.graph-error-note {
-  margin-bottom: 0.75rem;
-  padding: 0.75rem 0.9rem;
-  border: 1px solid rgba(245,158,11,0.24);
-  border-radius: var(--radius-sm);
-  background: rgba(245,158,11,0.08);
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-  line-height: 1.6;
-}
 
 .ai-check-panel { display: flex; flex-direction: column; gap: 1rem; }
 .ai-check-header { margin-bottom: 0; }
@@ -1702,10 +1710,6 @@ function renderMarkdown(content: string): string {
     justify-content: center;
   }
 
-  .graph-snapshot {
-    height: 14rem;
-  }
-
   .ai-check-input-area {
     flex-wrap: wrap;
   }
@@ -1827,16 +1831,11 @@ function renderMarkdown(content: string): string {
 .society-participant-chip.citizen_representative { border-color: rgba(34,197,94,0.3); color: var(--success); }
 .participant-stance-tag { font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-muted); }
 .society-disagreement { margin-bottom: 0.5rem; }
-.disagreement-topic { font-size: 0.82rem; font-weight: 600; color: var(--text-primary); }
-.disagreement-positions { display: flex; flex-direction: column; gap: 0.2rem; margin-top: 0.25rem; }
-.disagreement-pos { font-size: 0.78rem; color: var(--text-secondary); }
 .society-scenario-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem; margin-bottom: 0.5rem; }
 .scenario-name { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.25rem; }
 .scenario-desc { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5; }
 .scenario-prob { font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent); margin-top: 0.25rem; }
 .society-shift { display: flex; align-items: center; gap: 0.75rem; font-size: 0.82rem; margin-bottom: 0.35rem; }
-.shift-name { font-weight: 600; }
-.shift-flow { font-family: var(--font-mono); color: var(--accent); }
 .society-assessment { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.7; }
 
 /* Decision Brief council section */
@@ -1876,17 +1875,11 @@ function renderMarkdown(content: string): string {
   .decision-brief { break-inside: avoid; }
   .brief-section { break-inside: avoid; page-break-inside: avoid; }
   .reason-card,
-  .detail-card,
-  .option-card,
-  .horizon-card { break-inside: avoid; }
-
-  .graph-container,
-  .canvas-wrapper { display: none !important; }
+  .detail-card { break-inside: avoid; }
 
   .evidence-panel { break-before: page; }
   .evidence-card { break-inside: avoid; }
 
-  .stakeholder-bar-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .confidence-gauge-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .recommendation-badge { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }

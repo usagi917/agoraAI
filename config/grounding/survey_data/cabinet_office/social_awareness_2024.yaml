@@ -18,6 +18,26 @@ surveys:
       条件付き反対: 0.18
       反対: 0.12
 
+  - theme: "暮らし向き"
+    question: "現在の暮らし向きにゆとりがありますか"
+    source: "内閣府「社会意識に関する世論調査」2024年"
+    survey_date: "2024-02"
+    sample_size: 5308
+    method: "郵送法"
+    theme_category: "economy"
+    relevance_keywords:
+      - "暮らし向き"
+      - "生活"
+      - "家計"
+      - "所得"
+      - "生活費"
+    stance_distribution:
+      賛成: 0.10
+      条件付き賛成: 0.20
+      中立: 0.25
+      条件付き反対: 0.28
+      反対: 0.17
+
   - theme: "国の方向性"
     question: "日本の国は良い方向に向かっていると思いますか"
     source: "内閣府「社会意識に関する世論調査」2024年"

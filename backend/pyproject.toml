@@ -23,13 +23,6 @@ dependencies = [
     "optuna>=4.8.0",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.24.0",
-    "httpx>=0.27.0",
-]
-
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
@@ -44,9 +37,15 @@ dev = [
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.0.0",
     "ruff>=0.15.12",
-    "scipy>=1.17.1",
     "vulture>=2.16",
 ]
+
+[tool.pytest.ini_options]
+# 安全網の再現性を固定する。asyncio_mode=strict は明示マーカー(@pytest.mark.asyncio)を必須にし、
+# マーカー付け忘れで非同期テストが黙ってスキップ/エラー化するのを防ぐ。
+asyncio_mode = "strict"
+testpaths = ["tests"]
+addopts = "--strict-markers"
 
 [tool.ruff]
 line-length = 100
@@ -54,7 +53,10 @@ target-version = "py311"
 extend-exclude = ["tests"]
 
 [tool.ruff.lint]
-select = ["F401"]
+# 段階導入(現): F401(未使用import), I(import整列), UP(構文近代化)。
+# F 全体(F841 未使用変数12件=潜在バグ含む要レビュー), E501(行長379), B(B008=FastAPI Depends 誤検知含む),
+# C4, SIM は手動修正/要判断が多いため次段階で導入する(plans/refactor/task.md の P3 メモ参照)。
+select = ["F401", "I", "UP"]
 
 [tool.deptry]
 extend_exclude = ["tests"]
@@ -67,3 +69,10 @@ DEP002 = [
     "redis", # optional deployment service
     "python-multipart", # FastAPI UploadFile/form parser
 ]
+
+[tool.vulture]
+# デコレータ経由で使われるルートハンドラ/バリデータを誤検知しないよう除外。
+# 実行例: uv run vulture src --min-confidence 80
+min_confidence = 80
+ignore_decorators = ["@router.*", "@app.*", "@field_validator", "@model_validator"]
+ignore_names = ["model_config"]

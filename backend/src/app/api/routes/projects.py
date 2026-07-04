@@ -1,12 +1,12 @@
 import uuid
 
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.api.deps import get_session
-from src.app.models.project import Project
 from src.app.models.document import Document
+from src.app.models.project import Project
 
 router = APIRouter()
 

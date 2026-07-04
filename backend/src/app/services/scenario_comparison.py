@@ -306,7 +306,6 @@ async def build_scenario_comparison(
     delta = build_delta_brief(baseline_brief, intervention_brief)
 
     # Opinion shifts from audit trail
-    baseline_shifts = await get_opinion_shifts(session, str(baseline_sim.id))
     intervention_shifts = await get_opinion_shifts(session, str(intervention_sim.id))
 
     all_shift_dicts = [

@@ -6,8 +6,8 @@ import uuid
 from dataclasses import dataclass, field
 
 from src.app.llm.client import llm_client
-from src.app.services.communication.message_bus import AgentMessage, MessageBus
 from src.app.services.communication.conversation import ConversationChannel
+from src.app.services.communication.message_bus import AgentMessage, MessageBus
 from src.app.services.cost_tracker import record_usage
 from src.app.sse.manager import sse_manager
 

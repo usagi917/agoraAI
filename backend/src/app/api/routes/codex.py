@@ -1,8 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.app.api.deps import get_session
 from src.app.config import settings
 from src.app.services.codex_bridge import CodexAppServerClient
 from src.app.services.codex_review_service import (
@@ -68,12 +67,3 @@ async def create_codex_review(
         "answer": review.answer,
         "provider": "codex",
     }
-
-
-async def create_simulation_codex_review(
-    sim_id: str,
-    body: CodexReviewRequest,
-    session: AsyncSession = Depends(get_session),
-    service: CodexReviewService = Depends(get_codex_review_service),
-):
-    return await create_codex_review(sim_id, body, session, service)

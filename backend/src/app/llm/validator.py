@@ -68,7 +68,7 @@ class WorldBuildPayload(_StrictBaseModel):
     world_summary: str = ""
 
     @model_validator(mode="after")
-    def _validate_links(self) -> "WorldBuildPayload":
+    def _validate_links(self) -> WorldBuildPayload:
         entity_ids = [entity.id for entity in self.entities]
         if len(entity_ids) != len(set(entity_ids)):
             raise ValueError("entity id は一意である必要があります")
@@ -93,7 +93,7 @@ class AgentsPayload(_StrictBaseModel):
     agents: list[AgentPayloadModel]
 
     @model_validator(mode="after")
-    def _validate_unique_ids(self) -> "AgentsPayload":
+    def _validate_unique_ids(self) -> AgentsPayload:
         agent_ids = [agent.id for agent in self.agents]
         if len(agent_ids) != len(set(agent_ids)):
             raise ValueError("agent id は一意である必要があります")
@@ -143,22 +143,6 @@ class ExtractedRelationsPayload(_StrictBaseModel):
     relations: list[dict[str, Any]]
 
 
-class EvaluationPayload(_StrictBaseModel):
-    goal_completion: float
-    relationship_maintenance: float
-    information_management: float
-    social_norm_adherence: float
-    behavioral_consistency: float
-    causal_plausibility: float
-    emergent_complexity: float
-    overall_score: float
-
-    @field_validator("*")
-    @classmethod
-    def _validate_scores(cls, value: float) -> float:
-        return _validate_probability(value, label="evaluation score")
-
-
 def _validate_with_model(model: type[BaseModel], data: dict[str, Any], *, label: str) -> None:
     payload = _ensure_dict(data, label=label)
     try:
@@ -199,10 +183,6 @@ def validate_action_resolution(data: dict) -> None:
     payload = _ensure_dict(data, label="action_resolution")
     if not isinstance(payload.get("resolved_actions"), list):
         raise ValueError("resolved_actions は配列である必要があります")
-
-
-def validate_evaluation(data: dict) -> None:
-    _validate_with_model(EvaluationPayload, data, label="evaluation")
 
 
 def validate_pm_board_output(data: dict) -> None:

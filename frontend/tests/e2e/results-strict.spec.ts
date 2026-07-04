@@ -1,6 +1,6 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 
-test('shows unsupported strict-evidence state in results', async ({ page }) => {
+async function routeCompletedStrictSimulation(page: Page) {
   await page.route('**/api/codex/health', async (route) => {
     await route.fulfill({
       json: {
@@ -71,6 +71,9 @@ test('shows unsupported strict-evidence state in results', async ({ page }) => {
       },
     })
   })
+  await page.route('**/api/simulations/sim-strict/timeline', async (route) => {
+    await route.fulfill({ json: [] })
+  })
   await page.route('**/api/simulations/sim-strict/graph/history', async (route) => {
     await route.fulfill({ json: [] })
   })
@@ -80,9 +83,26 @@ test('shows unsupported strict-evidence state in results', async ({ page }) => {
   await page.route('**/api/society/simulations/sim-strict/propagation', async (route) => {
     await route.fulfill({ json: { phase_data: null } })
   })
+  await page.route('**/api/society/simulations/sim-strict/time-axis', async (route) => {
+    await route.fulfill({ status: 404, json: { detail: 'not available' } })
+  })
+}
+
+test('shows unsupported strict-evidence state in results', async ({ page }) => {
+  await routeCompletedStrictSimulation(page)
 
   await page.goto('/sim/sim-strict/results')
 
   await expect(page.getByTestId('quality-banner')).toContainText('Unsupported')
   await expect(page.getByTestId('quality-banner')).toContainText('strict_document_evidence_required')
+})
+
+test('opens the execution screen from completed results without redirecting back', async ({ page }) => {
+  await routeCompletedStrictSimulation(page)
+
+  await page.goto('/sim/sim-strict/results')
+  await page.getByRole('link', { name: '実行画面' }).click()
+
+  await expect(page).toHaveURL(/\/sim\/sim-strict$/)
+  await expect(page.getByRole('button', { name: '結果を表示' })).toBeVisible()
 })

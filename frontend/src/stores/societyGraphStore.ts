@@ -4,7 +4,7 @@ import type { GraphNode, GraphEdge } from './graphStore'
 import type { SocialGraphNode, SocialGraphEdge } from '../api/client'
 import { useKGEvolutionStore } from './kgEvolutionStore'
 
-export type LiveAgentStatus = 'selected' | 'activating' | 'activated' | 'speaking' | 'idle'
+type LiveAgentStatus = 'selected' | 'activating' | 'activated' | 'speaking' | 'idle'
 
 interface LiveAgentNode {
   id: string
@@ -49,7 +49,7 @@ export interface MeetingArgument {
   is_devil_advocate?: boolean
 }
 
-export interface ConversationEdge {
+interface ConversationEdge {
   id: string
   source: string
   target: string
@@ -65,26 +65,110 @@ interface StanceShiftEvent {
   reason: string
 }
 
+/** GET /society/simulations/{id}/population-network のレスポンス */
+interface PopulationNetworkPayload {
+  population_id: string
+  node_count: number
+  edge_count: number
+  nodes: Array<{ id: string; agent_index: number }>
+  /** [source_index, target_index, strength] */
+  edges: Array<[number, number, number]>
+}
+
+/** SSE population_propagation_round の changes 要素（i=agent_index, s=stance） */
+export interface PropagationChange {
+  i: number
+  s: string
+}
+
+/** Canvas 描画コスト保護のための人口エッジ表示上限（強い順に残す） */
+export const POPULATION_EDGE_DISPLAY_CAP = 12000
+
+/**
+ * Cumulative entry for the SNS-style live feed (SocietyLiveFeed).
+ * Unlike `currentArguments`, this buffer is NOT reset on round changes,
+ * so it retains the whole meeting history as it streams in.
+ */
+export interface FeedEntry {
+  id: string
+  kind: 'dialogue' | 'stance_shift' | 'round'
+  round: number
+  receivedAt: number
+  // dialogue
+  participant_name?: string
+  role?: string
+  position?: string
+  argument?: string
+  addressed_to?: string
+  // stance_shift
+  participant?: string
+  from?: string
+  to?: string
+  reason?: string
+  // round
+  round_name?: string
+}
+
+const FEED_MAX = 300
+
 export const useSocietyGraphStore = defineStore('societyGraph', () => {
   const liveAgents = ref<Map<string, LiveAgentNode>>(new Map())
+  const liveAgentIdSet = ref<Set<string>>(new Set())
   const liveEdges = ref<LiveEdge[]>([])
+  const generation = ref(0)
   const currentRound = ref<number>(0)
   const currentArguments = ref<MeetingArgument[]>([])
   const activationCompleted = ref(0)
   const activationTotal = ref(0)
   const conversationEdges = ref<ConversationEdge[]>([])
   const pendingStanceShifts = ref<StanceShiftEvent[]>([])
+  const feedEntries = ref<FeedEntry[]>([])
+  // Monotonic counter for feed entry ids that don't have a natural stable key
+  // (round markers, stance shifts). Not reset — keys only need per-session uniqueness.
+  let feedSeq = 0
   const hoveredEdge = ref<{ id: string; relationType: string; weight: number; sourceId: string; targetId: string } | null>(null)
   const selectedEdge = ref<{ id: string; relationType: string; weight: number; sourceId: string; targetId: string } | null>(null)
   const socialEdgesVisible = ref(true)
   const agentEntityLinksVisible = ref(true)
 
+  // --- 人口レイヤー（全人口伝播の波及描画） ---
+  const populationNodes = ref<Array<{ id: string; agentIndex: number }>>([])
+  /** エッジは不変なので GraphEdge 変換をキャッシュしておく（30k 件規模） */
+  const populationGraphEdges = ref<GraphEdge[]>([])
+  const populationStances = ref<Map<number, string>>(new Map())
+  const populationVisible = ref(true)
+
   // === Computed: 2D graph 用の GraphNode/GraphEdge 変換 ===
 
   const agentList = computed(() => Array.from(liveAgents.value.values()))
 
+  const populationDisplayNodes = computed<GraphNode[]>(() => {
+    if (!populationVisible.value || !populationNodes.value.length) return []
+
+    const liveIds = liveAgentIdSet.value
+    const stances = populationStances.value
+    const nodes: GraphNode[] = []
+    for (const p of populationNodes.value) {
+      // 選抜済みエージェントは liveAgents 側のリッチなノードを優先
+      if (liveIds.has(p.id)) continue
+      nodes.push({
+        id: p.id,
+        label: '',
+        type: 'agent',
+        importance_score: 0.1,
+        stance: stances.get(p.agentIndex) || '',
+        activity_score: 0,
+        sentiment_score: 0,
+        status: 'idle',
+        group: 'population',
+        tier: 'population',
+      })
+    }
+    return nodes
+  })
+
   const graphNodes = computed<GraphNode[]>(() => {
-    const agentNodes = agentList.value.map((a) => ({
+    const nodes: GraphNode[] = agentList.value.map((a) => ({
       id: a.id,
       label: a.displayName || a.label,
       type: 'agent',
@@ -96,10 +180,12 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
       group: a.stance || '不明',
     }))
 
-    const kgStore = useKGEvolutionStore()
-    if (!kgStore.layerVisible) return agentNodes
+    nodes.push(...populationDisplayNodes.value)
 
-    return [...agentNodes, ...kgStore.graphNodes]
+    const kgStore = useKGEvolutionStore()
+    if (!kgStore.layerVisible) return nodes
+
+    return [...nodes, ...kgStore.graphNodes]
   })
 
   const graphEdges = computed<GraphEdge[]>(() => {
@@ -121,6 +207,10 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
       }
     }
 
+    if (populationVisible.value && populationGraphEdges.value.length) {
+      edges.push(...populationGraphEdges.value)
+    }
+
     const kgStore = useKGEvolutionStore()
     if (kgStore.layerVisible) {
       edges.push(...kgStore.graphEdges)
@@ -133,6 +223,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
   })
 
   const nodeCount = computed(() => liveAgents.value.size)
+  const populationNodeCount = computed(() => populationNodes.value.length)
   const edgeCount = computed(() => graphEdges.value.length)
 
   const speakingAgents = computed(() =>
@@ -197,6 +288,59 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
       arg.addressed_to || '',
       arg.argument,
     ].join('::')
+  }
+
+  function _pushFeedEntry(entry: FeedEntry) {
+    feedEntries.value.push(entry)
+    if (feedEntries.value.length > FEED_MAX) {
+      feedEntries.value.splice(0, feedEntries.value.length - FEED_MAX)
+    }
+  }
+
+  /** Insert a round marker unless the most recent marker already covers this round. */
+  function _recordRoundMarker(round: number, roundName?: string) {
+    for (let i = feedEntries.value.length - 1; i >= 0; i--) {
+      if (feedEntries.value[i].kind === 'round') {
+        if (feedEntries.value[i].round === round) return
+        break
+      }
+    }
+    _pushFeedEntry({
+      id: `round-${round}-${feedSeq++}`,
+      kind: 'round',
+      round,
+      receivedAt: Date.now(),
+      round_name: roundName,
+    })
+  }
+
+  function _recordDialogueEntry(round: number, arg: MeetingArgument) {
+    const id = getMeetingArgumentKey(round, arg)
+    if (feedEntries.value.some((e) => e.kind === 'dialogue' && e.id === id)) return
+    _pushFeedEntry({
+      id,
+      kind: 'dialogue',
+      round,
+      receivedAt: Date.now(),
+      participant_name: arg.participant_name,
+      role: arg.role,
+      position: arg.position,
+      argument: arg.argument,
+      addressed_to: arg.addressed_to,
+    })
+  }
+
+  /**
+   * Record a whole batch of arguments into the feed (round marker + each dialogue).
+   * Used by the bulk paths (setMeetingRound / completeMeetingRound) so that
+   * arguments delivered only via meeting_round_completed (SSE reconnect / gap fill)
+   * still reach the feed. Existing dedup keys prevent double-recording.
+   */
+  function _recordFeedArguments(round: number, args: MeetingArgument[]) {
+    _recordRoundMarker(round, args.find((a) => a.round_name)?.round_name)
+    for (const arg of args) {
+      _recordDialogueEntry(round, arg)
+    }
   }
 
   function getRestingStatus(agent: LiveAgentNode): LiveAgentStatus {
@@ -277,6 +421,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
       })
     }
     liveAgents.value = map
+    liveAgentIdSet.value = new Set(map.keys())
   }
 
   function updateActivationProgress(completed: number, total: number) {
@@ -330,6 +475,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     }
     // trigger reactivity
     liveAgents.value = new Map(liveAgents.value)
+    liveAgentIdSet.value = new Set(liveAgents.value.keys())
 
     // エッジを設定
     liveEdges.value = edges.map((e) => ({
@@ -346,6 +492,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     currentArguments.value = []
     conversationEdges.value = []
     mergeMeetingArguments(round, args)
+    _recordFeedArguments(round, args)
     clearActiveSpeakers()
 
     // 会話エッジを生成
@@ -357,9 +504,11 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
       currentRound.value = round
       currentArguments.value = []
       conversationEdges.value = []
+      _recordRoundMarker(round, arg.round_name)
     }
 
     mergeMeetingArguments(round, [arg])
+    _recordDialogueEntry(round, arg)
     setActiveSpeaker(arg, round)
     _buildConversationEdges(round, currentArguments.value)
   }
@@ -373,6 +522,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
 
     if (args.length > 0) {
       mergeMeetingArguments(round, args)
+      _recordFeedArguments(round, args)
     }
 
     clearActiveSpeakers()
@@ -484,6 +634,31 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
   }
 
   function addStanceShifts(shifts: Array<{ participant: string; from: string; to: string; reason: string }>) {
+    // Feed records every reported shift, independent of whether it maps to a live agent node.
+    // Dedup by content key (participant/from/to/round) so a re-sent meeting_completed
+    // does not double-record; the feedSeq-based id stays unique for the :key.
+    const round = currentRound.value
+    for (const shift of shifts) {
+      const isDuplicate = feedEntries.value.some((e) =>
+        e.kind === 'stance_shift'
+        && e.round === round
+        && e.participant === shift.participant
+        && e.from === shift.from
+        && e.to === shift.to,
+      )
+      if (isDuplicate) continue
+      _pushFeedEntry({
+        id: `stance-${shift.participant}-${shift.from}-${shift.to}-${feedSeq++}`,
+        kind: 'stance_shift',
+        round,
+        receivedAt: Date.now(),
+        participant: shift.participant,
+        from: shift.from,
+        to: shift.to,
+        reason: shift.reason,
+      })
+    }
+
     const events: StanceShiftEvent[] = []
     for (const shift of shifts) {
       // 参加者名からagentIdを検索
@@ -538,6 +713,83 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     }
   }
 
+  function setPopulationNetwork(payload: PopulationNetworkPayload) {
+    const idByIndex = new Map<number, string>()
+    const nodeIndices = new Set<number>()
+    populationNodes.value = payload.nodes.map((n) => {
+      idByIndex.set(n.agent_index, n.id)
+      nodeIndices.add(n.agent_index)
+      return { id: n.id, agentIndex: n.agent_index }
+    })
+
+    let rawEdges = payload.edges
+    if (rawEdges.length > POPULATION_EDGE_DISPLAY_CAP) {
+      rawEdges = [...rawEdges]
+        .sort((a, b) => b[2] - a[2])
+        .slice(0, POPULATION_EDGE_DISPLAY_CAP)
+    }
+
+    const edges: GraphEdge[] = []
+    rawEdges.forEach(([si, ti, strength], i) => {
+      const source = idByIndex.get(si)
+      const target = idByIndex.get(ti)
+      if (!source || !target) return
+      edges.push({
+        id: `pop-edge-${i}`,
+        source,
+        target,
+        relation_type: 'acquaintance',
+        weight: strength,
+        direction: 'undirected',
+        status: 'active',
+      })
+    })
+    populationGraphEdges.value = edges
+
+    const preservedStances = new Map<number, string>()
+    for (const [agentIndex, stance] of populationStances.value) {
+      if (nodeIndices.has(agentIndex)) {
+        preservedStances.set(agentIndex, stance)
+      }
+    }
+    populationStances.value = preservedStances
+  }
+
+  function setPopulationNetworkIfCurrent(payload: PopulationNetworkPayload, expectedGeneration: number): boolean {
+    if (generation.value !== expectedGeneration) return false
+    setPopulationNetwork(payload)
+    return true
+  }
+
+  /** 伝播ラウンドのスタンス変化を反映する（人口レイヤー + 選抜エージェント両対応） */
+  function applyPropagationRound(changes: PropagationChange[]) {
+    if (!changes.length) return
+
+    const liveByIndex = new Map<number, LiveAgentNode>()
+    for (const agent of liveAgents.value.values()) {
+      liveByIndex.set(agent.agentIndex, agent)
+    }
+
+    const nextStances = new Map(populationStances.value)
+    let liveChanged = false
+    for (const change of changes) {
+      const live = liveByIndex.get(change.i)
+      if (live) {
+        if (live.stance !== change.s) {
+          live.stance = change.s
+          liveChanged = true
+        }
+      } else {
+        nextStances.set(change.i, change.s)
+      }
+    }
+
+    populationStances.value = nextStances
+    if (liveChanged) {
+      liveAgents.value = new Map(liveAgents.value)
+    }
+  }
+
   function setHoveredEdge(edge: typeof hoveredEdge.value) {
     hoveredEdge.value = edge
   }
@@ -547,7 +799,9 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
   }
 
   function reset() {
+    generation.value += 1
     liveAgents.value = new Map()
+    liveAgentIdSet.value = new Set()
     liveEdges.value = []
     currentRound.value = 0
     currentArguments.value = []
@@ -555,10 +809,15 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     activationTotal.value = 0
     conversationEdges.value = []
     pendingStanceShifts.value = []
+    feedEntries.value = []
     hoveredEdge.value = null
     selectedEdge.value = null
     socialEdgesVisible.value = true
     agentEntityLinksVisible.value = true
+    populationNodes.value = []
+    populationGraphEdges.value = []
+    populationStances.value = new Map()
+    populationVisible.value = true
   }
 
   return {
@@ -571,16 +830,24 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     activationTotal,
     conversationEdges,
     pendingStanceShifts,
+    feedEntries,
     hoveredEdge,
     selectedEdge,
     socialEdgesVisible,
     agentEntityLinksVisible,
+    generation,
+    populationNodes,
+    populationGraphEdges,
+    populationStances,
+    populationVisible,
     // Computed
     agentList,
+    populationDisplayNodes,
     graphNodes,
     graphEdges,
     nodeCount,
     edgeCount,
+    populationNodeCount,
     speakingAgents,
     interactionMatrix,
     // Actions
@@ -596,6 +863,9 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     addStanceShifts,
     clearStanceShifts,
     updateStancesFromPropagation,
+    setPopulationNetwork,
+    setPopulationNetworkIfCurrent,
+    applyPropagationRound,
     setHoveredEdge,
     setSelectedEdge,
     reset,

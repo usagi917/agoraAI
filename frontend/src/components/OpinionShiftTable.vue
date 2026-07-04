@@ -1,12 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-
-export interface OpinionShift {
-  agent_name: string
-  before: string
-  after: string
-  reasoning: string
-}
+import type { OpinionShift } from './timelineTypes'
 
 defineProps<{
   shifts: OpinionShift[]

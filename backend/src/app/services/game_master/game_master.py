@@ -7,20 +7,20 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.config import settings
+from src.app.models.message import Message
 from src.app.models.timeline_event import TimelineEvent
 from src.app.models.world_state import WorldState
-from src.app.services.cognition.cognitive_agent import CognitiveAgent
-from src.app.services.game_master.action_resolver import ActionResolver
-from src.app.services.game_master.event_injector import EventInjector
-from src.app.services.game_master.consistency_checker import ConsistencyChecker
-from src.app.services.communication.message_bus import MessageBus, AgentMessage
-from src.app.services.communication.conversation import ConversationManager
-from src.app.services.communication.response_orchestrator import ResponseOrchestrator
-from src.app.services.communication.debate_protocol import DebateProtocol
-from src.app.services.scheduling.agent_scheduler import AgentScheduler, AgentTier
-from src.app.services.cognition.lightweight_cycle import LightweightCognitiveProcessor
 from src.app.services.cognition.causal_reasoning import CausalReasoningEngine
-from src.app.models.message import Message
+from src.app.services.cognition.cognitive_agent import CognitiveAgent
+from src.app.services.cognition.lightweight_cycle import LightweightCognitiveProcessor
+from src.app.services.communication.conversation import ConversationManager
+from src.app.services.communication.debate_protocol import DebateProtocol
+from src.app.services.communication.message_bus import AgentMessage, MessageBus
+from src.app.services.communication.response_orchestrator import ResponseOrchestrator
+from src.app.services.game_master.action_resolver import ActionResolver
+from src.app.services.game_master.consistency_checker import ConsistencyChecker
+from src.app.services.game_master.event_injector import EventInjector
+from src.app.services.scheduling.agent_scheduler import AgentScheduler, AgentTier
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
@@ -101,13 +101,9 @@ class GameMaster:
         self.causal_engine.build_graph(world_state)
 
         # === Phase 0: エージェントTier分類 ===
-        unread_counts = {
-            a.agent_id: len(self.message_bus.get_inbox(a.agent_id))
-            for a in cognitive_agents
-        }
-        # inbox を覗くだけなので get_inbox で消費されないよう注意
-        # → 実際は get_inbox は pop するので、分類時点では peek が必要
-        # 簡略化: 前ラウンドの通信量で分類
+        # Tier 分類は前ラウンドの通信量(active_conversations)で行う。
+        # 未読数(unread_counts)は MessageBus.get_inbox が破壊的(pop)で安全に覗けないため
+        # 未配線（classify には空 dict を渡す）。実装する場合は非破壊 peek の追加が必要。
         active_convos = {
             a.agent_id: len(self.conversation_manager.get_agent_channels(a.agent_id))
             for a in cognitive_agents

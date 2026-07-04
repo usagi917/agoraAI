@@ -11,6 +11,7 @@ export interface GraphNode {
   sentiment_score: number
   status: string
   group: string
+  tier?: string
 }
 
 export interface GraphEdge {

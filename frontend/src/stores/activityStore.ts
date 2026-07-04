@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-export type ActivityLevel = 'info' | 'event' | 'phase' | 'error' | 'agent'
+type ActivityLevel = 'info' | 'event' | 'phase' | 'error' | 'agent'
 
 export interface ActivityEntry {
   id: number

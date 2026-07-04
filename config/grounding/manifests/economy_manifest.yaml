@@ -106,11 +106,37 @@ eval_surveys:
     normalization_notes: "賛否方向=正（老後の経済的不安を肯定として扱う）。懸念層が多数（賛成+条件付き賛成 ≈0.63）。"
     gate_eligible: true
 
+  - survey_id: "cabinet_social_2024_economy_暮らし向き"
+    file: "cabinet_office/social_awareness_2024.yaml"
+    theme: "暮らし向き"
+    survey_date: "2024-02"
+    sample_size: 5308
+    method: "郵送法"
+    source: "内閣府「社会意識に関する世論調査」2024年"
+    quality_rank: "A"
+    holdout_reason: "cross-source eval。BOJ trainとは別sourceで家計・生活費テーマの汎化性を評価する"
+    normalization_notes: "賛否方向=正（暮らし向きにゆとりがあることを肯定）。"
+    gate_eligible: true
+
+  - survey_id: "nhk_consciousness_2023_economy_家計の余裕"
+    file: "nhk/japanese_consciousness_2023.yaml"
+    theme: "家計の余裕"
+    survey_date: "2023-06"
+    sample_size: 3600
+    method: "配付回収法"
+    source: "NHK放送文化研究所「日本人の意識」調査 2023年"
+    quality_rank: "B"
+    holdout_reason: "cross-source eval。NHK系の生活実感設問でBOJ trainからのsource汎化性を評価する"
+    normalization_notes: "賛否方向=正（家計にゆとりがあることを肯定）。"
+    gate_eligible: true
+
 # leakage 防止
 leakage_prevention:
   exclude_survey_ids_from_training:
     - "boj_living_2024_economy_金利政策"
     - "cabinet_aging_2023_economy_老後の生活設計"
+    - "cabinet_social_2024_economy_暮らし向き"
+    - "nhk_consciousness_2023_economy_家計の余裕"
   validation_checks:
     - "eval survey_id がトレーニングセットに含まれないこと"
     - "train と eval のテーマキーワードに重複がないこと"

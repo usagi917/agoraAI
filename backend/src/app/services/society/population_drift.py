@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import copy
 import random
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 DAYS_PER_YEAR = 365
 

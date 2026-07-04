@@ -34,7 +34,9 @@ from typing import TypedDict
 import yaml
 
 from src.app.evaluation.gate_runner import run_deterministic_gate
-from src.app.services.society.baseline_comparator import compute_relative_improvement as _compute_relative_improvement
+from src.app.services.society.baseline_comparator import (
+    compute_relative_improvement as _compute_relative_improvement,
+)
 
 # =============================================================
 # 定数

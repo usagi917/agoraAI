@@ -14,10 +14,8 @@ from __future__ import annotations
 import math
 import random
 from collections import defaultdict
-from typing import Optional
 
 from src.app.services.society.age_utils import age_bracket_4 as _age_bracket
-
 
 # 職業→5区分マッピング
 _OCCUPATION_CATEGORY_MAP: dict[str, str] = {
@@ -154,7 +152,7 @@ def bootstrap_confidence_intervals(
     weights: list[float],
     n_bootstrap: int = 1000,
     ci: float = 0.95,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     extra_uncertainty: float = 0.0,
 ) -> dict[str, tuple[float, float]]:
     """ブートストラップ法でスタンス分布の信頼区間を計算する.
@@ -387,11 +385,6 @@ def compute_independence_weights(
         for mid in cluster.get("member_ids", []):
             agent_to_cluster[mid] = ci
 
-    # Build set of members per cluster for fast lookup
-    cluster_member_sets: list[set[str]] = [
-        set(c.get("member_ids", [])) for c in clusters
-    ]
-
     # Compute average internal edge strength per cluster
     cluster_edge_sums: dict[int, float] = defaultdict(float)
     cluster_edge_counts: dict[int, int] = defaultdict(int)
@@ -588,8 +581,6 @@ def mrp_estimate(
 
     if grouping_dims is None:
         grouping_dims = ["age_bracket", "region", "gender"]
-
-    n = len(agents)
 
     # Step 1: 全体のスタンス分布（global prior）
     all_stances: dict[str, int] = defaultdict(int)

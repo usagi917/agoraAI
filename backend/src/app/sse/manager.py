@@ -3,8 +3,8 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +13,7 @@ class SSEEvent:
     def __init__(self, event_type: str, run_id: str, payload: dict, sequence_no: int = 0):
         self.event_type = event_type
         self.run_id = run_id
-        self.timestamp = datetime.now(timezone.utc).isoformat()
+        self.timestamp = datetime.now(UTC).isoformat()
         self.sequence_no = sequence_no
         self.payload = payload
 
@@ -82,7 +82,7 @@ class SSEManager:
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=_SUBSCRIBE_TIMEOUT)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.warning(f"SSE subscription timed out for run {run_id}")
                     break
                 yield event.to_sse()

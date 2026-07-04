@@ -9,10 +9,10 @@ from src.app.llm.client import llm_client
 from src.app.llm.prompts import MEMORY_IMPORTANCE_SYSTEM, MEMORY_IMPORTANCE_USER
 from src.app.services.cost_tracker import record_usage
 from src.app.services.memory.episodic import EpisodicMemory
-from src.app.services.memory.semantic import SemanticMemory
 from src.app.services.memory.procedural import ProceduralMemory
-from src.app.services.memory.retrieval import MemoryRetriever
 from src.app.services.memory.reflection import ReflectionEngine
+from src.app.services.memory.retrieval import MemoryRetriever
+from src.app.services.memory.semantic import SemanticMemory
 
 logger = logging.getLogger(__name__)
 

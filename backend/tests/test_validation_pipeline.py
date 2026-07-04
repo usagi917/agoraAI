@@ -20,11 +20,13 @@ import src.app.models  # noqa: F401
 from src.app.repositories.validation_repo import ValidationRepository
 from src.app.services.society.validation_pipeline import (
     evaluate_intervention_prediction,
+    load_manifest_split,
     register_result,
     auto_compare,
     resolve_with_actual,
     generate_accuracy_report,
     update_bias_profile,
+    validate_no_leakage,
 )
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -47,6 +49,32 @@ async def db_session():
 
 SIM_DIST = {"賛成": 0.30, "条件付き賛成": 0.25, "中立": 0.20, "条件付き反対": 0.15, "反対": 0.10}
 ACTUAL_DIST = {"賛成": 0.25, "条件付き賛成": 0.20, "中立": 0.25, "条件付き反対": 0.15, "反対": 0.15}
+
+
+class TestManifestSplit:
+    def test_load_manifest_split_returns_holdout_sets(self):
+        split = load_manifest_split("economy")
+
+        assert len(split.train_ids) == 3
+        assert len(split.eval_ids) >= 4
+        assert not (split.train_ids & split.eval_ids)
+        assert "boj_living_2024_economy_金利政策" in split.eval_ids
+        assert "boj/living_consciousness_2024.yaml" in split.train_files
+
+    def test_load_manifest_split_rejects_path_traversal_preset(self):
+        with pytest.raises(ValueError, match="Invalid preset_id"):
+            load_manifest_split("../../etc/passwd")
+
+    def test_load_manifest_split_raises_for_unknown_preset(self):
+        with pytest.raises(FileNotFoundError, match="Manifest preset not found"):
+            load_manifest_split("nonexistent_preset_xyz")
+
+    def test_validate_no_leakage_raises_on_intersection(self):
+        with pytest.raises(ValueError, match="Survey leakage"):
+            validate_no_leakage(["a", "b"], ["b", "c"])
+
+    def test_validate_no_leakage_allows_disjoint_sets(self):
+        validate_no_leakage(["a"], ["b"])
 
 
 def test_evaluate_intervention_prediction_aggregates_repeated_actual_metrics():

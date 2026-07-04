@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ColonyState } from '../stores/simulationStore'
+import { formatPercent } from '../utils/format'
 
 const props = defineProps<{
   matrix: {
@@ -51,7 +52,7 @@ const cellColor = (value: number) => {
             :key="'c-' + j"
             class="heatmap-cell"
             :style="{ background: cellColor(value) }"
-            :title="`${labels[i]} × ${labels[j]}: ${(value * 100).toFixed(0)}%`"
+            :title="`${labels[i]} × ${labels[j]}: ${formatPercent(value, 0)}`"
           >
             <span v-if="i !== j" class="cell-value">
               {{ (value * 100).toFixed(0) }}

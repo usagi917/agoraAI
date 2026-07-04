@@ -18,9 +18,11 @@ declare module 'force-graph' {
     nodePointerAreaPaint(fn: (node: unknown, color: string, ctx: CanvasRenderingContext2D) => void): this
     linkColor(fn: (link: unknown) => string): this
     linkWidth(fn: (link: unknown) => number): this
+    linkCurvature(value: number | ((link: unknown) => number)): this
     linkDirectionalParticles(fn: (link: unknown) => number): this
     linkDirectionalParticleWidth(value: number): this
     linkDirectionalParticleColor(fn: (link: unknown) => string): this
+    linkDirectionalParticleSpeed(value: number | ((link: unknown) => number)): this
     warmupTicks(value: number): this
     cooldownTicks(value: number): this
     cooldownTime(value: number): this
@@ -35,7 +37,9 @@ declare module 'force-graph' {
     onLinkClick<TLink = unknown>(fn: (link: TLink) => void): this
     onLinkHover<TLink = unknown>(fn: (link: TLink | null) => void): this
     onEngineStop(fn: () => void): this
+    onBackgroundClick(fn: (event: MouseEvent) => void): this
     d3Force(name: string): unknown
+    d3Force(name: string, force: unknown): this
     width(value: number): this
     height(value: number): this
     graphData(data?: ForceGraphData): this | ForceGraphData

@@ -83,6 +83,24 @@ class TestWattsStrogatzEdges:
         # At least some edges should differ (probabilistic but highly likely with beta=0.5)
         assert no_rewire_pairs != rewired_pairs or len(edges_no_rewire) != len(edges_rewired)
 
+    def test_same_seed_produces_identical_edges(self):
+        agents = [
+            {"id": f"agent-{i}", "demographics": {"region": "関東（都市部）", "age": 25 + i}}
+            for i in range(30)
+        ]
+        first = generate_watts_strogatz_edges(
+            agents, "pop-1", k=4, beta=0.5, cluster_by_attributes=False, seed=42,
+        )
+        second = generate_watts_strogatz_edges(
+            agents, "pop-1", k=4, beta=0.5, cluster_by_attributes=False, seed=42,
+        )
+        third = generate_watts_strogatz_edges(
+            agents, "pop-1", k=4, beta=0.5, cluster_by_attributes=False, seed=43,
+        )
+
+        assert first == second
+        assert first != third
+
 
 class TestBarabasiAlbertEdges:
     """Barabasi-Albert preferential attachment network tests."""
@@ -136,6 +154,13 @@ class TestBarabasiAlbertEdges:
         agents = self._make_simple_agents(2)
         edges = generate_barabasi_albert_edges(agents, "pop-1", m=3, seed=42)
         assert len(edges) == 0
+
+    def test_ba_same_seed_produces_identical_edges(self):
+        agents = self._make_simple_agents(30)
+        first = generate_barabasi_albert_edges(agents, "pop-1", m=3, seed=42)
+        second = generate_barabasi_albert_edges(agents, "pop-1", m=3, seed=42)
+
+        assert first == second
 
 
 class TestHybridEdges:
@@ -221,6 +246,30 @@ class TestNetworkTypeDispatch:
             mock_settings.load_population_mix_config.return_value = config
             edges = await generate_network(agents, "pop-test")
             assert len(edges) > 0
+
+    @pytest.mark.asyncio
+    async def test_generate_network_same_seed_is_deterministic(self):
+        agents = self._make_simple_agents(30)
+        config = {
+            "population": {
+                "network": {
+                    "type": "hybrid",
+                    "k": 4,
+                    "beta": 0.4,
+                    "m": 3,
+                    "ba_ratio": 0.4,
+                    "cluster_by_attributes": False,
+                }
+            }
+        }
+        with patch("src.app.services.society.network_generator.settings") as mock_settings:
+            mock_settings.load_population_mix_config.return_value = config
+            first = await generate_network(agents, "pop-test", seed=42)
+            second = await generate_network(agents, "pop-test", seed=42)
+            third = await generate_network(agents, "pop-test", seed=43)
+
+        assert first == second
+        assert first != third
 
     @pytest.mark.asyncio
     async def test_config_dispatch_barabasi_albert(self):

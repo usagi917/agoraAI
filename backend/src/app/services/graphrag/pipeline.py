@@ -6,15 +6,15 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.app.config import settings
-from src.app.models.kg_node import KGNode
-from src.app.models.kg_edge import KGEdge
 from src.app.models.community import Community
+from src.app.models.kg_edge import KGEdge
+from src.app.models.kg_node import KGNode
 from src.app.services.graphrag.chunker import SemanticChunker
-from src.app.services.graphrag.entity_extractor import EntityExtractor
-from src.app.services.graphrag.relation_extractor import RelationExtractor
-from src.app.services.graphrag.dedup_resolver import DedupResolver
 from src.app.services.graphrag.community_detector import CommunityDetector
+from src.app.services.graphrag.dedup_resolver import DedupResolver
+from src.app.services.graphrag.entity_extractor import EntityExtractor
 from src.app.services.graphrag.ontology_generator import generate_ontology
+from src.app.services.graphrag.relation_extractor import RelationExtractor
 
 logger = logging.getLogger(__name__)
 

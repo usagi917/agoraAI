@@ -13,7 +13,6 @@ import uuid
 from statistics import pstdev
 from typing import Any
 
-
 BACKTEST_SCHEMA_VERSION = 1
 
 METRIC_DEFINITIONS: dict[str, dict[str, str]] = {
@@ -97,6 +96,96 @@ BACKTEST_INPUT_FORMAT = {
                     "evidence": [
                         "初月の採用率が 9pt 改善",
                         "価格反論率が低下",
+                    ],
+                }
+            ],
+        },
+        {
+            "case_id": "case-002",
+            "title": "2025 自治体 PoC 規制調整",
+            "observed_at": "2025-11-15",
+            "linked_simulation_id": "optional-simulation-id",
+            "linked_report_id": "optional-report-id",
+            "baseline_metrics": {
+                "approval_rate": 0.36,
+                "compliance_readiness": 0.41,
+                "regulatory_risk": 0.68,
+                "trust_score": 0.44,
+            },
+            "outcome": {
+                "issue_label": "規制対応",
+                "summary": "自治体・監督部門との事前調整により承認率と準備度が改善した",
+                "actual_scenario": "制度整合で採用が回復する",
+                "metrics": {
+                    "approval_rate": 0.52,
+                    "compliance_readiness": 0.59,
+                    "regulatory_risk": 0.49,
+                    "trust_score": 0.55,
+                },
+                "tags": ["規制", "承認", "制度整合"],
+            },
+            "interventions": [
+                {
+                    "intervention_id": "regulatory_alignment",
+                    "label": "規制対応",
+                    "baseline_metrics": {
+                        "approval_rate": 0.36,
+                        "compliance_readiness": 0.41,
+                        "regulatory_risk": 0.68,
+                    },
+                    "outcome_metrics": {
+                        "approval_rate": 0.52,
+                        "compliance_readiness": 0.59,
+                        "regulatory_risk": 0.49,
+                    },
+                    "evidence": [
+                        "自治体レビュー通過率が 16pt 改善",
+                        "規制リスク評価が低下",
+                    ],
+                }
+            ],
+        },
+        {
+            "case_id": "case-003",
+            "title": "2026 首都圏 メッセージ改善キャンペーン",
+            "observed_at": "2026-02-20",
+            "linked_simulation_id": "optional-simulation-id",
+            "linked_report_id": "optional-report-id",
+            "baseline_metrics": {
+                "sentiment_score": 0.46,
+                "trust_score": 0.48,
+                "referral_rate": 0.07,
+                "conversion_rate": 0.11,
+            },
+            "outcome": {
+                "issue_label": "信頼形成",
+                "summary": "安全性と導入事例を前面に出した訴求で感情スコアと紹介率が改善した",
+                "actual_scenario": "信頼訴求で初期利用と紹介が増える",
+                "metrics": {
+                    "sentiment_score": 0.61,
+                    "trust_score": 0.58,
+                    "referral_rate": 0.12,
+                    "conversion_rate": 0.15,
+                },
+                "tags": ["信頼", "導入事例", "紹介"],
+            },
+            "interventions": [
+                {
+                    "intervention_id": "message_refinement",
+                    "label": "訴求改善",
+                    "baseline_metrics": {
+                        "sentiment_score": 0.46,
+                        "trust_score": 0.48,
+                        "referral_rate": 0.07,
+                    },
+                    "outcome_metrics": {
+                        "sentiment_score": 0.61,
+                        "trust_score": 0.58,
+                        "referral_rate": 0.12,
+                    },
+                    "evidence": [
+                        "ネガティブ反応率が低下",
+                        "紹介率が 5pt 改善",
                     ],
                 }
             ],

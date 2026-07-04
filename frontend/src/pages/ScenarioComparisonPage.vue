@@ -7,8 +7,7 @@ import ComparisonBrief from '../components/ComparisonBrief.vue'
 import CoalitionMap from '../components/CoalitionMap.vue'
 import OpinionShiftTable from '../components/OpinionShiftTable.vue'
 import AuditTimeline from '../components/AuditTimeline.vue'
-import type { OpinionShift } from '../components/OpinionShiftTable.vue'
-import type { AuditEvent } from '../components/AuditTimeline.vue'
+import type { AuditEvent, OpinionShift } from '../components/timelineTypes'
 
 const route = useRoute()
 const router = useRouter()

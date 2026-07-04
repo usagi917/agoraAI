@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 
+const apiMocks = vi.hoisted(() => ({
+  getPopulationNetwork: vi.fn(),
+}))
+
+vi.mock('../../api/client', () => apiMocks)
+
 // Mock EventSource
 class MockEventSource {
   static instances: MockEventSource[] = []
@@ -51,6 +57,7 @@ describe('useSimulationSSE', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     MockEventSource.instances = []
+    apiMocks.getPopulationNetwork.mockReset()
     mockNotification.mockClear()
     ;(Notification as any).permission = 'granted'
     ;(Notification.requestPermission as ReturnType<typeof vi.fn>).mockClear()
@@ -136,6 +143,99 @@ describe('useSimulationSSE', () => {
       MockEventSource.instances[0].triggerError()
       vi.advanceTimersByTime(5000)
       expect(MockEventSource.instances).toHaveLength(1)
+    })
+  })
+
+  describe('全人口伝播 (population propagation) handling', () => {
+    it('population_propagation_started の古い取得結果は reset 後に適用しない', async () => {
+      const { useSocietyGraphStore } = await import('../../stores/societyGraphStore')
+      const graph = useSocietyGraphStore()
+      graph.setSelectedAgents([
+        { id: 'sel-0', agent_index: 0, name: 'A0', occupation: '会社員', age: 30, region: '関東' },
+      ])
+
+      let resolveNetwork: (value: {
+        population_id: string
+        node_count: number
+        edge_count: number
+        nodes: Array<{ id: string; agent_index: number }>
+        edges: Array<[number, number, number]>
+      }) => void = () => undefined
+      apiMocks.getPopulationNetwork.mockReturnValueOnce(new Promise((resolve) => {
+        resolveNetwork = resolve
+      }))
+
+      const { start } = await createSSE('sim-old')
+      start()
+      const source = MockEventSource.instances[MockEventSource.instances.length - 1]
+
+      source.emit('population_propagation_started', { population_count: 1, edge_count: 0 })
+      expect(apiMocks.getPopulationNetwork).toHaveBeenCalledWith('sim-old', expect.any(Object))
+
+      graph.reset()
+      resolveNetwork({
+        population_id: 'stale-pop',
+        node_count: 1,
+        edge_count: 0,
+        nodes: [{ id: 'pop-stale', agent_index: 1 }],
+        edges: [],
+      })
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(graph.populationNodeCount).toBe(0)
+      expect(graph.graphNodes).toHaveLength(0)
+    })
+
+    it('population_propagation_round が societyGraphStore へ波を適用する', async () => {
+      const { useSocietyGraphStore } = await import('../../stores/societyGraphStore')
+      const graph = useSocietyGraphStore()
+      graph.setSelectedAgents([
+        { id: 'sel-0', agent_index: 0, name: 'A0', occupation: '会社員', age: 30, region: '関東' },
+      ])
+      graph.setPopulationNetwork({
+        population_id: 'pop-1',
+        node_count: 2,
+        edge_count: 1,
+        nodes: [
+          { id: 'sel-0', agent_index: 0 },
+          { id: 'pop-1-a', agent_index: 1 },
+        ],
+        edges: [[0, 1, 0.8]],
+      })
+
+      const { start } = await createSSE()
+      start()
+      const source = MockEventSource.instances[MockEventSource.instances.length - 1]
+      expect(source.listeners.population_propagation_round).toHaveLength(1)
+
+      source.emit('population_propagation_round', { changes: [{ i: 1, s: '条件付き賛成' }] })
+
+      const popNode = graph.graphNodes.find((n) => n.id === 'pop-1-a')
+      expect(popNode?.stance).toBe('条件付き賛成')
+    })
+
+    it('population_propagation_completed が分布反映と完了ログを行う', async () => {
+      const { useSimulationStore } = await import('../../stores/simulationStore')
+      const { useActivityStore } = await import('../../stores/activityStore')
+      const store = useSimulationStore()
+      const activity = useActivityStore()
+
+      const { start } = await createSSE()
+      start()
+      const source = MockEventSource.instances[MockEventSource.instances.length - 1]
+
+      source.emit('population_propagation_completed', {
+        distribution: { 賛成: 0.6, 反対: 0.4 },
+        total_rounds: 5,
+        converged: true,
+        changed_total: 12,
+      })
+
+      expect(store.opinionDistribution).toEqual({ 賛成: 0.6, 反対: 0.4 })
+      expect(
+        activity.entries.some((e) => e.message.includes('全人口伝播完了')),
+      ).toBe(true)
     })
   })
 

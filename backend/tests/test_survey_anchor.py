@@ -10,12 +10,15 @@ import pytest
 from src.app.services.society.survey_anchor import (
     SurveyRecord,
     ComparisonReport,
+    allocate_anchor_prior_stances,
     load_survey_data,
+    load_manifest_anchor_distribution,
     find_relevant_surveys,
     kl_divergence_symmetric,
     earth_movers_distance,
     compare_with_surveys,
     map_to_five_stances,
+    resolve_and_apply_anchor,
 )
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -196,6 +199,81 @@ class TestStanceMapping:
         result = map_to_five_stances(original, "binary")
         assert set(result.keys()) == {"賛成", "条件付き賛成", "中立", "条件付き反対", "反対"}
         assert abs(sum(result.values()) - 1.0) < 0.01
+
+
+class TestDiagnosticAnchorHelpers:
+    def test_manifest_train_anchor_uses_train_average(self):
+        distribution, survey_ids = load_manifest_anchor_distribution("economy", split="train")
+
+        assert survey_ids == [
+            "boj_living_2024_economy_景況感",
+            "boj_living_2024_economy_物価上昇",
+            "boj_living_2024_economy_収入の見通し",
+        ]
+        assert distribution["賛成"] == pytest.approx((0.08 + 0.45 + 0.10) / 3)
+        assert sum(distribution.values()) == pytest.approx(1.0)
+
+    def test_anchor_blend_false_keeps_distribution_but_records_anchor(self):
+        original = {
+            "賛成": 0.1,
+            "条件付き賛成": 0.2,
+            "中立": 0.3,
+            "条件付き反対": 0.2,
+            "反対": 0.2,
+        }
+        result = resolve_and_apply_anchor(
+            original,
+            "金利政策",
+            "economy",
+            diagnostic_cfg={
+                "anchor_blend": False,
+                "anchor_source": "manifest_train:economy",
+            },
+        )
+
+        assert result.applied is False
+        assert result.post_distribution == result.pre_distribution
+        assert result.anchor_distribution is not None
+        assert result.source_survey_ids
+
+    def test_anchor_source_none_preserves_default_noop_path(self):
+        original = {
+            "賛成": 0.1,
+            "条件付き賛成": 0.2,
+            "中立": 0.3,
+            "条件付き反対": 0.2,
+            "反対": 0.2,
+        }
+        result = resolve_and_apply_anchor(
+            original,
+            "対象外テーマ",
+            "unknown",
+            anchor_source="none",
+            anchor_distribution=None,
+        )
+
+        assert result.applied is False
+        assert result.anchor_distribution is None
+        assert result.post_distribution == original
+
+    def test_anchor_prior_allocation_uses_largest_remainder_deterministically(self):
+        distribution = {
+            "賛成": 0.34,
+            "条件付き賛成": 0.33,
+            "中立": 0.33,
+            "条件付き反対": 0.0,
+            "反対": 0.0,
+        }
+        first = allocate_anchor_prior_stances(5, distribution, seed=42)
+        second = allocate_anchor_prior_stances(5, distribution, seed=42)
+
+        assert first == second
+        assert first.count("賛成") == 2
+        assert first.count("条件付き賛成") == 2
+        assert first.count("中立") == 1
+
+    def test_anchor_prior_allocation_handles_empty_agents(self):
+        assert allocate_anchor_prior_stances(0, {"賛成": 1.0}, seed=42) == []
 
     def test_stance_mapping_from_likert_5(self):
         """5段階リッカートをスタンスにマップ"""

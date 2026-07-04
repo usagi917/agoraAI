@@ -12,17 +12,20 @@
 
 from __future__ import annotations
 
+import logging
+import random
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
-import logging
 import yaml
 
+from src.app.config import settings
 from src.app.services.society.constants import STANCE_ORDER
 from src.app.utils.distribution_metrics import (
-    kl_divergence_symmetric,
     earth_movers_distance,
+    kl_divergence_symmetric,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,6 +56,217 @@ class ComparisonReport(TypedDict):
     emd: float
     per_survey_deviations: list[dict]
     best_match_source: str
+
+
+@dataclass(frozen=True)
+class AnchorApplication:
+    pre_distribution: dict[str, float]
+    post_distribution: dict[str, float]
+    anchor_distribution: dict[str, float] | None
+    applied: bool
+    blend_enabled: bool
+    source: str
+    source_survey_ids: list[str]
+
+
+def normalize_stance_distribution(distribution: dict[str, float] | None) -> dict[str, float]:
+    values = {stance: float((distribution or {}).get(stance, 0.0)) for stance in STANCE_ORDER}
+    total = sum(values.values())
+    if total <= 0:
+        return {stance: 1.0 / len(STANCE_ORDER) for stance in STANCE_ORDER}
+    return {stance: value / total for stance, value in values.items()}
+
+
+def _survey_data_dir(survey_data_dir: str | Path | None = None) -> Path:
+    return Path(survey_data_dir) if survey_data_dir else settings.config_dir / "grounding" / "survey_data"
+
+
+def _load_manifest_survey_record(entry: dict, survey_data_dir: Path) -> SurveyRecord:
+    file_path = survey_data_dir / str(entry["file"])
+    with open(file_path, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    for survey in data.get("surveys", []):
+        if (
+            survey.get("theme") == entry.get("theme")
+            and survey.get("source") == entry.get("source")
+            and survey.get("survey_date") == entry.get("survey_date")
+        ):
+            return _validate_survey_record(survey)
+    raise ValueError(
+        "Manifest survey not found in source file: "
+        f"survey_id={entry.get('survey_id')} file={entry.get('file')}"
+    )
+
+
+def _average_manifest_entries(
+    entries: list[dict],
+    survey_data_dir: str | Path | None = None,
+) -> tuple[dict[str, float], list[str]]:
+    data_dir = _survey_data_dir(survey_data_dir)
+    if not entries:
+        raise ValueError("Cannot build anchor from empty manifest entries")
+
+    totals = {stance: 0.0 for stance in STANCE_ORDER}
+    survey_ids: list[str] = []
+    for entry in entries:
+        record = _load_manifest_survey_record(entry, data_dir)
+        survey_ids.append(str(entry.get("survey_id", record["source"])))
+        for stance in STANCE_ORDER:
+            totals[stance] += record["stance_distribution"].get(stance, 0.0)
+
+    n = len(entries)
+    return normalize_stance_distribution({stance: value / n for stance, value in totals.items()}), survey_ids
+
+
+def load_manifest_anchor_distribution(
+    preset_id: str,
+    *,
+    split: str = "train",
+    survey_data_dir: str | Path | None = None,
+) -> tuple[dict[str, float], list[str]]:
+    from src.app.services.society.validation_pipeline import load_manifest_split
+
+    manifest_split = load_manifest_split(preset_id)
+    entries = manifest_split.train_surveys if split == "train" else manifest_split.eval_surveys
+    return _average_manifest_entries(entries, survey_data_dir=survey_data_dir)
+
+
+def resolve_anchor_distribution(
+    theme: str,
+    theme_category: str,
+    *,
+    diagnostic_cfg: dict | None = None,
+    survey_data_dir: str | Path | None = None,
+) -> tuple[dict[str, float] | None, str, list[str]]:
+    """通常/diagnostic両用でアンカー分布を解決する。"""
+    diagnostic_cfg = diagnostic_cfg or {}
+    source = diagnostic_cfg.get("anchor_source")
+
+    if source == "uniform":
+        return normalize_stance_distribution({}), "uniform", []
+
+    if isinstance(source, str) and source.startswith("manifest_train:"):
+        preset_id = source.split(":", 1)[1]
+        distribution, survey_ids = load_manifest_anchor_distribution(
+            preset_id,
+            split="train",
+            survey_data_dir=survey_data_dir,
+        )
+        return distribution, source, survey_ids
+
+    if isinstance(source, str) and source.startswith("unrelated:"):
+        preset_id = source.split(":", 1)[1]
+        distribution, survey_ids = load_manifest_anchor_distribution(
+            preset_id,
+            split="train",
+            survey_data_dir=survey_data_dir,
+        )
+        return distribution, source, survey_ids
+
+    surveys = load_survey_data(str(_survey_data_dir(survey_data_dir)))
+    distribution = get_anchor_distribution(theme, theme_category, surveys)
+    return distribution, "theme_match", []
+
+
+def resolve_and_apply_anchor(
+    distribution: dict[str, float],
+    theme: str,
+    theme_category: str,
+    *,
+    diagnostic_cfg: dict | None = None,
+    survey_data_dir: str | Path | None = None,
+    anchor_distribution: dict[str, float] | None = None,
+    anchor_source: str | None = None,
+    anchor_survey_ids: list[str] | None = None,
+) -> AnchorApplication:
+    """アンカーの解決とブレンド適用を一箇所に集約する。"""
+    diagnostic_cfg = diagnostic_cfg or {}
+    pre_distribution = normalize_stance_distribution(distribution)
+    source = anchor_source if anchor_source is not None else "theme_match"
+    survey_ids = list(anchor_survey_ids or [])
+
+    if diagnostic_cfg.get("anchor_source") or (
+        anchor_distribution is None and source != "none"
+    ):
+        anchor_distribution, source, survey_ids = resolve_anchor_distribution(
+            theme,
+            theme_category,
+            diagnostic_cfg=diagnostic_cfg,
+            survey_data_dir=survey_data_dir,
+        )
+
+    anchor_distribution = (
+        normalize_stance_distribution(anchor_distribution)
+        if anchor_distribution is not None else None
+    )
+    blend_enabled = bool(diagnostic_cfg.get("anchor_blend", True))
+    if not blend_enabled or anchor_distribution is None:
+        return AnchorApplication(
+            pre_distribution=pre_distribution,
+            post_distribution=pre_distribution,
+            anchor_distribution=anchor_distribution,
+            applied=False,
+            blend_enabled=blend_enabled,
+            source=source,
+            source_survey_ids=survey_ids,
+        )
+
+    post_distribution = apply_survey_anchor(pre_distribution, anchor_distribution)
+    return AnchorApplication(
+        pre_distribution=pre_distribution,
+        post_distribution=normalize_stance_distribution(post_distribution),
+        anchor_distribution=anchor_distribution,
+        applied=post_distribution != pre_distribution,
+        blend_enabled=blend_enabled,
+        source=source,
+        source_survey_ids=survey_ids,
+    )
+
+
+def allocate_anchor_prior_stances(
+    count: int,
+    anchor_distribution: dict[str, float],
+    *,
+    seed: int | None = None,
+) -> list[str]:
+    """分布に近い人数配分を largest remainder で決定し、seed付きで並べ替える。"""
+    if count <= 0:
+        return []
+    normalized = normalize_stance_distribution(anchor_distribution)
+    exact = {stance: normalized[stance] * count for stance in STANCE_ORDER}
+    floors = {stance: int(exact[stance]) for stance in STANCE_ORDER}
+    remaining = count - sum(floors.values())
+    ranked = sorted(
+        STANCE_ORDER,
+        key=lambda stance: (exact[stance] - floors[stance], -STANCE_ORDER.index(stance)),
+        reverse=True,
+    )
+    for stance in ranked[:remaining]:
+        floors[stance] += 1
+
+    assignments: list[str] = []
+    for stance in STANCE_ORDER:
+        assignments.extend([stance] * floors[stance])
+    rng = random.Random(seed) if seed is not None else random.Random()
+    rng.shuffle(assignments)
+    return assignments
+
+
+def inject_anchor_prior_stances(
+    agents: list[dict],
+    anchor_distribution: dict[str, float],
+    *,
+    seed: int | None = None,
+) -> list[str]:
+    assignments = allocate_anchor_prior_stances(
+        len(agents),
+        anchor_distribution,
+        seed=seed,
+    )
+    for agent, stance in zip(agents, assignments):
+        agent["anchor_prior_stance"] = stance
+    return assignments
 
 
 def _validate_survey_record(record: dict) -> SurveyRecord:

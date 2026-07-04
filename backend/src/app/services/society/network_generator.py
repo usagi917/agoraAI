@@ -15,6 +15,19 @@ RELATION_TYPES = ["friend", "family", "colleague", "neighbor", "acquaintance"]
 RELATION_WEIGHTS = [0.20, 0.10, 0.25, 0.15, 0.30]
 
 
+def _edge_id(
+    population_id: str,
+    agent_id: str,
+    target_id: str,
+    relation_type: str,
+    seed: int | None,
+) -> str:
+    if seed is None:
+        return str(uuid.uuid4())
+    name = f"{population_id}:{agent_id}:{target_id}:{relation_type}:{seed}"
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, name))
+
+
 def _attribute_similarity(a: dict, b: dict) -> float:
     """2つのエージェントプロフィールの属性類似度を計算する (0-1)。"""
     score = 0.0
@@ -45,17 +58,18 @@ def _attribute_similarity(a: dict, b: dict) -> float:
     return score / count if count > 0 else 0.0
 
 
-def _determine_relation_type(similarity: float) -> str:
+def _determine_relation_type(similarity: float, rng: random.Random | None = None) -> str:
     """類似度に基づいて関係タイプを決定する。"""
+    rng = rng or random
     if similarity > 0.8:
         # 高い類似度: friend/colleague が多い
-        return random.choices(
+        return rng.choices(
             ["friend", "family", "colleague"],
             weights=[0.4, 0.2, 0.4],
             k=1,
         )[0]
     elif similarity > 0.5:
-        return random.choices(
+        return rng.choices(
             RELATION_TYPES,
             weights=RELATION_WEIGHTS,
             k=1,
@@ -70,6 +84,7 @@ def generate_watts_strogatz_edges(
     k: int = 6,
     beta: float = 0.3,
     cluster_by_attributes: bool = True,
+    seed: int | None = None,
 ) -> list[dict[str, Any]]:
     """Watts-Strogatz 小世界ネットワークを生成する。
 
@@ -80,6 +95,7 @@ def generate_watts_strogatz_edges(
     n = len(agents)
     if n < 3:
         return []
+    rng = random.Random(seed) if seed is not None else random.Random()
 
     # 属性ベースクラスタリング: 地域→年齢でソートし、類似住民が近傍になるようにする
     if cluster_by_attributes:
@@ -109,14 +125,14 @@ def generate_watts_strogatz_edges(
             edges_set.add(edge)
 
     # Step 2: 再配線
-    edges_list = list(edges_set)
+    edges_list = sorted(edges_set)
     for idx, (i, j) in enumerate(edges_list):
-        if random.random() < beta:
+        if rng.random() < beta:
             # j を新しいランダムターゲットに置き換え
-            new_j = random.randint(0, n - 1)
+            new_j = rng.randint(0, n - 1)
             attempts = 0
             while new_j == i or (min(i, new_j), max(i, new_j)) in edges_set:
-                new_j = random.randint(0, n - 1)
+                new_j = rng.randint(0, n - 1)
                 attempts += 1
                 if attempts > 100:
                     break
@@ -126,14 +142,14 @@ def generate_watts_strogatz_edges(
 
     # エッジオブジェクト生成
     edge_objects = []
-    for i, j in edges_set:
+    for i, j in sorted(edges_set):
         similarity = _attribute_similarity(agents[i], agents[j])
-        relation_type = _determine_relation_type(similarity)
-        strength = round(0.3 + similarity * 0.5 + random.uniform(-0.1, 0.1), 3)
+        relation_type = _determine_relation_type(similarity, rng)
+        strength = round(0.3 + similarity * 0.5 + rng.uniform(-0.1, 0.1), 3)
         strength = max(0.1, min(1.0, strength))
 
         edge_objects.append({
-            "id": str(uuid.uuid4()),
+            "id": _edge_id(population_id, agents[i]["id"], agents[j]["id"], relation_type, seed),
             "population_id": population_id,
             "agent_id": agents[i]["id"],
             "target_id": agents[j]["id"],
@@ -172,6 +188,7 @@ def generate_barabasi_albert_edges(
     if n <= m:
         return []
 
+    rng = random.Random(seed) if seed is not None else random.Random()
     G = nx.barabasi_albert_graph(n, m, seed=seed)
 
     # Compute degree for strength assignment
@@ -179,17 +196,17 @@ def generate_barabasi_albert_edges(
     max_degree = max(degrees.values()) if degrees else 1
 
     edge_objects = []
-    for u, v in G.edges():
+    for u, v in sorted(G.edges()):
         # Strength proportional to the average degree of the two endpoints
         avg_deg = (degrees[u] + degrees[v]) / 2
-        strength = round(0.3 + 0.5 * (avg_deg / max_degree) + random.uniform(-0.05, 0.05), 3)
+        strength = round(0.3 + 0.5 * (avg_deg / max_degree) + rng.uniform(-0.05, 0.05), 3)
         strength = max(0.1, min(1.0, strength))
 
         similarity = _attribute_similarity(agents[u], agents[v])
-        relation_type = _determine_relation_type(similarity)
+        relation_type = _determine_relation_type(similarity, rng)
 
         edge_objects.append({
-            "id": str(uuid.uuid4()),
+            "id": _edge_id(population_id, agents[u]["id"], agents[v]["id"], relation_type, seed),
             "population_id": population_id,
             "agent_id": agents[u]["id"],
             "target_id": agents[v]["id"],
@@ -235,22 +252,24 @@ def generate_hybrid_edges(
     ba_ratio = max(0.0, min(1.0, ba_ratio))
 
     if ba_ratio == 0.0:
-        return generate_watts_strogatz_edges(agents, population_id, k, beta, cluster_by_attributes)
+        return generate_watts_strogatz_edges(agents, population_id, k, beta, cluster_by_attributes, seed)
 
     if ba_ratio == 1.0:
         return generate_barabasi_albert_edges(agents, population_id, m, seed)
 
     # Generate both edge sets
-    ws_edges = generate_watts_strogatz_edges(agents, population_id, k, beta, cluster_by_attributes)
-    ba_edges = generate_barabasi_albert_edges(agents, population_id, m, seed)
+    ws_seed = None if seed is None else seed + 1009
+    ba_seed = None if seed is None else seed + 2003
+    sample_rng = random.Random(seed + 3001) if seed is not None else random.Random()
+    ws_edges = generate_watts_strogatz_edges(agents, population_id, k, beta, cluster_by_attributes, ws_seed)
+    ba_edges = generate_barabasi_albert_edges(agents, population_id, m, ba_seed)
 
     # Sample from each according to ba_ratio
     n_ws = max(1, int(len(ws_edges) * (1 - ba_ratio)))
     n_ba = max(1, int(len(ba_edges) * ba_ratio))
 
-    rng = random.Random(seed)
-    sampled_ws = rng.sample(ws_edges, min(n_ws, len(ws_edges)))
-    sampled_ba = rng.sample(ba_edges, min(n_ba, len(ba_edges)))
+    sampled_ws = sample_rng.sample(ws_edges, min(n_ws, len(ws_edges)))
+    sampled_ba = sample_rng.sample(ba_edges, min(n_ba, len(ba_edges)))
 
     # Merge and deduplicate by (agent_id, target_id)
     seen: set[tuple[str, str]] = set()
@@ -273,6 +292,7 @@ def generate_hybrid_edges(
 async def generate_network(
     agents: list[dict],
     population_id: str,
+    seed: int | None = None,
 ) -> list[dict[str, Any]]:
     """人口ミックス設定に基づいてネットワークを生成する。
 
@@ -292,11 +312,11 @@ async def generate_network(
     ba_ratio = network_cfg.get("ba_ratio", 0.3)
 
     if network_type == "barabasi_albert":
-        return generate_barabasi_albert_edges(agents, population_id, m)
+        return generate_barabasi_albert_edges(agents, population_id, m, seed)
     elif network_type == "hybrid":
         return generate_hybrid_edges(
-            agents, population_id, k, beta, m, ba_ratio, cluster,
+            agents, population_id, k, beta, m, ba_ratio, cluster, seed,
         )
     else:
         # Default: watts_strogatz
-        return generate_watts_strogatz_edges(agents, population_id, k, beta, cluster)
+        return generate_watts_strogatz_edges(agents, population_id, k, beta, cluster, seed)

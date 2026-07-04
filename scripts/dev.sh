@@ -54,7 +54,7 @@ fi
 
 if [[ ! -d "${ROOT_DIR}/backend/.venv" ]]; then
   echo "[dev.sh] installing backend dependencies..."
-  (cd "${ROOT_DIR}/backend" && uv sync --extra dev)
+  (cd "${ROOT_DIR}/backend" && uv sync)
 fi
 
 if [[ ! -d "${ROOT_DIR}/frontend/node_modules" ]]; then

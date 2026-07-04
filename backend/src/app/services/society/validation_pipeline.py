@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
@@ -25,18 +27,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.app.models.prediction_evaluation import PredictionEvaluation
 from src.app.models.validation_record import ValidationRecord
 from src.app.repositories.validation_repo import ValidationRepository
+from src.app.services.society.calibration import (
+    extremeness_aversion_correction,
+)
 from src.app.services.society.survey_anchor import (
     ComparisonReport,
     compare_with_surveys,
 )
-from src.app.services.society.calibration import (
-    extremeness_aversion_correction,
-)
+from src.app.services.society.theme_category import ThemeCategoryEstimate
 from src.app.services.society.transfer_calibrator import (
     BiasProfile,
     compute_bias_profile,
 )
-from src.app.services.society.theme_category import ThemeCategoryEstimate
 from src.app.utils.distribution_metrics import (
     earth_movers_distance,
     kl_divergence_symmetric,
@@ -72,6 +74,92 @@ MANIFEST_DIR: str = os.path.join(
     "../../../../..",  # agentAI/
     "config/grounding/manifests",
 )
+_PRESET_ID_RE = re.compile(r"^[a-z0-9_-]+$")
+
+
+@dataclass(frozen=True)
+class ManifestSplit:
+    preset_id: str
+    train_ids: set[str]
+    eval_ids: set[str]
+    train_files: set[str]
+    eval_files: set[str]
+    train_surveys: list[dict[str, Any]]
+    eval_surveys: list[dict[str, Any]]
+    manifest_path: Path
+
+
+def _manifest_path_for_preset(preset_id: str) -> Path:
+    if not _PRESET_ID_RE.fullmatch(preset_id):
+        raise ValueError(f"Invalid preset_id: {preset_id!r}")
+
+    manifest_dir = Path(MANIFEST_DIR).resolve()
+    direct = (manifest_dir / f"{preset_id}_manifest.yaml").resolve()
+    if not direct.is_relative_to(manifest_dir):
+        raise ValueError(f"Invalid preset_id: {preset_id!r}")
+
+    if direct.exists():
+        return direct
+
+    for yaml_file in manifest_dir.glob("*.yaml"):
+        try:
+            with open(yaml_file, encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+        except (yaml.YAMLError, OSError):
+            continue
+        if data.get("preset_id") == preset_id:
+            return yaml_file
+    raise FileNotFoundError(f"Manifest preset not found: {preset_id}")
+
+
+def load_manifest_split(preset_id: str) -> ManifestSplit:
+    """指定 preset の train/eval survey split を読み込む。"""
+    manifest_path = _manifest_path_for_preset(preset_id)
+    with open(manifest_path, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    train_surveys = list(data.get("train_surveys") or [])
+    eval_surveys = list(data.get("eval_surveys") or [])
+    train_ids = {str(s["survey_id"]) for s in train_surveys if s.get("survey_id")}
+    eval_ids = {str(s["survey_id"]) for s in eval_surveys if s.get("survey_id")}
+
+    validate_no_leakage(train_ids, eval_ids)
+
+    excluded = {
+        str(survey_id)
+        for survey_id in (data.get("leakage_prevention") or {}).get(
+            "exclude_survey_ids_from_training", []
+        )
+    }
+    leaked_excluded = train_ids & excluded
+    if leaked_excluded:
+        raise ValueError(
+            "Manifest leakage: eval/excluded surveys are present in training: "
+            f"{sorted(leaked_excluded)}"
+        )
+
+    return ManifestSplit(
+        preset_id=str(data.get("preset_id") or preset_id),
+        train_ids=train_ids,
+        eval_ids=eval_ids,
+        train_files={str(s["file"]) for s in train_surveys if s.get("file")},
+        eval_files={str(s["file"]) for s in eval_surveys if s.get("file")},
+        train_surveys=train_surveys,
+        eval_surveys=eval_surveys,
+        manifest_path=manifest_path,
+    )
+
+
+def validate_no_leakage(
+    anchor_survey_ids: set[str] | list[str] | tuple[str, ...],
+    eval_survey_ids: set[str] | list[str] | tuple[str, ...],
+) -> None:
+    """アンカー/学習に使う survey_id と eval survey_id の交差を禁止する。"""
+    anchor_ids = {str(s) for s in anchor_survey_ids}
+    eval_ids = {str(s) for s in eval_survey_ids}
+    overlap = anchor_ids & eval_ids
+    if overlap:
+        raise ValueError(f"Survey leakage detected: {sorted(overlap)}")
 
 
 def _load_manifest_surveys() -> list[dict]:

@@ -4,10 +4,12 @@ import { useGraphStore } from '../stores/graphStore'
 import { useActivityStore } from '../stores/activityStore'
 import { useSocietyStore } from '../stores/societyStore'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
+import { getPopulationNetwork } from '../api/client'
 import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
 import { useAgentVisualizationStore } from '../stores/agentVisualizationStore'
 import { useCognitiveSSE } from './useCognitiveSSE'
 import { useTheaterSSE } from './useTheaterSSE'
+import { formatPercent } from '../utils/format'
 
 function getSimulationStreamUrl(simulationId: string) {
   const base = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '')
@@ -33,6 +35,7 @@ export function useSimulationSSE(simulationId: string) {
   let reconnectAttempts = 0
   const MAX_RECONNECTS = 3
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let populationNetworkAbort: AbortController | null = null
 
   function start() {
     const e2eEvents = (window as Window & {
@@ -113,6 +116,10 @@ export function useSimulationSSE(simulationId: string) {
       'network_propagation_started',
       'propagation_timestep',
       'network_propagation_completed',
+      // Population Propagation (全人口への意見伝播)
+      'population_propagation_started',
+      'population_propagation_round',
+      'population_propagation_completed',
       // Society ソーシャルグラフ
       'society_social_graph_ready',
       // Unified モード イベント
@@ -190,7 +197,7 @@ export function useSimulationSSE(simulationId: string) {
         store.setMetaPhase('world_building')
         store.setPhase('meta_world_building')
         activity.addEntry('phase', '⬢', 'Meta Simulation 開始', {
-          detail: payload.target_score ? `target ${(Number(payload.target_score) * 100).toFixed(0)}%` : undefined,
+          detail: payload.target_score ? `target ${formatPercent(Number(payload.target_score), 0)}` : undefined,
           track: 'phase',
           status: 'running',
         })
@@ -248,7 +255,7 @@ export function useSimulationSSE(simulationId: string) {
         store.setMetaStopReason(payload.stop_evaluation?.reason || '')
         store.setMetaPhase('scoring')
         store.setPhase('meta_scoring')
-        activity.addEntry('event', '◎', `Meta Score ${(Number(payload.objective_score || 0) * 100).toFixed(0)}%`, {
+        activity.addEntry('event', '◎', `Meta Score ${formatPercent(Number(payload.objective_score || 0), 0)}`, {
           detail: payload.stop_evaluation?.reason || undefined,
           track: 'phase',
           status: 'completed',
@@ -257,7 +264,7 @@ export function useSimulationSSE(simulationId: string) {
 
       case 'meta_cycle_completed':
         activity.addEntry('event', '✓', `Meta Cycle ${payload.cycle_index} 完了`, {
-          detail: `${(Number(payload.objective_score || 0) * 100).toFixed(0)}% / ${payload.stop_reason || 'continue'}`,
+          detail: `${formatPercent(Number(payload.objective_score || 0), 0)} / ${payload.stop_reason || 'continue'}`,
           track: 'phase',
           status: 'completed',
         })
@@ -266,7 +273,7 @@ export function useSimulationSSE(simulationId: string) {
       case 'meta_converged':
         store.setMetaBestScore(Number(payload.best_score || 0))
         store.setMetaStopReason(payload.stop_reason || '')
-        activity.addEntry('phase', '✓', `Meta 収束: ${(Number(payload.best_score || 0) * 100).toFixed(0)}%`, {
+        activity.addEntry('phase', '✓', `Meta 収束: ${formatPercent(Number(payload.best_score || 0), 0)}`, {
           detail: payload.stop_reason || undefined,
           track: 'phase',
           status: 'completed',
@@ -414,7 +421,7 @@ export function useSimulationSSE(simulationId: string) {
         }
         activity.addEntry('event', '▣', 'レポート生成完了', {
           detail: payload.agreement_score != null
-            ? `合意度: ${(payload.agreement_score * 100).toFixed(0)}%`
+            ? `合意度: ${formatPercent(payload.agreement_score, 0)}`
             : undefined,
           track: 'report',
           status: 'completed',
@@ -446,7 +453,7 @@ export function useSimulationSSE(simulationId: string) {
           payload.status === 'passed' ? '✓' : '✗',
           `検証完了: ${payload.target || 'output'}`,
           {
-            detail: payload.status ? `${payload.status} / ${(Number(payload.score || 0) * 100).toFixed(0)}%` : undefined,
+            detail: payload.status ? `${payload.status} / ${formatPercent(Number(payload.score || 0), 0)}` : undefined,
             track: 'report',
             status: payload.status === 'passed' ? 'completed' : 'failed',
           },
@@ -690,7 +697,7 @@ export function useSimulationSSE(simulationId: string) {
         }
         {
           const avgConf = payload.aggregation?.average_confidence
-          const avgConfStr = avgConf != null ? `${(avgConf * 100).toFixed(1)}%` : '?'
+          const avgConfStr = avgConf != null ? formatPercent(avgConf, 1) : '?'
           vizStore.addSystemEvent('✓', '活性化完了', `平均信頼度: ${avgConfStr}`)
           activity.addEntry('event', '◎', '活性化完了', {
             detail: `平均信頼度: ${avgConfStr}`,
@@ -740,6 +747,47 @@ export function useSimulationSSE(simulationId: string) {
         }
         activity.addEntry('event', '◎', `伝播完了 (${payload.total_timesteps}ステップ, ${payload.converged ? '収束' : '未収束'})`, {
           detail: `${payload.cluster_count}クラスタ, ${payload.stance_updates?.length || 0}件のスタンス変化`,
+          track: 'phase',
+          status: 'completed',
+        })
+        break
+
+      case 'population_propagation_started':
+        // 全人口ネットワークを取得して人口レイヤーを表示
+        populationNetworkAbort?.abort()
+        populationNetworkAbort = new AbortController()
+        {
+          const startedGeneration = societyGraphStore.generation
+          const controller = populationNetworkAbort
+          getPopulationNetwork(simulationId, { signal: controller.signal })
+            .then((network) => societyGraphStore.setPopulationNetworkIfCurrent(network, startedGeneration))
+            .catch((err) => {
+              if (err?.name === 'AbortError' || err?.code === 'ERR_CANCELED') return
+              console.warn('population-network の取得に失敗:', err)
+            })
+            .finally(() => {
+              if (populationNetworkAbort === controller) populationNetworkAbort = null
+            })
+        }
+        vizStore.addSystemEvent('◎', '全人口伝播開始', `${payload.population_count}人へ意見が波及中`)
+        activity.addEntry('phase', '◎', `全人口伝播開始 (${payload.population_count}人, ${payload.edge_count}辺)`, {
+          track: 'phase',
+          status: 'running',
+        })
+        break
+
+      case 'population_propagation_round':
+        if (payload.changes?.length) {
+          societyGraphStore.applyPropagationRound(payload.changes)
+        }
+        break
+
+      case 'population_propagation_completed':
+        if (payload.distribution) {
+          store.setOpinionDistribution(payload.distribution)
+        }
+        activity.addEntry('event', '◎', `全人口伝播完了 (${payload.total_rounds}ラウンド, ${payload.converged ? '収束' : '未収束'})`, {
+          detail: `${payload.changed_total || 0}件のスタンス変化`,
           track: 'phase',
           status: 'completed',
         })
@@ -920,6 +968,8 @@ export function useSimulationSSE(simulationId: string) {
     }
     source?.close()
     source = null
+    populationNetworkAbort?.abort()
+    populationNetworkAbort = null
   }
 
   onUnmounted(close)

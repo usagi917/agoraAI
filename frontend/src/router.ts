@@ -20,6 +20,11 @@ const router = createRouter({
       component: () => import('./pages/ResultsPage.vue'),
     },
     {
+      path: '/validate/:id?',
+      name: 'validate',
+      component: () => import('./pages/ValidatePage.vue'),
+    },
+    {
       path: '/populations',
       name: 'populations',
       component: () => import('./pages/PopulationPage.vue'),
@@ -63,6 +68,11 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'e2e') {
     path: '/__e2e__/sse',
     name: 'sse-probe',
     component: () => import('./pages/SSEProbePage.vue'),
+  })
+  router.addRoute({
+    path: '/__dev__/graph',
+    name: 'graph-dev',
+    component: () => import('./pages/GraphDevPage.vue'),
   })
 }
 

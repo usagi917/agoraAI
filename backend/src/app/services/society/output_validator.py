@@ -4,8 +4,8 @@
 人工合意・浅い応答・ペルソナ崩壊の自動検出機能を含む。
 """
 
-import re
 import logging
+import re
 from collections import Counter
 
 logger = logging.getLogger(__name__)

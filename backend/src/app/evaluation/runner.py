@@ -4,13 +4,13 @@ from typing import Any
 
 from src.app.evaluation.base import BaseMetric
 from src.app.evaluation.metrics import (
-    DiversityMetric,
     ConsistencyMetric,
     ConvergenceMetric,
     CoverageMetric,
-    ResponseDepthMetric,
-    MeetingPolarizationMetric,
+    DiversityMetric,
     LexicalDiversityMetric,
+    MeetingPolarizationMetric,
+    ResponseDepthMetric,
 )
 
 

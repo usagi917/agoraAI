@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
-export type AgentVisualStatus = 'idle' | 'thinking' | 'executing' | 'speaking' | 'debating'
+type AgentVisualStatus = 'idle' | 'thinking' | 'executing' | 'speaking' | 'debating'
 
 interface RecentThought {
   agentId: string

@@ -7,8 +7,10 @@
   --bg-surface: #1e1e2a;
   --text-primary: #f0f0f5;
   --text-secondary: #8888a0;
+  --text-tertiary: #6f6f86;
   --text-muted: #55556a;
   --accent: #3b82f6;
+  --accent-rgb: 59, 130, 246;
   --accent-hover: #60a5fa;
   --accent-glow: rgba(59, 130, 246, 0.3);
   --accent-subtle: rgba(59, 130, 246, 0.08);

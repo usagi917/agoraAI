@@ -1,10 +1,15 @@
-from datetime import datetime, timezone
-from pathlib import Path
 import re
+from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy import event, inspect, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import DeclarativeBase, Session
 
 from src.app.config import settings
@@ -20,12 +25,12 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 
 def utcnow_naive() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _normalize_aware_datetime(value: object) -> object:
     if isinstance(value, datetime) and value.tzinfo is not None:
-        return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value.astimezone(UTC).replace(tzinfo=None)
     return value
 
 
@@ -309,6 +314,7 @@ async def _apply_postgres_compatibility_migrations(conn: AsyncConnection) -> Non
         CONVERSATION_LOG_PARTICIPANT_ROLE_MAX_LENGTH,
         CONVERSATION_LOG_STANCE_MAX_LENGTH,
     )
+    from src.app.models.society_result import SOCIETY_RESULT_LAYER_MAX_LENGTH
 
     existing_tables = await _get_existing_tables(conn)
 
@@ -370,6 +376,28 @@ async def _apply_postgres_compatibility_migrations(conn: AsyncConnection) -> Non
         ]:
             if col_name not in vr_columns:
                 await conn.execute(text(col_ddl))
+
+    if "society_results" in existing_tables:
+        result = await conn.execute(
+            text(
+                """
+                SELECT character_maximum_length
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'society_results'
+                  AND column_name = 'layer'
+                """
+            )
+        )
+        current_layer_length = result.scalar()
+
+        if (current_layer_length or 0) < SOCIETY_RESULT_LAYER_MAX_LENGTH:
+            await conn.execute(
+                text(
+                    f"ALTER TABLE society_results ALTER COLUMN layer "
+                    f"TYPE VARCHAR({SOCIETY_RESULT_LAYER_MAX_LENGTH})"
+                )
+            )
 
     if "conversation_logs" not in existing_tables:
         return

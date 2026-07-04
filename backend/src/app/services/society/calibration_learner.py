@@ -9,7 +9,7 @@ DB 永続化や API 統合は後続フェーズで行う（このモジュール
 from __future__ import annotations
 
 import random
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.app.models.calibration_profile import CalibrationProfile
 from src.app.services.society.calibration import expected_calibration_error
@@ -17,7 +17,7 @@ from src.app.services.society.constants import STANCE_ORDER as STANCES
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def _to_ece_pairs(predicted: dict[str, float], observed: dict[str, float]) -> list[tuple[float, bool]]:

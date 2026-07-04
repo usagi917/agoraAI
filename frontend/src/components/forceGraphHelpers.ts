@@ -8,6 +8,7 @@ export interface NodeProp {
   activity_score: number
   stance?: string
   status?: string
+  tier?: string
 }
 
 export interface EdgeProp {
@@ -36,26 +37,32 @@ export interface SimLink {
   relation_type: string
   weight: number
   label?: string
+  synthetic?: boolean
+  curvature?: number
 }
 
+// Research-grade palette: a single cohesive, desaturated family (steel blue →
+// teal → muted sage → soft violet, with two restrained warm accents) so entity
+// type never competes with the loud, semantic stance colors. Against the deep
+// near-black field these read as calm, luminous points rather than candy.
 export const TYPE_COLORS: Record<string, string> = {
-  organization: '#4FC3F7',
-  person: '#FFB74D',
-  policy: '#81C784',
-  market: '#E57373',
-  technology: '#BA68C8',
-  resource: '#4DB6AC',
-  concept: '#64B5F6',
-  risk: '#FF8A65',
-  opportunity: '#AED581',
-  agent: '#FFB74D',
-  friend: '#4FC3F7',
-  family: '#FFB74D',
-  colleague: '#81C784',
-  neighbor: '#4DB6AC',
-  acquaintance: '#90A4AE',
-  mentions: '#BA68C8',
-  default: '#90A4AE',
+  organization: '#5b8fb0',
+  person: '#c9a373',
+  policy: '#6faa8f',
+  market: '#c17c74',
+  technology: '#8a7fbf',
+  resource: '#5fa0a6',
+  concept: '#6d92c4',
+  risk: '#c78f6a',
+  opportunity: '#8fb079',
+  agent: '#c9a373',
+  friend: '#5aa0c8',
+  family: '#c9a373',
+  colleague: '#6faa8f',
+  neighbor: '#5fa0a6',
+  acquaintance: '#8593a8',
+  mentions: '#8a7fbf',
+  default: '#7c8aa0',
 }
 
 const NODE_PROP_KEYS = [
@@ -66,9 +73,12 @@ const NODE_PROP_KEYS = [
   'activity_score',
   'stance',
   'status',
+  'tier',
 ] as const
 
 const EDGE_PROP_KEYS = ['id', 'source', 'target', 'relation_type', 'weight', 'label'] as const
+const MIN_LINKS_PER_NODE_FOR_CONNECTED_VIEW = 1.25
+const MAX_SYNTHETIC_NEIGHBORS = 3
 
 export function clamp01(value: number | null | undefined): number {
   if (value == null || Number.isNaN(value)) return 0
@@ -90,10 +100,48 @@ export function nodeDisplayColor(node: Pick<NodeProp, 'type' | 'stance'>): strin
   return typeColor
 }
 
-export function nodeRadius(node: Pick<NodeProp, 'importance_score' | 'activity_score' | 'status'>): number {
+export const POPULATION_NODE_RADIUS = 2.2
+
+export function nodeRadius(
+  node: Pick<NodeProp, 'importance_score' | 'activity_score' | 'status' | 'tier'>,
+  degree = 0,
+): number {
+  if (node.tier === 'population') return POPULATION_NODE_RADIUS
   const importance = clamp01(node.importance_score ?? 0.4)
   const activityBoost = (node.activity_score ?? 0) > 0 || node.status === 'speaking' ? 3 : 0
-  return 5 + importance * 8 + activityBoost
+  const degreeBoost = Math.min(8, Math.sqrt(Math.max(0, degree)) * 0.9)
+  return 5 + importance * 8 + activityBoost + degreeBoost
+}
+
+export function computeDegrees(edges: ReadonlyArray<EdgeProp | SimLink>): Map<string, number> {
+  const degrees = new Map<string, number>()
+  for (const [id, neighbors] of buildAdjacency(edges)) {
+    degrees.set(id, neighbors.size)
+  }
+  return degrees
+}
+
+// Labels stay hidden across the overview zoom (where zoomToFit lands ~1x) so the
+// graph reads as a clean constellation, and fade in only once the user has
+// deliberately zoomed into a neighbourhood. Selected/hovered nodes bypass this.
+export function labelAlpha(globalScale: number): number {
+  const FADE_START = 2.0
+  const FADE_END = 3.4
+  if (globalScale <= FADE_START) return 0
+  if (globalScale >= FADE_END) return 1
+  return (globalScale - FADE_START) / (FADE_END - FADE_START)
+}
+
+// Deterministic [0, 1) hash of a node id. Used to give the population "dust" a
+// stable per-point size/brightness jitter so 10k dots read as a star field
+// instead of a uniform stipple — identical every render (no layout churn).
+export function hashUnit(id: string): number {
+  let h = 2166136261
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return ((h >>> 0) % 100000) / 100000
 }
 
 export function linkWidth(weight: number | null | undefined): number {
@@ -123,8 +171,106 @@ export function withAlpha(color: string, alpha: number): string {
 
 export function linkColor(relation_type: string, weight: number | null | undefined, dimmed: boolean): string {
   const base = nodeColor(relation_type)
-  const alpha = dimmed ? 0.14 : Math.min(0.72, 0.24 + clamp01(weight) * 0.38)
+  const alpha = dimmed ? 0.06 : Math.min(0.42, 0.14 + clamp01(weight) * 0.28)
   return withAlpha(base, alpha)
+}
+
+export interface GraphPhysics {
+  chargeStrength: number
+  linkDistance: number
+  centerStrength: number
+  collidePadding: number
+}
+
+export const DEFAULT_PHYSICS: GraphPhysics = {
+  chargeStrength: -220,
+  linkDistance: 60,
+  centerStrength: 0.04,
+  collidePadding: 4,
+}
+
+// Synthetic "visual affinity" links only exist to keep sparse graphs from
+// flying apart — they carry no semantic meaning, so they must whisper. We ignore
+// the endpoint colors entirely and paint a single cool slate at a hair of alpha,
+// blended toward the endpoints only faintly so the web has subtle depth without
+// ever becoming the loud green/red yarn ball it used to be.
+export function syntheticLinkColor(sourceColor: string, targetColor: string, dimmed: boolean): string {
+  if (dimmed) return 'rgba(120, 138, 168, 0.04)'
+  const source = hexToRgb(sourceColor)
+  const target = hexToRgb(targetColor)
+  // Pull the mixed hue 82% of the way toward a neutral slate so only a trace of
+  // the endpoints' color survives.
+  const slate = { r: 120, g: 138, b: 168 }
+  const mix = (s: number, t: number, base: number) =>
+    Math.round(base * 0.82 + (s * 0.52 + t * 0.48) * 0.18)
+  const r = mix(source.r, target.r, slate.r)
+  const g = mix(source.g, target.g, slate.g)
+  const b = mix(source.b, target.b, slate.b)
+  return `rgba(${r}, ${g}, ${b}, 0.1)`
+}
+
+function stableNodeSortKey(node: Pick<NodeProp, 'id' | 'stance' | 'type'>): string {
+  return `${node.stance || node.type || ''}:${node.id}`
+}
+
+export function buildSyntheticLinks(
+  nodes: ReadonlyArray<NodeProp>,
+  edges: ReadonlyArray<EdgeProp>,
+): SimLink[] {
+  // Synthetic "visual affinity" links are a fallback for the sparse agent graph
+  // only. The dense population layer must never receive them — at 10k nodes that
+  // would mean tens of thousands of invisible links dragging layout, hit-testing
+  // and paint. Restrict candidates (and the density check) to non-population.
+  const linkable = nodes.filter((node) => node.tier !== 'population')
+  if (linkable.length < 3) return []
+  const realEdges = edges.filter((edge) => !(edge.id?.startsWith('pop-edge-') ?? false))
+  if (realEdges.length >= linkable.length * MIN_LINKS_PER_NODE_FOR_CONNECTED_VIEW) return []
+
+  const realPairs = new Set<string>()
+  const degree = new Map(linkable.map((node) => [node.id, 0]))
+  const pairKey = (a: string, b: string) => [a, b].sort().join('::')
+
+  for (const edge of realEdges) {
+    const source = endpointId(edge.source)
+    const target = endpointId(edge.target)
+    if (!source || !target || source === target) continue
+    realPairs.add(pairKey(source, target))
+    degree.set(source, (degree.get(source) ?? 0) + 1)
+    degree.set(target, (degree.get(target) ?? 0) + 1)
+  }
+
+  const ordered = [...linkable].sort((a, b) => stableNodeSortKey(a).localeCompare(stableNodeSortKey(b)))
+  const synthetic: SimLink[] = []
+  const syntheticPairs = new Set<string>()
+  const targetNeighborCount = Math.min(MAX_SYNTHETIC_NEIGHBORS, Math.max(1, Math.ceil(linkable.length / 28)))
+  const addSynthetic = (source: NodeProp, target: NodeProp, weight: number) => {
+    if (source.id === target.id) return
+    const key = pairKey(source.id, target.id)
+    if (realPairs.has(key) || syntheticPairs.has(key)) return
+    syntheticPairs.add(key)
+    synthetic.push({
+      id: `synthetic:${key}`,
+      source: source.id,
+      target: target.id,
+      relation_type: 'visual_affinity',
+      weight,
+      synthetic: true,
+    })
+  }
+
+  for (let i = 0; i < ordered.length; i++) {
+    const source = ordered[i]
+    const sourceDegree = degree.get(source.id) ?? 0
+    const neighbors = sourceDegree === 0 ? targetNeighborCount + 1 : targetNeighborCount
+    for (let offset = 1; offset <= neighbors; offset++) {
+      let targetIndex = (i + offset * 7) % ordered.length
+      if (targetIndex === i) targetIndex = (i + offset) % ordered.length
+      const target = ordered[targetIndex]
+      addSynthetic(source, target, Math.max(0.18, 0.42 - offset * 0.06))
+    }
+  }
+
+  return synthetic
 }
 
 function endpointId(end: string | { id?: string | number } | undefined): string {
@@ -132,6 +278,36 @@ function endpointId(end: string | { id?: string | number } | undefined): string 
   if (typeof end === 'string') return end
   if (typeof end === 'number') return String(end)
   return String(end.id ?? '')
+}
+
+export function assignLinkCurvatures(links: SimLink[]): void {
+  const groups = new Map<string, SimLink[]>()
+  for (const link of links) {
+    if (link.synthetic) continue
+    // Clear any prior value so a reused link that dropped from a parallel pair
+    // back to a lone edge doesn't keep its stale curvature.
+    link.curvature = undefined
+    const source = endpointId(link.source as string | { id?: string | number })
+    const target = endpointId(link.target as string | { id?: string | number })
+    const key = [source, target].sort().join('::')
+    const group = groups.get(key)
+    if (group) group.push(link)
+    else groups.set(key, [link])
+  }
+
+  for (const group of groups.values()) {
+    const total = group.length
+    if (total < 2) continue
+    const range = Math.min(0.6, 0.3 + total * 0.08)
+    group.forEach((link, index) => {
+      const base = (index / (total - 1) - 0.5) * range
+      const source = endpointId(link.source as string | { id?: string | number })
+      const target = endpointId(link.target as string | { id?: string | number })
+      // Normalize against the sorted pair key so anti-parallel edges land on
+      // opposite physical sides in force-graph's source->target frame.
+      link.curvature = source > target ? -base : base
+    })
+  }
 }
 
 export function buildAdjacency(edges: ReadonlyArray<EdgeProp | SimLink>): Map<string, Set<string>> {
@@ -148,36 +324,131 @@ export function buildAdjacency(edges: ReadonlyArray<EdgeProp | SimLink>): Map<st
   return map
 }
 
+interface MergeGraphDataCache {
+  populationNodeProps: NodeProp[]
+  populationNodes: SimNode[]
+  populationEdgeProps: EdgeProp[]
+  populationLinks: SimLink[]
+}
+
+export function createMergeGraphDataCache(): MergeGraphDataCache {
+  return {
+    populationNodeProps: [],
+    populationNodes: [],
+    populationEdgeProps: [],
+    populationLinks: [],
+  }
+}
+
+function findPopulationRange<T>(items: ReadonlyArray<T>, predicate: (item: T) => boolean): { start: number; end: number } | null {
+  let start = -1
+  let end = -1
+  for (let i = 0; i < items.length; i++) {
+    if (predicate(items[i])) {
+      if (start === -1) start = i
+      end = i + 1
+    } else if (start !== -1) {
+      break
+    }
+  }
+  return start === -1 ? null : { start, end }
+}
+
+function segmentMatches<T>(items: ReadonlyArray<T>, range: { start: number; end: number }, cached: ReadonlyArray<T>): boolean {
+  if (range.end - range.start !== cached.length) return false
+  for (let i = 0; i < cached.length; i++) {
+    if (items[range.start + i] !== cached[i]) return false
+  }
+  return true
+}
+
+function updateSimNode(existing: SimNode | undefined, next: NodeProp): SimNode {
+  if (existing) {
+    // Mutate in place so force-graph keeps the same object reference,
+    // preserving x/y/vx/vy/fx/fy/index across reactive updates.
+    existing.label = next.label
+    existing.type = next.type
+    existing.importance_score = next.importance_score
+    existing.activity_score = next.activity_score
+    existing.stance = next.stance
+    existing.status = next.status
+    existing.tier = next.tier
+    return existing
+  }
+  return { ...next }
+}
+
+function toSimLink(edge: EdgeProp): SimLink {
+  return {
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    relation_type: edge.relation_type,
+    weight: edge.weight,
+    label: edge.label,
+  }
+}
+
 export function mergeGraphData(
   prevNodes: ReadonlyArray<SimNode>,
   newNodes: ReadonlyArray<NodeProp>,
   newEdges: ReadonlyArray<EdgeProp>,
+  cache?: MergeGraphDataCache,
 ): { nodes: SimNode[]; links: SimLink[] } {
   const prevById = new Map(prevNodes.map((n) => [n.id, n]))
-  const nodes: SimNode[] = newNodes.map((n) => {
-    const existing = prevById.get(n.id)
-    if (existing) {
-      // Mutate in place so force-graph keeps the same object reference,
-      // preserving x/y/vx/vy/fx/fy/index across reactive updates.
-      existing.label = n.label
-      existing.type = n.type
-      existing.importance_score = n.importance_score
-      existing.activity_score = n.activity_score
-      existing.stance = n.stance
-      existing.status = n.status
-      return existing
+  const populationNodeRange = findPopulationRange(newNodes, (node) => node.tier === 'population')
+  const canReusePopulationNodes = !!cache
+    && !!populationNodeRange
+    && segmentMatches(newNodes, populationNodeRange, cache.populationNodeProps)
+
+  const nodes: SimNode[] = []
+  for (let i = 0; i < newNodes.length; i++) {
+    if (canReusePopulationNodes && populationNodeRange && i === populationNodeRange.start) {
+      nodes.push(...cache!.populationNodes)
+      i = populationNodeRange.end - 1
+      continue
     }
-    return { ...n }
-  })
-  const links: SimLink[] = newEdges.map((e) => ({
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    relation_type: e.relation_type,
-    weight: e.weight,
-    label: e.label,
-  }))
-  return { nodes, links }
+    nodes.push(updateSimNode(prevById.get(newNodes[i].id), newNodes[i]))
+  }
+  if (cache && populationNodeRange && !canReusePopulationNodes) {
+    cache.populationNodeProps = newNodes.slice(populationNodeRange.start, populationNodeRange.end)
+    cache.populationNodes = nodes.slice(populationNodeRange.start, populationNodeRange.end)
+  } else if (cache && !populationNodeRange) {
+    cache.populationNodeProps = []
+    cache.populationNodes = []
+  }
+
+  const nodeIds = new Set(nodes.map((n) => n.id))
+  const populationEdgeRange = findPopulationRange(newEdges, (edge) => edge.id?.startsWith('pop-edge-') ?? false)
+  const canReusePopulationLinks = !!cache
+    && !!populationEdgeRange
+    && segmentMatches(newEdges, populationEdgeRange, cache.populationEdgeProps)
+
+  const validEdges: EdgeProp[] = []
+  const links: SimLink[] = []
+  for (let i = 0; i < newEdges.length; i++) {
+    if (canReusePopulationLinks && populationEdgeRange && i === populationEdgeRange.start) {
+      validEdges.push(...cache!.populationEdgeProps)
+      links.push(...cache!.populationLinks)
+      i = populationEdgeRange.end - 1
+      continue
+    }
+    const edge = newEdges[i]
+    if (!nodeIds.has(endpointId(edge.source)) || !nodeIds.has(endpointId(edge.target))) continue
+    validEdges.push(edge)
+    links.push(toSimLink(edge))
+  }
+  if (cache && populationEdgeRange && !canReusePopulationLinks) {
+    const populationEdges = validEdges.filter((edge) => edge.id?.startsWith('pop-edge-'))
+    cache.populationEdgeProps = populationEdges
+    cache.populationLinks = links.filter((link) => link.id?.startsWith('pop-edge-'))
+  } else if (cache && !populationEdgeRange) {
+    cache.populationEdgeProps = []
+    cache.populationLinks = []
+  }
+
+  assignLinkCurvatures(links)
+  return { nodes, links: [...links, ...buildSyntheticLinks(nodes, validEdges)] }
 }
 
 export function toNodeProp(node: SimNode | NodeProp | null | undefined): NodeProp | null {

@@ -3,7 +3,7 @@
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,8 +30,10 @@ from src.app.services.quality import (
     merge_evidence_refs,
     normalize_evidence_mode,
 )
-from src.app.services.simulation_live_state import update_report_progress
-from src.app.services.simulation_live_state import update_simulation_metadata
+from src.app.services.simulation_live_state import (
+    update_report_progress,
+    update_simulation_metadata,
+)
 from src.app.services.verification import (
     ensure_verification_passed,
     verify_report_content,
@@ -255,7 +257,7 @@ async def generate_report(
             content=report_content,
             sections=sections_data,
             status="completed",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(UTC),
         )
         session.add(report)
         await session.flush()

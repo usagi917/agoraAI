@@ -1,7 +1,7 @@
 """MemoryRetriever: recency x relevance x importance スコアリング"""
 
-import math
 import logging
+import math
 
 import numpy as np
 
