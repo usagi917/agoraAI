@@ -9,10 +9,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 import yaml
 from sqlalchemy import select
@@ -22,7 +23,6 @@ from src.app.evaluation.retrodiction_runner import evaluate_case
 from src.app.models.simulation import Simulation
 from src.app.models.society_result import SocietyResult
 from src.app.services.simulation_dispatcher import dispatch_simulation
-from src.app.services.society.constants import STANCE_ORDER
 from src.app.services.society.diagnostic_baseline import run_single_llm_distribution
 from src.app.services.society.survey_anchor import (
     load_manifest_anchor_distribution,
