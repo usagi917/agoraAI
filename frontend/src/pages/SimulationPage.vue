@@ -1299,8 +1299,6 @@ function goToResults() {
 
 .panel-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--panel-padding); }
 .thinking-tab { min-height: 20rem; max-height: 36rem; overflow-y: auto; }
-.dialogue-tab { flex: 1; min-height: 20rem; overflow: hidden; }
-.connections-tab { flex: 1; min-height: 20rem; overflow: hidden; }
 .panel-count { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); background: rgba(255,255,255,0.04); padding: 0.1rem 0.4rem; border-radius: 4px; }
 .panel-count.live { color: var(--success); background: rgba(34,197,94,0.1); }
 
