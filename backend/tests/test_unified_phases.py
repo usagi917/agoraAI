@@ -401,6 +401,81 @@ class TestRunSynthesis:
         assert "# " in result.content  # Markdown report
         assert isinstance(result.sections, dict)
 
+    @pytest.mark.asyncio
+    async def test_normalizes_broken_brief_and_logs_repair(self, caplog):
+        """壊れた brief は normalize され、schema 修復ログが出て、描画が落ちない。
+
+        正規化がない場合、render 側の item.get(...) / period.get(...) で
+        AttributeError となり synthesis フェーズごと落ちる（描画は try/except 外）。
+        """
+        import logging
+
+        from src.app.services.phases.council_deliberation import CouncilResult
+        from src.app.services.phases.society_pulse import SocietyPulseResult
+        from src.app.services.phases.synthesis import SynthesisResult, run_synthesis
+
+        mock_session = AsyncMock()
+        mock_sim = MagicMock()
+        mock_sim.id = "sim-broken"
+
+        pulse = SocietyPulseResult(
+            agents=[],
+            responses=[],
+            aggregation={
+                "stance_distribution": {"賛成": 0.6, "反対": 0.4},
+                "average_confidence": 0.7,
+                "top_concerns": ["コスト"],
+            },
+            evaluation={"consistency": 0.7, "calibration": 0.6},
+            representatives=[],
+            usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+        )
+        council = CouncilResult(
+            participants=[{"display_name": "田中", "role": "citizen", "stance": "賛成"}],
+            rounds=[[{"argument": "主張"}]],
+            synthesis={
+                "consensus_points": ["合意1"],
+                "disagreement_points": [],
+                "recommendations": ["提言1"],
+                "overall_assessment": "概ね肯定的",
+            },
+            devil_advocate_summary="コスト懸念あり。",
+            usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+        )
+
+        # LLM が返しうる型不一致の brief（要素が str / time_horizon サブ値が str）
+        broken_brief = {
+            "key_reasons": "テキスト根拠",
+            "risk_factors": ["リスク文字列"],
+            "next_steps": [None, "追加調査"],
+            "time_horizon": {"short_term": "3ヶ月で普及"},
+        }
+
+        with (
+            patch(
+                "src.app.services.phases.synthesis._generate_decision_brief",
+                new_callable=AsyncMock,
+                return_value=(broken_brief, {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
+            ),
+            patch("src.app.services.phases.synthesis.sse_manager") as mock_sse,
+            caplog.at_level(logging.WARNING, logger="src.app.services.phases.synthesis"),
+        ):
+            mock_sse.publish = AsyncMock()
+            result = await run_synthesis(
+                mock_session, mock_sim, pulse, council, "テスト政策", use_react=False
+            )
+
+        assert isinstance(result, SynthesisResult)
+        # 正規化の結果、要素が dict / サブ値が dict になっている
+        assert result.decision_brief["key_reasons"] == [{"reason": "テキスト根拠"}]
+        assert result.decision_brief["risk_factors"] == [{"condition": "リスク文字列"}]
+        assert result.decision_brief["next_steps"] == ["", "追加調査"]
+        assert result.decision_brief["time_horizon"]["short_term"] == {"prediction": "3ヶ月で普及"}
+        # 修復ログの発火
+        assert "Decision brief schema repaired" in caplog.text
+        # 描画が例外なく完了している
+        assert "3ヶ月で普及" in result.content
+
 
 class TestComputeAgreementScore:
     """合意度スコア計算のテスト。"""

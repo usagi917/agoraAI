@@ -8,6 +8,7 @@ from typing import Any
 
 from src.app.llm.multi_client import multi_llm_client
 from src.app.models.simulation import Simulation
+from src.app.services.decision_brief_schema import normalize_decision_brief
 from src.app.services.decision_briefing import (
     build_conversation_highlights,
     render_decision_brief_markdown,
@@ -567,6 +568,14 @@ async def run_synthesis(
         )
     else:
         decision_brief, brief_usage = await _generate_decision_brief(pulse, council, theme)
+
+    # LLM 出力の欠損・型不一致をレンダリング前に修復する
+    decision_brief = normalize_decision_brief(decision_brief)
+    if decision_brief.get("schema_repair_warnings"):
+        logger.warning(
+            "Decision brief schema repaired: %s",
+            decision_brief["schema_repair_warnings"],
+        )
 
     # 合意度計算
     society_summary = {
