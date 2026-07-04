@@ -359,6 +359,7 @@ To use the AI check feature, install the Codex CLI, log in, start the backend wi
 | `GET` | `/society/simulations/{sim_id}/demographics` | demographic summary |
 | `GET` | `/society/simulations/{sim_id}/propagation` | propagation data |
 | `GET` | `/society/simulations/{sim_id}/social-graph` | society graph |
+| `GET` | `/society/simulations/{sim_id}/population-network` | full population network (compact form for rendering) |
 | `GET` | `/society/simulations/{sim_id}/agents` | list agents |
 | `GET` | `/society/simulations/{sim_id}/agents/{agent_id}` | agent details |
 | `GET` | `/society/simulations/{sim_id}/transcript` | transcript data |
