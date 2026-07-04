@@ -109,6 +109,13 @@ function readGraphPanelOpen(): boolean {
 const graphPanelOpen = ref(readGraphPanelOpen())
 function toggleGraphPanel() {
   graphPanelOpen.value = !graphPanelOpen.value
+  // society モードでは、閉じると子（LiveSocietyGraph）が unmount され、その
+  // onUnmounted が societyGraphStore.reset() を呼ぶためストアが空になる。
+  // hydrateGraph は onMounted でしか走らないので、開き直したときにデータが
+  // 失われたままだと空状態のままになる。開き直しでデータが無ければ再 hydrate する。
+  if (graphPanelOpen.value && !hasGraphData.value) {
+    void hydrateGraph()
+  }
   try {
     window.sessionStorage.setItem(graphPanelOpenKey, graphPanelOpen.value ? 'open' : 'closed')
   } catch {

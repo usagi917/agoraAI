@@ -1,10 +1,22 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { h, onUnmounted } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ResultsPage from '../ResultsPage.vue'
 import { useGraphStore } from '../../stores/graphStore'
 import { useSocietyGraphStore } from '../../stores/societyGraphStore'
+
+// 実際の LiveSocietyGraph は onUnmounted で societyGraphStore.reset() を呼ぶ。
+// パネル開閉の再 hydrate 回帰テストでは、その reset 挙動を再現するスタブを使う
+// （素の <div> スタブでは reset が起きず回帰を検出できない）。
+const societyResetStub = {
+  setup() {
+    const store = useSocietyGraphStore()
+    onUnmounted(() => store.reset())
+    return () => h('div', { 'data-testid': 'stub-society-graph' })
+  },
+}
 
 const push = vi.fn()
 
@@ -591,6 +603,56 @@ describe('ResultsPage', () => {
     // 再度開くと再マウントされる（レイアウト再実行は許容）。
     expect(wrapper.find('[data-testid="results-graph-body"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="stub-force-graph"]').exists()).toBe(true)
+  })
+
+  it('re-hydrates the social graph when the panel is reopened (society mode)', async () => {
+    // society モードでは、閉じると LiveSocietyGraph の onUnmounted が
+    // societyGraphStore.reset() を呼ぶ。開き直したときに再 hydrate されず
+    // 空状態のまま固定されないことを保証する回帰テスト。
+    apiMocks.getSimulation.mockResolvedValue(societySimResponse)
+    apiMocks.getSocialGraph.mockResolvedValue({
+      population_id: 'pop-1',
+      nodes: [
+        { id: 'agent-0', agent_index: 0, demographics: { occupation: '教師', age: 40, region: '関西' }, big_five: {}, values: {}, speech_style: '', stance: '賛成', confidence: 0.7, reason: '', concern: '', priority: '' },
+        { id: 'agent-1', agent_index: 1, demographics: { occupation: '会社員', age: 33, region: '関東' }, big_five: {}, values: {}, speech_style: '', stance: '反対', confidence: 0.6, reason: '', concern: '', priority: '' },
+      ],
+      edges: [
+        { id: 'se1', source: 'agent-0', target: 'agent-1', relation_type: 'friend', strength: 0.8 },
+      ],
+    })
+    apiMocks.getPopulationNetwork.mockResolvedValue({
+      population_id: 'pop-1',
+      node_count: 2,
+      edge_count: 1,
+      nodes: [{ id: 'agent-0', agent_index: 0 }, { id: 'agent-1', agent_index: 1 }],
+      edges: [[0, 1, 0.5]],
+    })
+
+    const wrapper = mount(ResultsPage, {
+      global: {
+        plugins: [createPinia()],
+        // reset を再現するスタブに差し替えて実挙動を再現する。
+        stubs: { ...graphPanelStubs, LiveSocietyGraph: societyResetStub },
+      },
+    })
+
+    await flushPromises()
+
+    // 初期 hydrate で社会グラフが描画される。
+    expect(wrapper.find('[data-testid="stub-society-graph"]').exists()).toBe(true)
+    expect(apiMocks.getSocialGraph).toHaveBeenCalledTimes(1)
+
+    // 閉じる → 子 unmount → onUnmounted が societyGraphStore.reset() を呼ぶ。
+    await wrapper.get('[data-testid="results-graph-toggle"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="results-graph-body"]').exists()).toBe(false)
+
+    // 再度開く → データが失われているので再 hydrate され、空状態にならない。
+    await wrapper.get('[data-testid="results-graph-toggle"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="results-graph-empty"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="stub-society-graph"]').exists()).toBe(true)
+    expect(apiMocks.getSocialGraph).toHaveBeenCalledTimes(2)
   })
 
   it('shows an empty state when there is no graph data', async () => {
