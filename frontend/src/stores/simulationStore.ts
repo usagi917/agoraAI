@@ -15,7 +15,7 @@ export interface ColonyState {
   eventCount: number
 }
 
-export interface ReportSectionState {
+interface ReportSectionState {
   name: string
   done: boolean
 }

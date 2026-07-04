@@ -4,7 +4,7 @@ import type { GraphNode, GraphEdge } from './graphStore'
 import type { SocialGraphNode, SocialGraphEdge } from '../api/client'
 import { useKGEvolutionStore } from './kgEvolutionStore'
 
-export type LiveAgentStatus = 'selected' | 'activating' | 'activated' | 'speaking' | 'idle'
+type LiveAgentStatus = 'selected' | 'activating' | 'activated' | 'speaking' | 'idle'
 
 interface LiveAgentNode {
   id: string
@@ -49,7 +49,7 @@ export interface MeetingArgument {
   is_devil_advocate?: boolean
 }
 
-export interface ConversationEdge {
+interface ConversationEdge {
   id: string
   source: string
   target: string
@@ -66,7 +66,7 @@ interface StanceShiftEvent {
 }
 
 /** GET /society/simulations/{id}/population-network のレスポンス */
-export interface PopulationNetworkPayload {
+interface PopulationNetworkPayload {
   population_id: string
   node_count: number
   edge_count: number

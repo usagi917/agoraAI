@@ -17,7 +17,7 @@ export interface ScenarioPair {
   created_at: string
 }
 
-export interface ComparisonDelta {
+interface ComparisonDelta {
   support_change: number
   new_concerns: string[]
   coalition_shifts: Array<Record<string, unknown>>

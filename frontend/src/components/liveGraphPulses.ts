@@ -18,7 +18,7 @@ export interface PulseArgument {
   argument: string
 }
 
-export interface DerivedPulse {
+interface DerivedPulse {
   sourceId: string
   targetId: string
   key: string

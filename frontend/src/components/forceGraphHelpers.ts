@@ -324,7 +324,7 @@ export function buildAdjacency(edges: ReadonlyArray<EdgeProp | SimLink>): Map<st
   return map
 }
 
-export interface MergeGraphDataCache {
+interface MergeGraphDataCache {
   populationNodeProps: NodeProp[]
   populationNodes: SimNode[]
   populationEdgeProps: EdgeProp[]

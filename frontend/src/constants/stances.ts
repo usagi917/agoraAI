@@ -1,6 +1,6 @@
 export const STANCE_ORDER = ['賛成', '条件付き賛成', '中立', '条件付き反対', '反対'] as const
 
-export type StanceLabel = typeof STANCE_ORDER[number]
+type StanceLabel = typeof STANCE_ORDER[number]
 
 export const STANCE_COLORS: Record<string, string> = {
   '賛成': '#22c55e',
