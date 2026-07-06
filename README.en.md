@@ -14,7 +14,7 @@
 - The API accepts five presets: `quick`, `standard`, `deep`, `research`, and `baseline`; the UI exposes `standard` and `research`.
 - Attach `.txt`, `.md`, and `.pdf` files to a project and run evidence-aware analysis on top of them.
 - Follow progress live over SSE with activity feed, social response views, conversations, and graph updates.
-- Review Decision Briefs, scenario comparison, propagation analysis, transcripts, reruns, and Codex Review Agent questions on the results page.
+- Review Decision Briefs, scenario comparison, propagation analysis, transcripts, the graph panel (Social / Knowledge Graph, collapsible), reruns, and Codex Review Agent questions on the results page.
 - Use `/validate/:id?` to check stance-distribution accuracy against holdout survey data.
 - Generate, inspect, and fork synthetic populations from `/populations`.
 - Start Decision Lab from `/compare`, then run two scenarios against the same population side by side to compare opinion shifts, coalition changes, and audit trails.
@@ -54,7 +54,7 @@ How to read it:
 | --- | --- | --- |
 | `/` | LaunchPad | guided question builders, free-form prompt, file upload, analysis mode selection, run history |
 | `/sim/:id` | Live Simulation | SSE progress, activity feed, social response views, conversations, live graph, Theater UI (debate cards, dialogue stream) |
-| `/sim/:id/results` | Results | Decision Brief, scenario comparison, propagation, transcript, Codex Review |
+| `/sim/:id/results` | Results | Decision Brief, scenario comparison, propagation, transcript, graph panel (Social / Knowledge Graph, collapsible), Codex Review |
 | `/validate/:id?` | Validation | holdout survey topic selection, diagnostic simulation, distribution comparison, hit/partial/miss verdict |
 | `/populations` | Populations | generation, listing, detail view, forking |
 | `/compare` | Compare Setup | configure two scenarios, execution presets, and population settings for comparison |
@@ -367,7 +367,7 @@ To use the AI check feature, install the Codex CLI, log in, start the backend wi
 | `GET` | `/society/simulations/{sim_id}/demographics` | demographic summary |
 | `GET` | `/society/simulations/{sim_id}/propagation` | propagation data |
 | `GET` | `/society/simulations/{sim_id}/social-graph` | society graph |
-| `GET` | `/society/simulations/{sim_id}/population-network` | population network graph |
+| `GET` | `/society/simulations/{sim_id}/population-network` | full population network (compact form for rendering) |
 | `GET` | `/society/simulations/{sim_id}/agents` | list agents |
 | `GET` | `/society/simulations/{sim_id}/agents/{agent_id}` | agent details |
 | `GET` | `/society/simulations/{sim_id}/transcript` | transcript data |

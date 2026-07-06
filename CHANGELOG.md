@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0.0] - 2026-07-05
+
+### Added
+- Results page now shows the Obsidian-style graph panel: the social graph (or knowledge graph, by simulation mode) renders directly on the results screen, restores after reload or direct navigation, and remembers its collapsed state per simulation
+- Decision Brief output is normalized before rendering: missing or mistyped fields from the LLM (scalars where lists are expected, wrong-typed scores, malformed time-horizon entries) are repaired with defaults and every repair is logged for quality tracking
+
+### Changed
+- Collapsing the results graph panel now fully stops the force-simulation, freeing the main thread while reading reports
+- Society-mode graph data (social graph + population network) loads in parallel, cutting time to first render
+
+### Fixed
+- Navigating away while graph data is loading can no longer write stale graph state back into the stores
+- Invalid agreement scores (NaN/infinite/boolean) now fall back to a neutral 0.5 instead of skewing to extremes
+- Malformed nested brief entries (time horizon, scorecard, conversation highlights) no longer crash report generation
+
 ## [0.1.0.0] - 2026-04-03
 
 ### Added
