@@ -10,11 +10,12 @@
 
 ## What It Is
 
-- Start from one of five guided question templates or a free-form prompt on the LaunchPad.
-- Switch between five presets: `quick`, `standard`, `deep`, `research`, and `baseline`.
+- Start from a free-form prompt, one of four guided question builders, or seeded analysis templates on the LaunchPad.
+- The API accepts five presets: `quick`, `standard`, `deep`, `research`, and `baseline`; the UI exposes `standard` and `research`.
 - Attach `.txt`, `.md`, and `.pdf` files to a project and run evidence-aware analysis on top of them.
 - Follow progress live over SSE with activity feed, social response views, conversations, and graph updates.
 - Review Decision Briefs, scenario comparison, propagation analysis, transcripts, reruns, and Codex Review Agent questions on the results page.
+- Use `/validate/:id?` to check stance-distribution accuracy against holdout survey data.
 - Generate, inspect, and fork synthetic populations from `/populations`.
 - Start Decision Lab from `/compare`, then run two scenarios against the same population side by side to compare opinion shifts, coalition changes, and audit trails.
 - Theater UI shows debate cards, live dialogue streams, and real-time stance shifts during simulation.
@@ -42,8 +43,8 @@ flowchart LR
 
 How to read it:
 
-- Users choose a question, template, file attachments, and execution preset on the LaunchPad.
-- The backend normalizes the request to `quick`, `standard`, `deep`, `research`, or `baseline`, then runs only the required phases.
+- Users choose a question, guided builder, file attachments, and analysis mode on the LaunchPad.
+- The backend normalizes API input to `quick`, `standard`, `deep`, `research`, or `baseline`, then runs only the required phases.
 - Runtime state is streamed over SSE, and frontend Pinia stores reflect it in the Activity Feed, social graph, dialogue views, and Theater UI.
 - Results can be reused as Decision Briefs, scenario comparisons, propagation analysis, transcripts, and follow-up questions.
 
@@ -51,9 +52,10 @@ How to read it:
 
 | Route | Purpose | Main contents |
 | --- | --- | --- |
-| `/` | LaunchPad | question templates, free-form prompt, file upload, preset selection, run history |
+| `/` | LaunchPad | guided question builders, free-form prompt, file upload, analysis mode selection, run history |
 | `/sim/:id` | Live Simulation | SSE progress, activity feed, social response views, conversations, live graph, Theater UI (debate cards, dialogue stream) |
 | `/sim/:id/results` | Results | Decision Brief, scenario comparison, propagation, transcript, Codex Review |
+| `/validate/:id?` | Validation | holdout survey topic selection, diagnostic simulation, distribution comparison, hit/partial/miss verdict |
 | `/populations` | Populations | generation, listing, detail view, forking |
 | `/compare` | Compare Setup | configure two scenarios, execution presets, and population settings for comparison |
 | `/scenario/:id` | Decision Lab | scenario pair comparison, opinion shift table, coalition map, audit timeline |
@@ -68,6 +70,8 @@ Pick citizen representatives and experts, then run a structured multi-round deba
 Combine social signals, debate output, and quality metadata into a Decision Brief and comparable scenarios.
 
 ### Presets
+
+These presets are available through the API. The LaunchPad advanced settings expose `standard` and `research` for day-to-day use.
 
 | Preset | Main phases | When to use it |
 | --- | --- | --- |
@@ -88,6 +92,7 @@ Legacy mode names are normalized internally. For example, `unified -> standard`,
 | DB connection, table creation, SQLite/PostgreSQL switching | `backend/src/app/database.py` |
 | API router registration | `backend/src/app/api/routes/__init__.py` |
 | Simulation creation, SSE, reports, reruns | `backend/src/app/api/routes/simulations.py` |
+| Validation API against holdout surveys | `backend/src/app/api/routes/validation.py`, `backend/src/app/evaluation/diagnostic.py` |
 | Execution preset definitions and legacy mode mapping | `backend/src/app/models/simulation.py` |
 | Dispatch between `baseline` and unified execution | `backend/src/app/services/simulation_dispatcher.py` |
 | `Society Pulse -> Council -> Synthesis` orchestration | `backend/src/app/services/unified_orchestrator.py` |
@@ -97,7 +102,7 @@ Legacy mode names are normalized internally. For example, `unified -> standard`,
 | REST API client and TypeScript types | `frontend/src/api/client.ts` |
 | SSE subscription and live state updates | `frontend/src/composables/useSimulationSSE.ts` |
 | Stores for execution state, graphs, society data, and Decision Lab | `frontend/src/stores/` |
-| Main screens | `frontend/src/pages/` |
+| Main and validation screens | `frontend/src/pages/` |
 | Visualization and result components | `frontend/src/components/` |
 
 ## Architecture
@@ -109,7 +114,7 @@ flowchart LR
     User["User"] --> Frontend
 
     subgraph Frontend["Frontend"]
-        LaunchPad["LaunchPad / Compare / Populations"]
+        LaunchPad["LaunchPad / Compare / Populations / Validate"]
         LiveUI["Live Simulation / Results"]
     end
 
@@ -125,7 +130,7 @@ flowchart LR
         Redis["Redis compose<br/>optional in local dev"]
         Config["config/*.yaml"]
         Templates["templates/ja/*.yaml"]
-        LLM["LiteLLM + provider adapters"]
+        LLM["OpenAI-compatible APIs / Anthropic adapter / Ollama"]
     end
 
     Frontend --> API
@@ -210,7 +215,7 @@ After installing dependencies, you can start the backend and frontend together.
 cp .env.example .env
 
 cd backend
-uv sync --extra dev
+uv sync
 
 cd ../frontend
 pnpm install
@@ -253,7 +258,7 @@ curl http://localhost:8000/simulations/SIM_ID/report
 cp .env.example .env
 
 cd backend
-uv sync --extra dev
+uv sync
 uv run uvicorn src.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -309,8 +314,10 @@ To use the AI check feature, install the Codex CLI, log in, start the backend wi
 | `GET` | `/health` | service status |
 | `GET` | `/templates` | list templates |
 | `POST` | `/projects` | create a project for attachments |
+| `GET` | `/projects/{project_id}` | get project details |
 | `POST` | `/projects/{project_id}/documents` | add documents |
 | `GET` | `/projects/{project_id}/documents` | list attached documents |
+| `GET` | `/validation/topics` | list holdout validation topics |
 | `POST` | `/simulations` | create a simulation |
 | `GET` | `/simulations` | list simulations |
 | `GET` | `/simulations/{sim_id}` | get status |
@@ -319,6 +326,7 @@ To use the AI check feature, install the Codex CLI, log in, start the backend wi
 | `GET` | `/simulations/{sim_id}/graph` | latest graph |
 | `GET` | `/simulations/{sim_id}/graph/history` | graph history by round |
 | `GET` | `/simulations/{sim_id}/report` | final report |
+| `GET` | `/simulations/{sim_id}/validation-report` | distribution comparison report against holdout surveys |
 | `GET` | `/simulations/{sim_id}/colonies` | colony-level execution state |
 | `GET/POST` | `/simulations/{sim_id}/backtest` | read or run backtests |
 | `GET` | `/simulations/{sim_id}/audit-trail` | audit trail for scenario comparison |
@@ -359,6 +367,7 @@ To use the AI check feature, install the Codex CLI, log in, start the backend wi
 | `GET` | `/society/simulations/{sim_id}/demographics` | demographic summary |
 | `GET` | `/society/simulations/{sim_id}/propagation` | propagation data |
 | `GET` | `/society/simulations/{sim_id}/social-graph` | society graph |
+| `GET` | `/society/simulations/{sim_id}/population-network` | population network graph |
 | `GET` | `/society/simulations/{sim_id}/agents` | list agents |
 | `GET` | `/society/simulations/{sim_id}/agents/{agent_id}` | agent details |
 | `GET` | `/society/simulations/{sim_id}/transcript` | transcript data |
@@ -375,7 +384,7 @@ CI runs the following:
 
 ```bash
 cd backend
-uv sync --extra dev
+uv sync
 uv run pytest -q
 ```
 
