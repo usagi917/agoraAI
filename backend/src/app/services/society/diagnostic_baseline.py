@@ -49,7 +49,7 @@ async def run_single_llm_distribution(
     seed: int,
     *,
     provider: str = "openai",
-) -> dict[str, float]:
+) -> tuple[dict[str, float], dict]:
     """日本の有権者母集団の5分類スタンス分布を単一LLMで推定する。"""
     multi_llm_client.initialize()
     stance_keys = " / ".join(STANCE_ORDER)
@@ -70,7 +70,7 @@ async def run_single_llm_distribution(
         '  "反対": 0.0\n'
         "}"
     )
-    result, _usage = await multi_llm_client.call(
+    result, usage = await multi_llm_client.call(
         provider_name=provider,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
@@ -79,4 +79,4 @@ async def run_single_llm_distribution(
         seed=seed,
         response_format={"type": "json_object"},
     )
-    return normalize_llm_distribution_payload(result)
+    return normalize_llm_distribution_payload(result), usage

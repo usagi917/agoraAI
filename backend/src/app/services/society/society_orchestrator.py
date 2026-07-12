@@ -458,6 +458,37 @@ async def _load_population_edges(session, population_id: str) -> list[dict]:
     ]
 
 
+async def _load_selected_social_edges(
+    session, population_id: str, selected_ids: set[str]
+) -> list[dict]:
+    """選抜エージェント同士（両端が selected_ids に含まれる）のソーシャルエッジを、
+    フロント表示用の形（id/source/target/relation_type/strength）で返す。
+
+    ソーシャル構造はデモグラから生成され活性化（意見形成）より前に確定・永続化
+    されているため、選抜完了直後に送出できる。/social-graph エンドポイントと
+    同じ両端フィルタのパターン。
+    """
+    if not selected_ids:
+        return []
+    edge_result = await session.execute(
+        select(SocialEdge).where(
+            SocialEdge.population_id == population_id,
+            SocialEdge.agent_id.in_(selected_ids),
+            SocialEdge.target_id.in_(selected_ids),
+        )
+    )
+    return [
+        {
+            "id": e.id or f"edge-{e.agent_id}-{e.target_id}",
+            "source": e.agent_id,
+            "target": e.target_id,
+            "relation_type": e.relation_type,
+            "strength": e.strength,
+        }
+        for e in edge_result.scalars().all()
+    ]
+
+
 def _phase_grounding(theme: str, selected_agents: list[dict]) -> list:
     """Phase 2.7: grounding facts をロードし各エージェントへ配布する（selected_agents を変異）。"""
     grounding_facts = []

@@ -3,8 +3,10 @@
 import json
 import os
 import tempfile
+from pathlib import Path
 
 import pytest
+import yaml
 
 
 class TestAccuracyConfig:
@@ -61,6 +63,16 @@ class TestAccuracyConfig:
         assert "ensemble_aggregation" in KNOWN_FEATURES
         assert "heterogeneous_thresholds" in KNOWN_FEATURES
         assert "confirmation_bias" in KNOWN_FEATURES
+
+    def test_population_mix_features_can_be_queried(self):
+        """population_mix.yaml の全フラグをモジュール関数で照会できること."""
+        from src.app.services.society.accuracy_config import is_enabled
+
+        config_path = Path(__file__).parents[2] / "config" / "population_mix.yaml"
+        with config_path.open(encoding="utf-8") as f:
+            mix_config = yaml.safe_load(f)
+        for feature in mix_config["accuracy_improvements"]:
+            assert isinstance(is_enabled(feature), bool)
 
 
 class TestCalibrationArtifactStore:

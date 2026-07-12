@@ -9,6 +9,7 @@ from src.app.evaluation.diagnostic import (
     estimate_dry_run,
     evaluate_prediction,
     load_eval_cases,
+    run_single_trial,
     run_trial_with_retry,
 )
 from src.app.services.society.diagnostic_baseline import (
@@ -173,3 +174,43 @@ async def test_leakage_exception_is_retried_then_partial():
 
     assert row["partial"] is True
     assert "Survey leakage" in row["error"]
+
+
+@pytest.mark.asyncio
+async def test_swarm_single_ensemble_condition_blends_both_predictions(monkeypatch):
+    condition = condition_definitions("economy")["5"]
+    case = {
+        "survey_id": "eval-ensemble",
+        "theme": "金利政策",
+        "source": "source",
+        "actual_distribution": UNIFORM_DISTRIBUTION,
+    }
+    swarm = {"賛成": 1.0}
+    single = {"反対": 1.0}
+
+    async def fake_swarm(_case, _seed, diagnostic, _dispatcher):
+        assert diagnostic == {"anchor_blend": False, "stop_after": "society_pulse"}
+        return swarm
+
+    async def fake_single(theme, seed):
+        assert (theme, seed) == ("金利政策", 42)
+        return single, {}
+
+    monkeypatch.setattr(
+        "src.app.evaluation.diagnostic._run_simulation_prediction",
+        fake_swarm,
+    )
+    monkeypatch.setattr("src.app.evaluation.diagnostic.get_ensemble_beta", lambda: 0.75)
+
+    row = await run_single_trial(
+        condition,
+        case,
+        42,
+        0,
+        preset="economy",
+        dispatcher=None,
+        single_llm_fn=fake_single,
+    )
+
+    assert row["predicted"]["賛成"] == pytest.approx(0.25)
+    assert row["predicted"]["反対"] == pytest.approx(0.75)

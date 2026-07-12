@@ -11,9 +11,16 @@ from src.app.models.evaluation_result import EvaluationResult
 from src.app.models.simulation import Simulation
 from src.app.models.society_result import SocietyResult
 from src.app.services.conversation_log_store import persist_conversation_logs
+from src.app.services.society.accuracy_config import is_enabled
 from src.app.services.society.activation_layer import run_activation
 from src.app.services.society.agent_selector import select_agents
 from src.app.services.society.demographic_analyzer import analyze_demographics
+from src.app.services.society.diagnostic_baseline import run_single_llm_distribution
+from src.app.services.society.ensemble import (
+    blend_distributions,
+    get_ensemble_beta,
+    is_uniform_fallback,
+)
 from src.app.services.society.evaluation import evaluate_society_simulation
 from src.app.services.society.kg_enricher import enrich_agents_from_kg
 from src.app.services.society.kg_evolution_service import KGEvolutionService
@@ -28,6 +35,7 @@ from src.app.services.society.society_orchestrator import (
     _estimate_theme_category,
     _get_or_create_population,
     _load_population_edges,
+    _load_selected_social_edges,
     _maybe_inject_anchor_prior,
     _phase_theme_anchor,
     _save_network,
@@ -252,6 +260,19 @@ async def run_society_pulse(
         ],
     })
 
+    # === Social graph structure (early) ===
+    # 意見（stance）はまだ無いが、選抜エージェント同士のソーシャル構造は
+    # デモグラから既に確定済み。ライブ実行の開始直後から本物の関係性の輪を描けるよう、
+    # 選抜完了の直後にエッジ構造だけを送出する（stance は活性化後に別途着色）。
+    selected_ids = {a.get("id", "") for a in selected_agents}
+    selected_ids.discard("")
+    social_edges = await _load_selected_social_edges(session, pop_id, selected_ids)
+    await sse_manager.publish(simulation_id, "society_social_graph_structure", {
+        "population_id": pop_id,
+        "edge_count": len(social_edges),
+        "edges": social_edges,
+    })
+
     # === KG Enrichment (Optional) ===
     if kg_entities:
         enrich_agents_from_kg(
@@ -299,6 +320,30 @@ async def run_society_pulse(
         max_concurrency=limits["max_concurrency"],
         on_progress=on_progress,
     )
+
+    if not diagnostic_cfg and is_enabled("single_llm_ensemble"):
+        aggregation = activation_result["aggregation"]
+        try:
+            single_distribution, single_usage = await run_single_llm_distribution(theme, sim.seed)
+        except Exception as exc:
+            logger.warning("Single-LLM ensemble skipped after baseline error: %s", exc)
+            aggregation["ensemble_skipped"] = "error"
+        else:
+            for key in total_usage:
+                total_usage[key] += single_usage.get(key, 0)
+            aggregation["single_llm_distribution"] = single_distribution
+            if is_uniform_fallback(single_distribution):
+                aggregation["ensemble_skipped"] = "uniform_fallback"
+            else:
+                swarm_distribution = aggregation["stance_distribution"]
+                beta = get_ensemble_beta()
+                aggregation["stance_distribution_pre_ensemble"] = swarm_distribution.copy()
+                aggregation["ensemble_beta"] = beta
+                aggregation["stance_distribution"] = blend_distributions(
+                    swarm_distribution,
+                    single_distribution,
+                    beta,
+                )
 
     if diagnostic_cfg:
         anchor_application = resolve_and_apply_anchor(

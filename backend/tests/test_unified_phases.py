@@ -106,6 +106,11 @@ class TestRunSocietyPulse:
                 return_value=[],
             ),
             patch(
+                "src.app.services.phases.society_pulse._load_selected_social_edges",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
                 "src.app.services.phases.society_pulse.select_agents",
                 new_callable=AsyncMock,
                 return_value=fake_agents,
@@ -115,6 +120,7 @@ class TestRunSocietyPulse:
                 new_callable=AsyncMock,
                 return_value=fake_activation,
             ),
+            patch("src.app.services.phases.society_pulse.is_enabled", return_value=False),
             patch(
                 "src.app.services.phases.society_pulse.generate_persona_narratives_post_activation",
                 new_callable=AsyncMock,
@@ -157,6 +163,14 @@ class TestRunSocietyPulse:
         assert isinstance(observed_register_kwargs["theme_category"], str)
         assert observed_register_kwargs["theme_category_estimate"].category == "politics"
         assert observed_prediction_kwargs["theme_category"] == "politics"
+
+        # 選抜直後に本物のソーシャル構造イベントを送出している（実行開始から輪を描くため）
+        published_events = [c.args[1] for c in mock_sse.publish.await_args_list]
+        assert "society_social_graph_structure" in published_events
+        # 選抜完了の後に構造イベントが来る（順序）
+        assert published_events.index("society_social_graph_structure") > published_events.index(
+            "society_selection_completed"
+        )
 
 
 # ---------------------------------------------------------------------------
