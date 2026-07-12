@@ -17,12 +17,17 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
+
+from src.app.services.society.accuracy_config import is_enabled
 from src.app.services.society.network_propagation import (
     _convert_opinion_to_stance,
     _convert_stance_to_opinion,
 )
 from src.app.services.society.opinion_dynamics import (
     OpinionDynamicsEngine,
+    compute_filter_bubble_thresholds,
+    compute_heterogeneous_thresholds,
     stubbornness_from_big_five,
 )
 
@@ -164,10 +169,35 @@ async def run_population_propagation(
     # エンジンへ渡す（さもなくば伝播が index 順に偏る）。
     undirected_edges = _mirror_edges(edges)
 
+    if is_enabled("heterogeneous_thresholds"):
+        heterogeneous_thresholds = np.asarray(
+            compute_heterogeneous_thresholds(
+                agents,
+                base_epsilon=confidence_threshold,
+                seed=seed,
+            ),
+            dtype=np.float64,
+        )
+        if any(
+            agent.get("information_source") or agent.get("information_sources")
+            for agent in agents
+        ):
+            bubble_thresholds = compute_filter_bubble_thresholds(
+                agents,
+                base_epsilon=confidence_threshold,
+            )
+            engine_threshold = (
+                heterogeneous_thresholds + bubble_thresholds
+            ) / 2.0
+        else:
+            engine_threshold = heterogeneous_thresholds
+    else:
+        engine_threshold = confidence_threshold
+
     engine = OpinionDynamicsEngine(
         agents=engine_agents,
         edges=undirected_edges,
-        confidence_threshold=confidence_threshold,
+        confidence_threshold=engine_threshold,
         seed=seed,
     )
 

@@ -93,6 +93,7 @@ accuracy_improvements:
   diversity_enforcement: false        # 多様性強制
   population_drift: false             # 人口 drift
   temporal_report: false              # 時系列統合レポート
+  heterogeneous_thresholds: true      # 人口伝播に個人別 bounded confidence 閾値（Big Five由来）を適用
 
 ensemble:
   single_llm_beta: 0.85
