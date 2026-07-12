@@ -29,6 +29,7 @@ from src.app.services.society.persona_generator import (
 )
 from src.app.services.society.population_generator import get_default_population_size
 from src.app.services.society.population_propagation import run_population_propagation
+from src.app.services.society.population_voice import generate_population_voices
 from src.app.services.society.representative_selector import select_representatives
 from src.app.services.society.society_orchestrator import (
     _diagnostic_config,
@@ -135,6 +136,9 @@ async def _run_population_propagation_phase(
     """
     if not (propagation_cfg["enabled"] and len(agents) > len(selected_agents)):
         return
+    agents_by_id = {a["id"]: a for a in agents}
+    selected_ids = {a.get("id", "") for a in selected_agents}
+    prev_round_stances: dict[str, str] = {}
     try:
         await sse_manager.publish(simulation_id, "population_propagation_started", {
             "population_count": len(agents),
@@ -152,6 +156,31 @@ async def _run_population_propagation_phase(
                 "changed_count": delta.changed_count,
                 "distribution": delta.distribution,
             })
+            filtered_changes = [
+                change for change in delta.changes
+                if change["agent_id"] not in selected_ids
+            ]
+            try:
+                voices = generate_population_voices(
+                    filtered_changes,
+                    agents_by_id,
+                    round_index=delta.round,
+                    prev_stances=prev_round_stances,
+                    max_voices=12,
+                    seed=seed,
+                )
+                if voices:
+                    await sse_manager.publish(simulation_id, "population_voice", {
+                        "round": delta.round,
+                        "voices": voices,
+                    })
+            except Exception as e:
+                logger.warning("Population voice generation failed, continuing: %s", e)
+            finally:
+                prev_round_stances.update({
+                    change["agent_id"]: change["stance"]
+                    for change in delta.changes
+                })
 
         propagation_result = await run_population_propagation(
             agents,
