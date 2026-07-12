@@ -28,6 +28,7 @@ export interface SimNode extends NodeProp {
   fx?: number
   fy?: number
   index?: number
+  spawnedAt?: number
 }
 
 export interface SimLink {
@@ -41,28 +42,12 @@ export interface SimLink {
   curvature?: number
 }
 
-// Research-grade palette: a single cohesive, desaturated family (steel blue →
-// teal → muted sage → soft violet, with two restrained warm accents) so entity
-// type never competes with the loud, semantic stance colors. Against the deep
-// near-black field these read as calm, luminous points rather than candy.
 export const TYPE_COLORS: Record<string, string> = {
-  organization: '#5b8fb0',
-  person: '#c9a373',
-  policy: '#6faa8f',
-  market: '#c17c74',
-  technology: '#8a7fbf',
-  resource: '#5fa0a6',
-  concept: '#6d92c4',
-  risk: '#c78f6a',
-  opportunity: '#8fb079',
-  agent: '#c9a373',
-  friend: '#5aa0c8',
-  family: '#c9a373',
-  colleague: '#6faa8f',
-  neighbor: '#5fa0a6',
-  acquaintance: '#8593a8',
-  mentions: '#8a7fbf',
-  default: '#7c8aa0',
+  organization: '#aeb9e8', person: '#c3cdf2', policy: '#b0c4e4', market: '#c9c3ea',
+  technology: '#b6b1ec', resource: '#a9c1e6', concept: '#bac6ee', risk: '#d4b9d4',
+  opportunity: '#b5cbe0', agent: '#c3cdf2', friend: '#a9b8e6', family: '#c3bfe0',
+  colleague: '#aec4e2', neighbor: '#a9c1e6', acquaintance: '#9aa6c8', mentions: '#b6b1ec',
+  default: '#aab4d6',
 }
 
 const NODE_PROP_KEYS = [
@@ -77,8 +62,7 @@ const NODE_PROP_KEYS = [
 ] as const
 
 const EDGE_PROP_KEYS = ['id', 'source', 'target', 'relation_type', 'weight', 'label'] as const
-const MIN_LINKS_PER_NODE_FOR_CONNECTED_VIEW = 1.25
-const MAX_SYNTHETIC_NEIGHBORS = 3
+const MAX_SYNTHETIC_NEIGHBORS = 7
 
 export function clamp01(value: number | null | undefined): number {
   if (value == null || Number.isNaN(value)) return 0
@@ -92,10 +76,25 @@ export function nodeColor(type: string | undefined): string {
   return TYPE_COLORS[type] ?? TYPE_COLORS.default
 }
 
+export const PENDING_AGENT_COLOR = '#c3cdf2'
+
+export function mixHex(a: string, b: string, t: number): string {
+  const from = hexToRgb(a)
+  const to = hexToRgb(b)
+  const amount = clamp01(t)
+  const channel = (start: number, end: number) => Math.round(start + (end - start) * amount)
+  return `#${[channel(from.r, to.r), channel(from.g, to.g), channel(from.b, to.b)]
+    .map((value) => value.toString(16).padStart(2, '0')).join('')}`
+}
+
+export function softenStanceColor(stance: string, fallback: string): string {
+  return mixHex(getStanceColor(stance, fallback), '#c3cdf2', 0.45)
+}
+
 export function nodeDisplayColor(node: Pick<NodeProp, 'type' | 'stance'>): string {
   const typeColor = nodeColor(node.type)
-  if (node.type === 'agent' && node.stance) {
-    return getStanceColor(node.stance, typeColor)
+  if (node.type === 'agent') {
+    return node.stance ? softenStanceColor(node.stance, typeColor) : PENDING_AGENT_COLOR
   }
   return typeColor
 }
@@ -108,9 +107,9 @@ export function nodeRadius(
 ): number {
   if (node.tier === 'population') return POPULATION_NODE_RADIUS
   const importance = clamp01(node.importance_score ?? 0.4)
-  const activityBoost = (node.activity_score ?? 0) > 0 || node.status === 'speaking' ? 3 : 0
-  const degreeBoost = Math.min(8, Math.sqrt(Math.max(0, degree)) * 0.9)
-  return 5 + importance * 8 + activityBoost + degreeBoost
+  const activityBoost = (node.activity_score ?? 0) > 0 || node.status === 'speaking' ? 1 : 0
+  const degreeBoost = Math.min(3.5, Math.sqrt(Math.max(0, degree)) * 0.6)
+  return 1.6 + importance * 2 + activityBoost + degreeBoost
 }
 
 export function computeDegrees(edges: ReadonlyArray<EdgeProp | SimLink>): Map<string, number> {
@@ -125,8 +124,8 @@ export function computeDegrees(edges: ReadonlyArray<EdgeProp | SimLink>): Map<st
 // graph reads as a clean constellation, and fade in only once the user has
 // deliberately zoomed into a neighbourhood. Selected/hovered nodes bypass this.
 export function labelAlpha(globalScale: number): number {
-  const FADE_START = 2.0
-  const FADE_END = 3.4
+  const FADE_START = 2.6
+  const FADE_END = 4.0
   if (globalScale <= FADE_START) return 0
   if (globalScale >= FADE_END) return 1
   return (globalScale - FADE_START) / (FADE_END - FADE_START)
@@ -144,8 +143,24 @@ export function hashUnit(id: string): number {
   return ((h >>> 0) % 100000) / 100000
 }
 
+export function ambientPulse(id: string, now: number): number {
+  const phase = hashUnit(id) * Math.PI * 2
+  return 0.875 + Math.sin((now / 2400) * Math.PI * 2 + phase) * 0.125
+}
+
+export function linkParticleCount(weight: number, synthetic: boolean | undefined, isPopEdge: boolean): number {
+  if (synthetic || isPopEdge) return 0
+  return clamp01(weight) > 0.8 ? 1 : 0
+}
+
+export function spawnProgress(spawnedAt: number | undefined, now: number): number {
+  if (spawnedAt == null) return 1
+  const linear = clamp01((now - spawnedAt) / 600)
+  return 1 - (1 - linear) ** 3
+}
+
 export function linkWidth(weight: number | null | undefined): number {
-  return 0.7 + clamp01(weight) * 2.4
+  return 0.35 + clamp01(weight) * 0.6
 }
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
@@ -169,10 +184,8 @@ export function withAlpha(color: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${a})`
 }
 
-export function linkColor(relation_type: string, weight: number | null | undefined, dimmed: boolean): string {
-  const base = nodeColor(relation_type)
-  const alpha = dimmed ? 0.06 : Math.min(0.42, 0.14 + clamp01(weight) * 0.28)
-  return withAlpha(base, alpha)
+export function linkColor(_relation_type: string, weight: number | null | undefined, dimmed: boolean): string {
+  return withAlpha('#8a96c8', dimmed ? 0.03 : 0.06 + clamp01(weight) * 0.1)
 }
 
 export interface GraphPhysics {
@@ -183,10 +196,10 @@ export interface GraphPhysics {
 }
 
 export const DEFAULT_PHYSICS: GraphPhysics = {
-  chargeStrength: -220,
-  linkDistance: 60,
-  centerStrength: 0.04,
-  collidePadding: 4,
+  chargeStrength: -70,
+  linkDistance: 42,
+  centerStrength: 0.08,
+  collidePadding: 2.5,
 }
 
 // Synthetic "visual affinity" links only exist to keep sparse graphs from
@@ -194,19 +207,8 @@ export const DEFAULT_PHYSICS: GraphPhysics = {
 // the endpoint colors entirely and paint a single cool slate at a hair of alpha,
 // blended toward the endpoints only faintly so the web has subtle depth without
 // ever becoming the loud green/red yarn ball it used to be.
-export function syntheticLinkColor(sourceColor: string, targetColor: string, dimmed: boolean): string {
-  if (dimmed) return 'rgba(120, 138, 168, 0.04)'
-  const source = hexToRgb(sourceColor)
-  const target = hexToRgb(targetColor)
-  // Pull the mixed hue 82% of the way toward a neutral slate so only a trace of
-  // the endpoints' color survives.
-  const slate = { r: 120, g: 138, b: 168 }
-  const mix = (s: number, t: number, base: number) =>
-    Math.round(base * 0.82 + (s * 0.52 + t * 0.48) * 0.18)
-  const r = mix(source.r, target.r, slate.r)
-  const g = mix(source.g, target.g, slate.g)
-  const b = mix(source.b, target.b, slate.b)
-  return `rgba(${r}, ${g}, ${b}, 0.1)`
+export function syntheticLinkColor(_sourceColor: string, _targetColor: string, dimmed: boolean): string {
+  return withAlpha('#8a96c8', dimmed ? 0.02 : 0.05)
 }
 
 function stableNodeSortKey(node: Pick<NodeProp, 'id' | 'stance' | 'type'>): string {
@@ -221,10 +223,13 @@ export function buildSyntheticLinks(
   // only. The dense population layer must never receive them — at 10k nodes that
   // would mean tens of thousands of invisible links dragging layout, hit-testing
   // and paint. Restrict candidates (and the density check) to non-population.
+  // 人口レイヤーが出ている間は hairball の密度は人口が担う。ここで synthetic を
+  // 足すとエージェント同士だけが強く凝集し、人口の球から分離した団子になるため
+  // 生成しない（実エッジ + pop-edge に任せて球へ混ざらせる）。
+  if (nodes.some((node) => node.tier === 'population')) return []
   const linkable = nodes.filter((node) => node.tier !== 'population')
   if (linkable.length < 3) return []
   const realEdges = edges.filter((edge) => !(edge.id?.startsWith('pop-edge-') ?? false))
-  if (realEdges.length >= linkable.length * MIN_LINKS_PER_NODE_FOR_CONNECTED_VIEW) return []
 
   const realPairs = new Set<string>()
   const degree = new Map(linkable.map((node) => [node.id, 0]))
@@ -242,7 +247,7 @@ export function buildSyntheticLinks(
   const ordered = [...linkable].sort((a, b) => stableNodeSortKey(a).localeCompare(stableNodeSortKey(b)))
   const synthetic: SimLink[] = []
   const syntheticPairs = new Set<string>()
-  const targetNeighborCount = Math.min(MAX_SYNTHETIC_NEIGHBORS, Math.max(1, Math.ceil(linkable.length / 28)))
+  const targetNeighborCount = Math.min(MAX_SYNTHETIC_NEIGHBORS, Math.max(3, Math.ceil(linkable.length / 14)))
   const addSynthetic = (source: NodeProp, target: NodeProp, weight: number) => {
     if (source.id === target.id) return
     const key = pairKey(source.id, target.id)
@@ -266,7 +271,7 @@ export function buildSyntheticLinks(
       let targetIndex = (i + offset * 7) % ordered.length
       if (targetIndex === i) targetIndex = (i + offset) % ordered.length
       const target = ordered[targetIndex]
-      addSynthetic(source, target, Math.max(0.18, 0.42 - offset * 0.06))
+      addSynthetic(source, target, Math.max(0.1, 0.3 - offset * 0.03))
     }
   }
 
@@ -375,7 +380,12 @@ function updateSimNode(existing: SimNode | undefined, next: NodeProp): SimNode {
     existing.tier = next.tier
     return existing
   }
-  return { ...next }
+  return {
+    ...next,
+    ...(next.tier !== 'population' && typeof performance !== 'undefined'
+      ? { spawnedAt: performance.now() }
+      : {}),
+  }
 }
 
 function toSimLink(edge: EdgeProp): SimLink {
@@ -447,7 +457,6 @@ export function mergeGraphData(
     cache.populationLinks = []
   }
 
-  assignLinkCurvatures(links)
   return { nodes, links: [...links, ...buildSyntheticLinks(nodes, validEdges)] }
 }
 

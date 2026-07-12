@@ -818,7 +818,7 @@ function goToResults() {
               </template>
             </div>
           </div>
-          <div class="graph-container" :class="graphContainerClass">
+          <div class="graph-container" :class="[graphContainerClass, { 'society-live': store.isSocietyMode }]">
             <!-- Society mode: Live Social Graph -->
             <LiveSocietyGraph
               v-if="store.isSocietyMode"
@@ -1157,6 +1157,13 @@ function goToResults() {
   border: 1px solid rgba(100,100,255,0.12);
   position: relative;
   overflow: hidden;
+}
+
+.graph-container.society-live {
+  flex: none;
+  min-height: 0;
+  height: clamp(20rem, 42vh, 30rem);
+  border-color: var(--border);
 }
 
 .graph-container.tone-graphrag { background: radial-gradient(ellipse at 30% 30%, rgba(15, 60, 54, 0.88) 0%, #041118 48%, #02070b 100%); }

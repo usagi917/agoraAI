@@ -11,6 +11,7 @@ declare module 'force-graph' {
     linkSource(value: string): this
     linkTarget(value: string): this
     backgroundColor(value: string): this
+    autoPauseRedraw(value: boolean): this
     nodeRelSize(value: number): this
     nodeVal(value: number | ((node: unknown) => number)): this
     nodeCanvasObjectMode(fn: (node: unknown) => string): this
@@ -45,6 +46,8 @@ declare module 'force-graph' {
     graphData(data?: ForceGraphData): this | ForceGraphData
     d3ReheatSimulation(): this
     zoomToFit(duration?: number, padding?: number): this
+    zoom(): number
+    zoom(value: number, durationMs?: number): this
     centerAt(x?: number, y?: number, duration?: number): this
   }
 }

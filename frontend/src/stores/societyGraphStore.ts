@@ -172,7 +172,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
       id: a.id,
       label: a.displayName || a.label,
       type: 'agent',
-      importance_score: a.displayName ? 0.85 : (a.confidence || 0.5),
+      importance_score: a.confidence || 0.5,
       stance: a.stance || '',
       activity_score: a.status === 'speaking' ? 1 : 0,
       sentiment_score: 0,
@@ -193,17 +193,15 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
 
     if (socialEdgesVisible.value) {
       for (const e of liveEdges.value) {
-        if (e.strength > 0.3) {
-          edges.push({
-            id: e.id,
-            source: e.source,
-            target: e.target,
-            relation_type: e.relationType,
-            weight: e.strength,
-            direction: 'undirected',
-            status: 'active',
-          })
-        }
+        edges.push({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          relation_type: e.relationType,
+          weight: e.strength,
+          direction: 'undirected',
+          status: 'active',
+        })
       }
     }
 
@@ -480,6 +478,22 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     // エッジを設定
     liveEdges.value = edges.map((e) => ({
       id: e.id,
+      source: e.source,
+      target: e.target,
+      relationType: e.relation_type,
+      strength: e.strength,
+    }))
+  }
+
+  /**
+   * ソーシャルグラフの「構造」だけを早期に投入する（選抜直後の SSE
+   * `society_social_graph_structure` 用）。stance/status は活性化の出力なので
+   * ここでは一切触らず、意見未確定の暫定暖色の窓を維持したまま本物の関係性の輪を描く。
+   * stance を含む完全版は後続の hydrateWithSocialGraph が上書きする。
+   */
+  function setSocialEdges(edges: SocialGraphEdge[]) {
+    liveEdges.value = edges.map((e) => ({
+      id: e.id || `edge-${e.source}-${e.target}`,
       source: e.source,
       target: e.target,
       relationType: e.relation_type,
@@ -855,6 +869,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     getConversationBetween,
     getInteractionCount,
     updateActivationProgress,
+    setSocialEdges,
     hydrateWithSocialGraph,
     setMeetingRound,
     appendMeetingDialogue,

@@ -121,6 +121,7 @@ export function useSimulationSSE(simulationId: string) {
       'population_propagation_round',
       'population_propagation_completed',
       // Society ソーシャルグラフ
+      'society_social_graph_structure',
       'society_social_graph_ready',
       // Unified モード イベント
       'unified_phase_changed',
@@ -668,6 +669,14 @@ export function useSimulationSSE(simulationId: string) {
           track: 'agent',
           status: 'completed',
         })
+        break
+
+      case 'society_social_graph_structure':
+        // 選抜直後: 意見（stance）はまだ無いが、本物のソーシャル構造（友人/家族/同僚…）は
+        // デモグラから既に確定しているので即座にエッジだけを投入し、開始直後から本物の輪を描く。
+        if (payload.edges) {
+          societyGraphStore.setSocialEdges(payload.edges)
+        }
         break
 
       case 'society_activation_started':

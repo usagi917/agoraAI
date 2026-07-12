@@ -101,26 +101,11 @@ onMounted(async () => {
     })),
   )
 
-  // 2. 活性化進捗 (SSE: society_activation_progress)
-  for (let done = 10; done <= 101; done += 30) {
-    if (cancelled) return
-    societyGraphStore.updateActivationProgress(Math.min(done, 101), 101)
-    await sleep(120)
-    if (cancelled) return
-  }
-
-  // 3. ソーシャルグラフ hydrate (SSE: social graph / stance 確定)
-  const nodes: SocialGraphNode[] = Array.from({ length: 101 }, (_, i) => ({
-    id: `agent-${i}`,
-    agent_index: i,
-    stance: STANCES[i % STANCES.length],
-    confidence: 0.4 + (i % 6) / 10,
-    demographics: { occupation: '会社員', age: 30 + (i % 40), region: '関東' },
-  })) as unknown as SocialGraphNode[]
-
-  const edges: SocialGraphEdge[] = Array.from({ length: 11 }, (_, i) => ({
+  // 2. ソーシャル構造の早期投入 (SSE: society_social_graph_structure)
+  //    意見(stance)確定より前に、本物の関係性エッジだけを入れて開始直後から輪を描く。
+  const edges: SocialGraphEdge[] = Array.from({ length: 140 }, (_, i) => ({
     id: `edge-${i}`,
-    source: `agent-${i}`,
+    source: `agent-${i % 101}`,
     target: `agent-${(i * 9 + 5) % 101}`,
     relation_type: RELATIONS[i % RELATIONS.length],
     strength: 0.4 + (i % 6) / 10,
@@ -135,11 +120,35 @@ onMounted(async () => {
     strength: 0.9,
   } as unknown as SocialGraphEdge)
 
+  societyGraphStore.setSocialEdges(edges)
+
+  // ?stage=early で「意見未確定・暖色グロー＋実エッジの輪」の初期状態を固定表示する
+  if (route.query.stage === 'early') return
+  await sleep(600)
+  if (cancelled) return
+
+  // 3. 活性化進捗 (SSE: society_activation_progress)
+  for (let done = 10; done <= 101; done += 30) {
+    if (cancelled) return
+    societyGraphStore.updateActivationProgress(Math.min(done, 101), 101)
+    await sleep(120)
+    if (cancelled) return
+  }
+
+  // 4. ソーシャルグラフ hydrate (SSE: social graph / stance 確定)
+  const nodes: SocialGraphNode[] = Array.from({ length: 101 }, (_, i) => ({
+    id: `agent-${i}`,
+    agent_index: i,
+    stance: STANCES[i % STANCES.length],
+    confidence: 0.4 + (i % 6) / 10,
+    demographics: { occupation: '会社員', age: 30 + (i % 40), region: '関東' },
+  })) as unknown as SocialGraphNode[]
+
   societyGraphStore.hydrateWithSocialGraph(nodes, edges)
   await sleep(400)
   if (cancelled) return
 
-  // 4. 評議会フェーズ (SSE: council round)
+  // 5. 評議会フェーズ (SSE: council round)
   simulationStore.unifiedPhase = 'council'
   societyGraphStore.appendMeetingDialogue(3, {
     participant_name: '松田 章太',
@@ -148,7 +157,7 @@ onMounted(async () => {
     argument: '結局のところ数字が示していることは…',
   })
 
-  // 5. 全人口レイヤー（?pop=N 指定時のみ）
+  // 6. 全人口レイヤー（?pop=N 指定時のみ）
   const popSize = Number(route.query.pop)
   if (Number.isFinite(popSize) && popSize > 0) {
     await sleep(400)

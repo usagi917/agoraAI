@@ -39,6 +39,9 @@
     "vue-tsc": "^3.2.5"
   },
   "knip": {
+    "ignore": [
+      "src/**/*.d.ts"
+    ],
     "entry": [
       "src/**/*.spec.ts",
       "tests/e2e/**/*.spec.ts"
