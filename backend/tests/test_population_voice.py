@@ -100,4 +100,3 @@ def test_unknown_speech_style_uses_fallback():
     )[0]
 
     assert voice["comment"]
-
