@@ -86,6 +86,10 @@ const unifiedReport = {
   },
   agreement_score: 0.82,
   society_summary: {
+    population_count: 10_000,
+    activated_count: 10_000,
+    gpt_validated_count: 800,
+    council_representative_count: 10,
     aggregation: {
       average_confidence: 0.75,
       stance_distribution: { 賛成: 0.55, 反対: 0.25, 中立: 0.2 },
@@ -195,6 +199,17 @@ describe('ResultsPage — unified report', () => {
 
     expect(wrapper.text()).toContain('田中太郎')
     expect(wrapper.text()).toContain('佐藤花子')
+  })
+
+  it('distinguishes activated residents, GPT checks, and council representatives', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const summary = wrapper.get('.society-stats-row').text()
+    expect(summary).toContain('活性化10,000')
+    expect(summary).toContain('GPT検証800')
+    expect(summary).toContain('評議会代表10')
+    expect(summary).not.toContain('選抜')
   })
 
   it('shows compact validation status above the workspace', async () => {

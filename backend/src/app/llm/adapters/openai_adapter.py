@@ -15,15 +15,13 @@ class OpenAIAdapter(LLMAdapter):
     def __init__(self, provider_name: str, config: dict):
         super().__init__(provider_name, config)
         self._http_client: httpx.AsyncClient | None = None
+        self._min_completion_tokens = max(0, int(config.get("min_completion_tokens", 0) or 0))
+        self._reasoning_effort = config.get("reasoning_effort")
 
     def _get_http_client(self) -> httpx.AsyncClient:
         if self._http_client is None or self._http_client.is_closed:
             self._http_client = httpx.AsyncClient(timeout=httpx.Timeout(300.0))
         return self._http_client
-
-    # 推論モデルでは max_completion_tokens に思考トークンも含まれるため、
-    # 呼び出し側が要求した出力トークン数では足りない。最低限のバッファを確保する。
-    _REASONING_MIN_TOKENS = 8192
 
     def _uses_reasoning_controls(self) -> bool:
         return self.model.startswith("gpt-5") or self.model.startswith(("o1", "o3", "o4"))
@@ -46,10 +44,9 @@ class OpenAIAdapter(LLMAdapter):
 
         is_reasoning = self._uses_reasoning_controls()
 
-        # 推論モデルでは思考トークン分のバッファが必要
-        effective_max_tokens = max_tokens
-        if is_reasoning:
-            effective_max_tokens = max(max_tokens, self._REASONING_MIN_TOKENS)
+        # A global 8k floor made high-volume calls impossible to budget. Each role
+        # declares its own minimum based on measured completion behaviour.
+        effective_max_tokens = max(max_tokens, self._min_completion_tokens)
 
         body: dict = {
             "model": self.model,
@@ -57,6 +54,8 @@ class OpenAIAdapter(LLMAdapter):
             "max_completion_tokens": effective_max_tokens,
         }
         if is_reasoning:
+            if self._reasoning_effort:
+                body["reasoning_effort"] = self._reasoning_effort
             if temperature not in (1, 1.0):
                 logger.debug(
                     "Skipping unsupported temperature override for reasoning model %s: %s",

@@ -8,6 +8,8 @@ from src.app.config import settings
 from src.app.database import Base
 from src.app.main import app
 from src.app.models import _import_all_models
+from src.app.models.agent_activation_result import AgentActivationResult
+from src.app.models.agent_profile import AgentProfile
 from src.app.models.population import Population
 from src.app.models.simulation import Simulation
 from src.app.models.society_result import SocietyResult
@@ -160,3 +162,66 @@ async def test_propagation_endpoint_returns_independence_comparison_summary(
     assert phase_data["independence_re_aggregation"]["effective_sample_size_post"] == 19.1
     assert phase_data["aggregation_pre_independence"]["stance_distribution"]["賛成"] == 0.7
     assert phase_data["aggregation_post_independence"]["stance_distribution"]["反対"] == 0.42
+
+
+@pytest.mark.asyncio
+async def test_agents_endpoint_reads_hybrid_row_checkpoints(client, session_factory):
+    async with session_factory() as session:
+        population = Population(
+            id="pop-hybrid",
+            agent_count=2,
+            status="ready",
+            generation_params={"count": 2},
+        )
+        simulation = Simulation(
+            id="sim-hybrid",
+            population_id=population.id,
+            mode="unified",
+            prompt_text="test",
+            status="completed",
+        )
+        session.add_all([population, simulation])
+        for index in range(2):
+            session.add(AgentProfile(
+                id=f"hybrid-agent-{index}",
+                population_id=population.id,
+                agent_index=index,
+                demographics={"region": "関東", "occupation": "会社員"},
+            ))
+            session.add(AgentActivationResult(
+                simulation_id=simulation.id,
+                population_id=population.id,
+                agent_id=f"hybrid-agent-{index}",
+                agent_index=index,
+                run_seed=1,
+                stage="social_final",
+                provider="social_dynamics",
+                status="success",
+                stance="賛成" if index == 0 else "反対",
+                confidence=0.8,
+                response_json={
+                    "agent_id": f"hybrid-agent-{index}",
+                    "stance": "賛成" if index == 0 else "反対",
+                    "confidence": 0.8,
+                    "reason": "最終反応",
+                },
+            ))
+        session.add(SocietyResult(
+            id="act-hybrid",
+            simulation_id=simulation.id,
+            population_id=population.id,
+            layer="activation",
+            phase_data={
+                "responses_persisted_separately": True,
+                "responses_summary": {"total": 2},
+            },
+            usage={},
+        ))
+        await session.commit()
+
+    response = await client.get("/society/simulations/sim-hybrid/agents")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 2
+    assert [agent["stance"] for agent in payload["agents"]] == ["賛成", "反対"]

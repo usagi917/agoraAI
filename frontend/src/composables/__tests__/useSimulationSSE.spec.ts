@@ -147,6 +147,27 @@ describe('useSimulationSSE', () => {
   })
 
   describe('全人口伝播 (population propagation) handling', () => {
+    it('全員活性化と表示上限を選抜と誤表示しない', async () => {
+      const { useAgentVisualizationStore } = await import('../../stores/agentVisualizationStore')
+      const visualization = useAgentVisualizationStore()
+      const { start } = await createSSE()
+      start()
+      const source = MockEventSource.instances[MockEventSource.instances.length - 1]
+
+      source.emit('society_selection_completed', {
+        total_population: 10_000,
+        selected_count: 10_000,
+        activated_target_count: 10_000,
+        visualized_count: 200,
+        selected_agents: [],
+      })
+
+      const event = visualization.systemEvents.at(-1)
+      expect(event?.label).toBe('住民活性化対象')
+      expect(event?.detail).toContain('全10,000人を活性化')
+      expect(event?.detail).toContain('グラフ表示200人')
+    })
+
     it('population_voice を feedEntries に混流する', async () => {
       const { useSocietyGraphStore } = await import('../../stores/societyGraphStore')
       const graph = useSocietyGraphStore()

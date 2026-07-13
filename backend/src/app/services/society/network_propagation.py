@@ -19,11 +19,11 @@ from typing import Any
 
 import numpy as np
 
+from src.app.services.society.edge_utils import mirror_edges
 from src.app.services.society.event_exposure import (
     ablation_heterogeneous_exposure,
     event_residual,
 )
-from src.app.services.society.edge_utils import mirror_edges
 from src.app.services.society.opinion_dynamics import (
     ClusterInfo,
     OpinionDynamicsEngine,

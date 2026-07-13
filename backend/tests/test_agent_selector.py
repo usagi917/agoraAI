@@ -94,6 +94,32 @@ class TestSelectAgents:
         assert len(selected) == 10  # can't exceed population
 
     @pytest.mark.asyncio
+    async def test_full_population_target_is_not_capped_at_two_hundred(self):
+        agents = [
+            {
+                "id": f"full-{i}",
+                "demographics": {
+                    "region": f"region-{i % 5}",
+                    "age": 18 + i % 70,
+                    "gender": "female" if i % 2 else "male",
+                },
+                "shock_sensitivity": {},
+            }
+            for i in range(10_000)
+        ]
+
+        selected = await select_agents(
+            agents,
+            "テスト",
+            target_count=10_000,
+            max_count=None,
+            seed=9,
+        )
+
+        assert len(selected) == 10_000
+        assert {agent["id"] for agent in selected} == {agent["id"] for agent in agents}
+
+    @pytest.mark.asyncio
     async def test_unique_selections(self, sample_agents):
         selected = await select_agents(sample_agents, "経済問題", target_count=80)
         ids = [a["id"] for a in selected]

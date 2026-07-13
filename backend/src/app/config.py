@@ -165,6 +165,16 @@ class Settings(BaseSettings):
                 return {}
         return {}
 
+    def load_hybrid_inference_config(self) -> dict:
+        config_path = self.config_dir / "hybrid_inference.yaml"
+        if config_path.exists():
+            try:
+                with open(config_path) as f:
+                    return yaml.safe_load(f) or {}
+            except (yaml.YAMLError, OSError) as exc:
+                logger.error("Failed to load hybrid_inference.yaml: %s", exc)
+        return {}
+
     @property
     def is_sqlite(self) -> bool:
         return "sqlite" in self.database_url

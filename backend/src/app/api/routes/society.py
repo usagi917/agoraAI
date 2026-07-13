@@ -19,6 +19,7 @@ from src.app.models.social_edge import SocialEdge
 from src.app.models.society_result import SocietyResult
 from src.app.schemas.graph_activity import GraphActivityEventDTO
 from src.app.services.graph_activity import graph_activity_dto
+from src.app.services.society.activation_store import load_preferred_response_rows
 from src.app.services.society.population_generator import (
     generate_population,
     get_default_population_size,
@@ -40,6 +41,47 @@ async def _latest_layer(session: AsyncSession, sim_id: str, layer: str) -> Socie
         .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+async def _activation_responses(
+    session: AsyncSession,
+    sim_id: str,
+    record: SocietyResult | None,
+    *,
+    limit: int | None = None,
+    agent_ids: list[str] | None = None,
+) -> list[dict]:
+    """Legacy JSON または大規模ハイブリッド行から activation 回答を読む。"""
+    phase_data = dict(record.phase_data or {}) if record else {}
+    legacy = list(phase_data.get("responses") or [])
+    if legacy:
+        if agent_ids is not None:
+            allowed = set(agent_ids)
+            legacy = [response for response in legacy if response.get("agent_id") in allowed]
+        return legacy[:limit] if limit is not None else legacy
+
+    rows = await load_preferred_response_rows(
+        session,
+        simulation_id=sim_id,
+        limit=limit,
+        agent_ids=agent_ids,
+    )
+    if rows:
+        responses = []
+        for row in rows:
+            response = dict(row.response_json or {})
+            response.setdefault("agent_id", row.agent_id)
+            response.setdefault("agent_index", row.agent_index)
+            response.setdefault("stance", row.stance)
+            response.setdefault("confidence", row.confidence)
+            responses.append(response)
+        return responses
+
+    sample = list(phase_data.get("response_sample") or [])
+    if agent_ids is not None:
+        allowed = set(agent_ids)
+        sample = [response for response in sample if response.get("agent_id") in allowed]
+    return sample[:limit] if limit is not None else sample
 
 
 @router.get("/populations")
@@ -424,12 +466,16 @@ async def get_social_graph(
     # activation の個別回答から agent_id → response のマップを作成
     response_map: dict[str, dict] = {}
     selected_agent_ids: list[str] = []
-    if act_record and act_record.phase_data:
-        for resp in act_record.phase_data.get("responses", []):
-            aid = resp.get("agent_id", "")
-            if aid:
-                response_map[aid] = resp
-                selected_agent_ids.append(aid)
+    for resp in await _activation_responses(
+        session,
+        sim_id,
+        act_record,
+        limit=200,
+    ):
+        aid = resp.get("agent_id", "")
+        if aid:
+            response_map[aid] = resp
+            selected_agent_ids.append(aid)
 
     # 活性化結果がまだ無いライブ初期状態では、永続 node_status から選抜集合を復元する。
     if not selected_agent_ids:
@@ -665,7 +711,7 @@ async def get_agents(
     # activation 結果を取得
     act_record = await _latest_layer(session, sim_id, "activation")
 
-    responses = act_record.phase_data.get("responses", []) if act_record and act_record.phase_data else []
+    responses = await _activation_responses(session, sim_id, act_record)
 
     # フィルタリング
     filtered = responses
@@ -734,11 +780,14 @@ async def get_agent_detail(
     act_record = await _latest_layer(session, sim_id, "activation")
 
     activation_response = None
-    if act_record and act_record.phase_data:
-        for resp in act_record.phase_data.get("responses", []):
-            if resp.get("agent_id") == agent_id:
-                activation_response = resp
-                break
+    matching_responses = await _activation_responses(
+        session,
+        sim_id,
+        act_record,
+        agent_ids=[agent_id],
+    )
+    if matching_responses:
+        activation_response = matching_responses[0]
 
     # meeting 発言を取得
     mtg_record = await _latest_layer(session, sim_id, "meeting")

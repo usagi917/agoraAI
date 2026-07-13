@@ -124,6 +124,8 @@ async def generate_persona_narratives_post_activation(
     responses: list[dict],
     theme: str,
     max_concurrency: int = 30,
+    *,
+    provider_override: str | None = None,
 ) -> list[dict]:
     """activation 済みエージェントにスタンス情報を含むペルソナナラティブを付与する。
 
@@ -135,6 +137,7 @@ async def generate_persona_narratives_post_activation(
         responses: activation のレスポンスリスト（stance, reason 等）
         theme: シミュレーションのテーマ
         max_concurrency: 並行 LLM 呼び出し数
+        provider_override: 全呼び出しに使うプロバイダー。None は各住民の設定を使う。
 
     Returns:
         persona_narrative が付与されたエージェントリスト
@@ -227,7 +230,7 @@ async def generate_persona_narratives_post_activation(
             user_prompt += f"- 性格: {', '.join(personality_hints)}\n"
 
         calls.append({
-            "provider": agent.get("llm_backend", "openai"),
+            "provider": provider_override or agent.get("llm_backend", "openai"),
             "system_prompt": system_prompt,
             "user_prompt": user_prompt,
             "temperature": 0.85,

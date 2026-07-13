@@ -60,6 +60,7 @@ describe('socialGraphTopologyStore', () => {
     store.hydrate(snapshot)
 
     expect(store.nodes.get('agent-1')?.stance).toBe('中立')
+    expect(store.nodes.get('agent-1')?.role).toBe('activated')
     expect(store.populationNetwork?.node_count).toBe(2)
     expect(store.snapshotCursor).toBe(10)
   })

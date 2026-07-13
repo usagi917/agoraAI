@@ -1116,8 +1116,16 @@ function renderMarkdown(content: string): string {
                   <span class="society-stat-value">{{ (societyResult.population_count ?? societyResult.aggregation?.total_submitted)?.toLocaleString() || 'n/a' }}</span>
                 </span>
                 <span class="society-stat">
-                  <span class="society-stat-label">選抜</span>
-                  <span class="society-stat-value">{{ societyResult.selected_count ?? societyResult.aggregation?.total_respondents ?? 'n/a' }}</span>
+                  <span class="society-stat-label">活性化</span>
+                  <span class="society-stat-value">{{ (societyResult.activated_count ?? societyResult.aggregation?.activated_count ?? societyResult.selected_count ?? societyResult.aggregation?.total_respondents)?.toLocaleString() || 'n/a' }}</span>
+                </span>
+                <span class="society-stat">
+                  <span class="society-stat-label">GPT検証</span>
+                  <span class="society-stat-value">{{ (societyResult.gpt_validated_count ?? societyResult.aggregation?.gpt_validated_count ?? 0).toLocaleString() }}</span>
+                </span>
+                <span class="society-stat">
+                  <span class="society-stat-label">評議会代表</span>
+                  <span class="society-stat-value">{{ (societyResult.council_representative_count ?? societyResult.aggregation?.council_representative_count ?? 0).toLocaleString() }}</span>
                 </span>
                 <span class="society-stat">
                   <span class="society-stat-label">平均信頼度</span>

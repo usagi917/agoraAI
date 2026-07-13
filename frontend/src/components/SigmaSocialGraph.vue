@@ -45,7 +45,7 @@ let isUnmounted = false
 const populationRenderIdByIndex = new Map<number, string>()
 const graphAriaLabel = computed(() => {
   const total = props.populationNetwork?.node_count || props.nodes.length
-  return `ソーシャルグラフ。代表エージェント${props.nodes.length}人、全体${total}人、関係${props.edges.length}件。ノードを選択すると詳細を確認できます。`
+  return `ソーシャルグラフ。活性化済み表示${props.nodes.length}人、全体${total}人、関係${props.edges.length}件。ノードを選択すると詳細を確認できます。`
 })
 
 const POPULATION_EDGE_CAP = 12000
@@ -98,7 +98,7 @@ function addRepresentativeNodes() {
       forceLabel: props.selectedNodeId === node.id,
       highlighted: node.activity > 0.5 || props.selectedNodeId === node.id,
       type: node.role === 'expert' ? 'square' : 'circle',
-      tier: 'representative',
+      tier: node.role,
     })
   })
 }

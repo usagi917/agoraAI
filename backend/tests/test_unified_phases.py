@@ -117,7 +117,7 @@ class TestRunSocietyPulse:
                 return_value=fake_agents,
             ),
             patch(
-                "src.app.services.phases.society_pulse.run_activation",
+                "src.app.services.phases.society_pulse.run_hybrid_activation",
                 new_callable=AsyncMock,
                 return_value=fake_activation,
             ),
@@ -547,6 +547,9 @@ class TestRunSynthesis:
                 "stance_distribution": {"賛成": 0.6, "反対": 0.3, "中立": 0.1},
                 "average_confidence": 0.75,
                 "top_concerns": ["コスト"],
+                "activated_count": 10_000,
+                "gpt_validated_count": 800,
+                "council_representative_count": 10,
             },
             evaluation={"consistency": 0.7, "calibration": 0.65},
             representatives=[],
@@ -598,13 +601,23 @@ class TestRunSynthesis:
         ):
             mock_sse.publish = AsyncMock()
 
-            result = await run_synthesis(mock_session, mock_sim, pulse, council, "テスト政策")
+            result = await run_synthesis(
+                mock_session,
+                mock_sim,
+                pulse,
+                council,
+                "テスト政策",
+                use_react=False,
+            )
 
         assert isinstance(result, SynthesisResult)
         assert result.decision_brief["recommendation"] == "条件付きGo"
         assert result.agreement_score > 0
         assert "# " in result.content  # Markdown report
         assert isinstance(result.sections, dict)
+        assert result.sections["society_summary"]["activated_count"] == 10_000
+        assert result.sections["society_summary"]["gpt_validated_count"] == 800
+        assert result.sections["society_summary"]["council_representative_count"] == 10
 
     @pytest.mark.asyncio
     async def test_normalizes_broken_brief_and_logs_repair(self, caplog):

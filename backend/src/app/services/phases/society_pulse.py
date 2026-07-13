@@ -18,6 +18,7 @@ from src.app.services.graph_activity import (
 )
 from src.app.services.society.accuracy_config import is_enabled
 from src.app.services.society.activation_layer import run_activation
+from src.app.services.society.activation_store import persist_activation_chunk
 from src.app.services.society.agent_selector import select_agents
 from src.app.services.society.demographic_analyzer import analyze_demographics
 from src.app.services.society.diagnostic_baseline import run_single_llm_distribution
@@ -27,13 +28,25 @@ from src.app.services.society.ensemble import (
     is_uniform_fallback,
 )
 from src.app.services.society.evaluation import evaluate_society_simulation
+from src.app.services.society.hybrid_calibration import apply_distribution_residual
+from src.app.services.society.hybrid_config import (
+    HybridInferenceConfig,
+    load_hybrid_inference_config,
+)
+from src.app.services.society.hybrid_orchestrator import (
+    run_hybrid_activation,
+    run_hybrid_social_requery,
+)
 from src.app.services.society.kg_enricher import enrich_agents_from_kg
 from src.app.services.society.kg_evolution_service import KGEvolutionService
 from src.app.services.society.persona_generator import (
     generate_persona_narratives_post_activation,
 )
 from src.app.services.society.population_generator import get_default_population_size
-from src.app.services.society.population_propagation import run_population_propagation
+from src.app.services.society.population_propagation import (
+    PopulationPropagationResult,
+    run_population_propagation,
+)
 from src.app.services.society.population_voice import generate_population_voices
 from src.app.services.society.representative_selector import select_representatives
 from src.app.services.society.society_orchestrator import (
@@ -58,6 +71,93 @@ from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
 
+MAX_VISUALIZED_ACTIVATION_NODES = 200
+MAX_ACTIVATION_CONVERSATION_LOGS = 100
+MAX_KG_ACTIVATION_RESPONSES = 100
+MAX_PROPAGATION_GRAPH_CHANGES_PER_ROUND = 500
+
+
+def _visualized_agents(agents: list[dict], *, limit: int = MAX_VISUALIZED_ACTIVATION_NODES) -> list[dict]:
+    """SSE/UI に送る住民だけを制限する。活性化対象そのものは変更しない。"""
+    return agents[: max(0, limit)]
+
+
+def _select_narrative_pairs(
+    agents: list[dict],
+    responses: list[dict],
+    *,
+    limit: int,
+) -> list[tuple[dict, dict]]:
+    """スタンスを偏らせず、ナラティブ生成対象を決定論的に選ぶ。"""
+    groups: dict[str, list[tuple[dict, dict]]] = {}
+    for agent, response in zip(agents, responses, strict=True):
+        if response.get("_failed"):
+            continue
+        stance = str(response.get("stance") or "中立")
+        groups.setdefault(stance, []).append((agent, response))
+
+    for pairs in groups.values():
+        pairs.sort(
+            key=lambda pair: (
+                -float(pair[1].get("confidence", 0.0) or 0.0),
+                int(pair[0].get("agent_index", 0) or 0),
+            )
+        )
+
+    selected: list[tuple[dict, dict]] = []
+    stance_order = ["賛成", "条件付き賛成", "中立", "条件付き反対", "反対"]
+    ordered_groups = [groups[stance] for stance in stance_order if stance in groups]
+    ordered_groups.extend(
+        groups[stance] for stance in sorted(set(groups) - set(stance_order))
+    )
+    while ordered_groups and len(selected) < max(0, limit):
+        remaining: list[list[tuple[dict, dict]]] = []
+        for group in ordered_groups:
+            if group and len(selected) < limit:
+                selected.append(group.pop(0))
+            if group:
+                remaining.append(group)
+        ordered_groups = remaining
+    return selected
+
+
+def _calibrate_social_distribution(
+    raw_distribution: dict[str, float],
+    aggregation: dict,
+) -> dict[str, float]:
+    """Keep the learned Liquid/GPT residual after numeric social dynamics."""
+    aggregation["stance_distribution_social_liquid"] = dict(raw_distribution)
+    calibration = aggregation.get("hybrid_calibration") or {}
+    residual = calibration.get("residual")
+    if not calibration.get("applied") or not isinstance(residual, dict):
+        return raw_distribution
+    aggregation["stance_distribution_social_hybrid_full"] = apply_distribution_residual(
+        raw_distribution,
+        residual,
+        shrinkage=1.0,
+    )
+    return apply_distribution_residual(
+        raw_distribution,
+        residual,
+        shrinkage=float(calibration.get("shrinkage", 1.0) or 0.0),
+    )
+
+
+def _updated_activation_phase_data(
+    phase_data: dict,
+    aggregation: dict,
+) -> dict:
+    """Refresh the durable audit snapshot after social dynamics completes."""
+    responses_summary = dict(phase_data.get("responses_summary") or {})
+    responses_summary["stance_distribution"] = dict(
+        aggregation.get("stance_distribution") or {}
+    )
+    return {
+        **phase_data,
+        "aggregation": dict(aggregation),
+        "responses_summary": responses_summary,
+    }
+
 
 def _phase_limits(cognitive_config: dict | None = None) -> dict[str, int]:
     """選抜数・活性化同時実行数を cognitive config (game_master) から導出する。
@@ -78,6 +178,22 @@ def _phase_limits(cognitive_config: dict | None = None) -> dict[str, int]:
         if isinstance(value, (int, float)) and not isinstance(value, bool) and int(value) > 0:
             limits[key] = int(value)
     return limits
+
+
+def _activation_limits(
+    hybrid_config: HybridInferenceConfig,
+    *,
+    diagnostic: bool,
+    cognitive_config: dict | None = None,
+) -> dict[str, int]:
+    """Use 10k limits only for the local hybrid path; keep paid legacy paths bounded."""
+    if hybrid_config.enabled and not diagnostic:
+        role = hybrid_config.population_activation
+        return {
+            "target_count": role.target_count,
+            "max_concurrency": role.max_concurrency,
+        }
+    return _phase_limits(cognitive_config)
 
 
 def _propagation_config(cognitive_config: dict | None = None) -> dict:
@@ -130,17 +246,17 @@ async def _run_population_propagation_phase(
     session: Any,
     seed: int | None,
     propagation_cfg: dict,
-) -> None:
+) -> PopulationPropagationResult | None:
     """全人口意見伝播フェーズ。失敗しても本流を止めない（警告ログのみ）。
 
-    activation 完了後、未活性化の大衆へ意見を伝播させ、ラウンドごとに SSE 配信し、
+    activation 完了後、全住民の意見を数値的に更新し、ラウンドごとに SSE 配信し、
     結果を population_propagation レイヤーとして永続化する。aggregation には
     population_stance_distribution を in-place で追記する。
 
-    伝播が無効、または未活性化の大衆が居ない（全員選抜済み）場合は何もしない。
+    全員が LLM 活性化済みでも社会的相互作用は実行する。無効設定の場合のみ省略する。
     """
-    if not (propagation_cfg["enabled"] and len(agents) > len(selected_agents)):
-        return
+    if not propagation_cfg["enabled"]:
+        return None
     agents_by_id = {a["id"]: a for a in agents}
     selected_ids = {a.get("id", "") for a in selected_agents}
     prev_round_stances: dict[str, str] = {}
@@ -153,7 +269,7 @@ async def _run_population_propagation_phase(
 
         async def on_propagation_round(delta):
             graph_events = propagation_changes_to_graph_events(
-                delta.changes,
+                delta.changes[:MAX_PROPAGATION_GRAPH_CHANGES_PER_ROUND],
                 phase="population_propagation",
                 round=delta.round,
                 stance_source_key="agent_id",
@@ -167,9 +283,12 @@ async def _run_population_propagation_phase(
                 "round": delta.round,
                 "changes": [
                     {"i": c["agent_index"], "s": c["stance"]}
-                    for c in delta.changes
+                    for c in delta.changes[:MAX_PROPAGATION_GRAPH_CHANGES_PER_ROUND]
                 ],
                 "changed_count": delta.changed_count,
+                "changes_truncated": (
+                    len(delta.changes) > MAX_PROPAGATION_GRAPH_CHANGES_PER_ROUND
+                ),
                 "distribution": delta.distribution,
             })
             filtered_changes = [
@@ -232,12 +351,14 @@ async def _run_population_propagation_phase(
             "total_rounds": propagation_result.total_rounds,
             "changed_total": sum(d.changed_count for d in propagation_result.rounds),
         })
+        return propagation_result
     except Exception as e:
         try:
             await session.rollback()
         except Exception as rollback_error:
             logger.warning("Population propagation rollback failed: %s", rollback_error)
         logger.warning("Population propagation failed, continuing: %s", e)
+        return None
 
 
 async def run_society_pulse(
@@ -254,6 +375,8 @@ async def run_society_pulse(
     """
     simulation_id = sim.id
     diagnostic_cfg = _diagnostic_config(sim)
+    hybrid_config = load_hybrid_inference_config()
+    hybrid_active = hybrid_config.enabled and not diagnostic_cfg
     total_usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
     # === Population ===
@@ -280,17 +403,28 @@ async def run_society_pulse(
     await _save_network(session, agents, pop_id, seed=sim.seed)
 
     # === Selection (network centrality-aware) ===
-    limits = _phase_limits()
+    limits = _activation_limits(
+        hybrid_config,
+        diagnostic=bool(diagnostic_cfg),
+    )
     all_edges = await _load_population_edges(session, pop_id)
     selected_agents = await select_agents(
         agents, theme,
         target_count=limits["target_count"],
+        max_count=(
+            limits["target_count"]
+            if hybrid_active
+            else 200
+        ),
         edges=all_edges,
         seed=sim.seed,
     )
+    visualized_agents = _visualized_agents(selected_agents)
 
     await sse_manager.publish(simulation_id, "society_selection_completed", {
         "selected_count": len(selected_agents),
+        "activated_target_count": len(selected_agents),
+        "visualized_count": len(visualized_agents),
         "total_population": len(agents),
         "selected_agents": [
             {
@@ -301,7 +435,7 @@ async def run_society_pulse(
                 "age": a.get("demographics", {}).get("age", 0),
                 "region": a.get("demographics", {}).get("region", ""),
             }
-            for i, a in enumerate(selected_agents)
+            for i, a in enumerate(visualized_agents)
         ],
     })
 
@@ -309,9 +443,9 @@ async def run_society_pulse(
     # 意見（stance）はまだ無いが、選抜エージェント同士のソーシャル構造は
     # デモグラから既に確定済み。ライブ実行の開始直後から本物の関係性の輪を描けるよう、
     # 選抜完了の直後にエッジ構造だけを送出する（stance は活性化後に別途着色）。
-    selected_ids = {a.get("id", "") for a in selected_agents}
-    selected_ids.discard("")
-    social_edges = await _load_selected_social_edges(session, pop_id, selected_ids)
+    visualized_ids = {a.get("id", "") for a in visualized_agents}
+    visualized_ids.discard("")
+    social_edges = await _load_selected_social_edges(session, pop_id, visualized_ids)
     await sse_manager.publish(simulation_id, "society_social_graph_structure", {
         "population_id": pop_id,
         "edge_count": len(social_edges),
@@ -336,7 +470,7 @@ async def run_society_pulse(
                         "agent_index": agent.get("agent_index", index),
                     },
                 )
-                for index, agent in enumerate(selected_agents)
+                for index, agent in enumerate(visualized_agents)
                 if agent.get("id")
             ],
         ],
@@ -393,13 +527,27 @@ async def run_society_pulse(
             "percent": round(completed / total * 100, 1),
         })
 
-    activation_result = await run_activation(
-        selected_agents, theme,
-        max_concurrency=limits["max_concurrency"],
-        on_progress=on_progress,
-    )
+    if hybrid_active:
+        activation_result = await run_hybrid_activation(
+            session,
+            simulation_id=simulation_id,
+            population_id=pop_id,
+            agents=selected_agents,
+            theme=theme,
+            seed=sim.seed,
+            config=hybrid_config,
+            on_progress=on_progress,
+            theme_category=theme_estimate.category,
+        )
+    else:
+        activation_result = await run_activation(
+            selected_agents,
+            theme,
+            max_concurrency=limits["max_concurrency"],
+            on_progress=on_progress,
+        )
 
-    if not diagnostic_cfg and is_enabled("single_llm_ensemble"):
+    if not hybrid_active and not diagnostic_cfg and is_enabled("single_llm_ensemble"):
         aggregation = activation_result["aggregation"]
         try:
             single_distribution, single_usage = await run_single_llm_distribution(theme, sim.seed)
@@ -456,7 +604,8 @@ async def run_society_pulse(
     # 個別回答を保存
     individual_responses = []
     activation_logs: list[ConversationLog] = []
-    for agent, resp in zip(selected_agents, activation_result["responses"]):
+    for agent, resp in zip(selected_agents, activation_result["responses"], strict=True):
+        resp.setdefault("agent_id", agent["id"])
         individual_responses.append({
             "agent_id": agent["id"],
             "agent_index": agent.get("agent_index", 0),
@@ -484,7 +633,11 @@ async def run_society_pulse(
         if concern:
             content_parts.append(f"【懸念】{concern}")
 
-        if content_parts and not resp.get("_failed"):
+        if (
+            content_parts
+            and not resp.get("_failed")
+            and len(activation_logs) < MAX_ACTIVATION_CONVERSATION_LOGS
+        ):
             activation_logs.append(ConversationLog(
                 simulation_id=simulation_id,
                 phase="activation",
@@ -503,30 +656,43 @@ async def run_society_pulse(
         context="activation conversation logs",
     )
 
+    activation_phase_data = {
+        "aggregation": activation_result["aggregation"],
+        "representative_count": len(activation_result["representatives"]),
+        "responses_summary": {
+            "total": len(activation_result["responses"]),
+            "stance_distribution": activation_result["aggregation"]["stance_distribution"],
+        },
+    }
+    if hybrid_active:
+        activation_phase_data.update({
+            "responses_persisted_separately": True,
+            "response_sample": individual_responses[:MAX_ACTIVATION_CONVERSATION_LOGS],
+        })
+    else:
+        activation_phase_data["responses"] = individual_responses
+
     activation_record = SocietyResult(
         id=str(uuid.uuid4()),
         simulation_id=simulation_id,
         population_id=pop_id,
         layer="activation",
-        phase_data={
-            "aggregation": activation_result["aggregation"],
-            "representative_count": len(activation_result["representatives"]),
-            "responses_summary": {
-                "total": len(activation_result["responses"]),
-                "stance_distribution": activation_result["aggregation"]["stance_distribution"],
-            },
-            "responses": individual_responses,
-        },
+        phase_data=activation_phase_data,
         usage=activation_result["usage"],
     )
     session.add(activation_record)
     await session.commit()
 
-    selected_agent_ids = [a["id"] for a in selected_agents]
+    visualized_agent_ids = [a["id"] for a in visualized_agents]
     await sse_manager.publish(simulation_id, "society_activation_completed", {
         "aggregation": activation_result["aggregation"],
         "representative_count": len(activation_result["representatives"]),
-        "selected_agent_ids": selected_agent_ids,
+        "activated_count": activation_result["aggregation"].get(
+            "activated_count", len(individual_responses)
+        ),
+        "gpt_validated_count": activation_result["aggregation"].get("gpt_validated_count", 0),
+        "selected_agent_ids": visualized_agent_ids,
+        "visualized_count": len(visualized_agent_ids),
         "usage": activation_result["usage"],
     })
     await persist_graph_activity_events(
@@ -544,11 +710,12 @@ async def run_society_pulse(
                 },
             )
             for response in individual_responses
+            if response["agent_id"] in visualized_ids
         ],
     )
 
     # === Population Propagation: 全人口への意見伝播 ===
-    await _run_population_propagation_phase(
+    propagation_result = await _run_population_propagation_phase(
         simulation_id=simulation_id,
         pop_id=pop_id,
         agents=agents,
@@ -560,14 +727,169 @@ async def run_society_pulse(
         seed=sim.seed,
         propagation_cfg=_propagation_config(),
     )
+    if propagation_result is not None and hybrid_active:
+        final_stances = {
+            str(item["agent_id"]): item["stance"]
+            for item in propagation_result.final_stances
+        }
+        for response in activation_result["responses"]:
+            initial_stance = response["stance"]
+            response["initial_stance"] = initial_stance
+            response["propagated_stance"] = final_stances.get(
+                str(response.get("agent_id") or ""), initial_stance
+            )
+
+        social_result: dict = {
+            "responses": [],
+            "usage": {},
+            "requeried_count": 0,
+            "changed_count": 0,
+        }
+        try:
+            social_result = await run_hybrid_social_requery(
+                session,
+                simulation_id=simulation_id,
+                population_id=pop_id,
+                agents=selected_agents,
+                initial_responses=activation_result["responses"],
+                final_stances=propagation_result.final_stances,
+                theme=theme,
+                seed=sim.seed,
+                config=hybrid_config,
+            )
+        except Exception as exc:
+            logger.warning("Liquid social requery failed, using numeric update: %s", exc)
+
+        social_by_id = {
+            str(response.get("agent_id") or ""): response
+            for response in social_result.get("responses", [])
+            if not response.get("_failed")
+        }
+        individual_by_id = {
+            response["agent_id"]: response for response in individual_responses
+        }
+        for response in activation_result["responses"]:
+            agent_id = str(response.get("agent_id") or "")
+            response["stance"] = response["propagated_stance"]
+            social_response = social_by_id.get(agent_id)
+            if social_response:
+                for field in ("stance", "confidence", "reason", "concern", "priority"):
+                    if field in social_response:
+                        response[field] = social_response[field]
+                response["social_requeried"] = True
+            stored = individual_by_id.get(agent_id)
+            if stored is not None:
+                stored.update({
+                    "initial_stance": response["initial_stance"],
+                    "propagated_stance": response["propagated_stance"],
+                    "stance": response["stance"],
+                    "confidence": response["confidence"],
+                    "reason": response.get("reason") or "",
+                    "concern": response.get("concern") or "",
+                    "priority": response.get("priority") or "",
+                    "social_requeried": bool(response.get("social_requeried")),
+                })
+
+        final_counts: dict[str, int] = {}
+        for response in activation_result["responses"]:
+            if response.get("_failed") or not response.get("stance"):
+                continue
+            stance = str(response["stance"])
+            final_counts[stance] = final_counts.get(stance, 0) + 1
+        total_final = sum(final_counts.values())
+        raw_final_distribution = {
+            stance: count / total_final
+            for stance, count in final_counts.items()
+        } if total_final else {}
+        aggregation = activation_result["aggregation"]
+        final_distribution = _calibrate_social_distribution(
+            raw_final_distribution,
+            aggregation,
+        )
+        aggregation["stance_distribution_pre_social"] = dict(
+            aggregation.get("stance_distribution", {})
+        )
+        aggregation["stance_distribution"] = final_distribution
+        aggregation["population_stance_distribution_after_requery"] = final_distribution
+        aggregation["social_changed_count"] = social_result.get("changed_count", 0)
+        aggregation["social_requeried_count"] = social_result.get("requeried_count", 0)
+        activation_phase_data = _updated_activation_phase_data(
+            activation_phase_data,
+            aggregation,
+        )
+        activation_record.phase_data = activation_phase_data
+        for key in total_usage:
+            total_usage[key] += int(social_result.get("usage", {}).get(key, 0) or 0)
+
+        for start in range(0, len(selected_agents), 256):
+            chunk_agents = selected_agents[start : start + 256]
+            chunk_responses = activation_result["responses"][start : start + 256]
+            await persist_activation_chunk(
+                session,
+                simulation_id=simulation_id,
+                population_id=pop_id,
+                stage="social_final",
+                run_seed=sim.seed,
+                records=[
+                    {
+                        "agent_id": agent["id"],
+                        "agent_index": agent.get("agent_index", start + offset),
+                        "provider": "social_dynamics",
+                        "model": "network+liquid_requery",
+                        "response": response,
+                        "usage": {},
+                    }
+                    for offset, (agent, response) in enumerate(
+                        zip(chunk_agents, chunk_responses, strict=True)
+                    )
+                ],
+            )
+
+        session.add(SocietyResult(
+            id=str(uuid.uuid4()),
+            simulation_id=simulation_id,
+            population_id=pop_id,
+            layer="social_requery",
+            phase_data={
+                "changed_count": aggregation["social_changed_count"],
+                "requeried_count": aggregation["social_requeried_count"],
+                "distribution": final_distribution,
+            },
+            usage=social_result.get("usage", {}),
+        ))
+        await session.commit()
 
     # === Post-Activation Persona Narrative Generation ===
+    narrative_pairs = _select_narrative_pairs(
+        selected_agents,
+        activation_result["responses"],
+        limit=(
+            hybrid_config.narrative_count
+            if hybrid_active
+            else len(selected_agents)
+        ),
+    )
+    narrative_agents = [agent for agent, _ in narrative_pairs]
+    narrative_responses = [response for _, response in narrative_pairs]
     await sse_manager.publish(simulation_id, "persona_generation_started", {
-        "agent_count": len(selected_agents),
+        "agent_count": len(narrative_agents),
+        "population_activated_count": len(selected_agents),
     })
     try:
-        selected_agents = await generate_persona_narratives_post_activation(
-            selected_agents, activation_result["responses"], theme,
+        await generate_persona_narratives_post_activation(
+            narrative_agents,
+            narrative_responses,
+            theme,
+            max_concurrency=(
+                hybrid_config.population_activation.max_concurrency
+                if hybrid_active
+                else limits["max_concurrency"]
+            ),
+            provider_override=(
+                hybrid_config.population_activation.provider
+                if hybrid_active
+                else None
+            ),
         )
         generated = sum(1 for a in selected_agents if a.get("persona_narrative"))
         logger.info("Post-activation persona narratives: %d/%d generated", generated, len(selected_agents))
@@ -581,7 +903,7 @@ async def run_society_pulse(
             kg_evo.seed_from_existing(kg_entities, kg_relations or [])
         await kg_evo.extract_and_publish_from_activation(
             simulation_id,
-            individual_responses,
+            individual_responses[:MAX_KG_ACTIVATION_RESPONSES],
             theme,
         )
     except Exception as e:
@@ -705,6 +1027,12 @@ async def run_society_pulse(
         max_experts=4,
         theme=theme,
     )
+    activation_result["aggregation"].setdefault(
+        "activated_count",
+        sum(not response.get("_failed") for response in activation_result["responses"]),
+    )
+    activation_result["aggregation"].setdefault("gpt_validated_count", 0)
+    activation_result["aggregation"]["council_representative_count"] = len(representatives)
 
     return SocietyPulseResult(
         agents=selected_agents,

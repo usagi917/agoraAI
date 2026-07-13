@@ -12,7 +12,7 @@ import type {
 export interface SocialTopologyNode extends SocialGraphNode {
   status: string
   activity: number
-  role: 'representative' | 'expert' | 'population'
+  role: 'activated' | 'representative' | 'expert' | 'population'
 }
 
 export interface SocialTopologyEdge extends SocialGraphEdge {
@@ -43,13 +43,7 @@ export const useSocialGraphTopologyStore = defineStore('socialGraphTopology', ()
         ...node,
         status: node.stance ? 'activated' : 'selected',
         activity: 0,
-        role: (
-          ['医師', '研究者', '大学教授', '専門家'].some((label) => (
-            node.demographics?.occupation?.includes(label)
-          ))
-            ? 'expert'
-            : 'representative'
-        ) as SocialTopologyNode['role'],
+        role: 'activated',
       },
     ]))
     edges.value = new Map(snapshot.edges.map((edge) => [

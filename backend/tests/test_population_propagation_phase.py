@@ -106,12 +106,15 @@ async def test_skips_when_disabled():
 
 
 @pytest.mark.asyncio
-async def test_skips_when_no_unactivated_mass():
-    """全員が選抜済み（未活性化の大衆が居ない）なら何もしない。"""
+async def test_runs_numeric_social_update_when_everyone_is_activated():
+    """全員がLLM活性化済みでも、全人口の数値的な社会更新は実行する。"""
     session = _mock_session()
-    with patch.object(society_pulse, "sse_manager") as sse:
+    propagation = AsyncMock(return_value=_fake_result())
+    with patch.object(society_pulse, "sse_manager") as sse, patch.object(
+        society_pulse, "run_population_propagation", new=propagation
+    ):
         sse.publish = AsyncMock()
-        await _run_population_propagation_phase(
+        result = await _run_population_propagation_phase(
             simulation_id="s",
             pop_id="p",
             agents=_agents(5),
@@ -123,8 +126,66 @@ async def test_skips_when_no_unactivated_mass():
             seed=None,
             propagation_cfg=_cfg(),
         )
-    session.add.assert_not_called()
-    sse.publish.assert_not_called()
+    propagation.assert_awaited_once()
+    session.add.assert_called_once()
+    assert result is not None
+    assert result.distribution == {"賛成": 0.7, "反対": 0.3}
+
+
+@pytest.mark.asyncio
+async def test_caps_visual_graph_events_without_truncating_numeric_propagation():
+    """1万人計算は維持しつつ、可視化イベントのDB増幅だけを抑える。"""
+    session = _mock_session()
+    changes = [
+        {
+            "agent_id": f"a{index}",
+            "agent_index": index,
+            "stance": "賛成",
+        }
+        for index in range(600)
+    ]
+    delta = PropagationRoundDelta(
+        round=0,
+        changes=changes,
+        changed_count=len(changes),
+        distribution={"賛成": 1.0},
+        max_delta=0.2,
+    )
+
+    async def fake_propagation(*_args, **kwargs):
+        await kwargs["on_round"](delta)
+        return _fake_result()
+
+    with (
+        patch.object(society_pulse, "sse_manager") as sse,
+        patch.object(
+            society_pulse,
+            "run_population_propagation",
+            new=AsyncMock(side_effect=fake_propagation),
+        ),
+        patch.object(
+            society_pulse,
+            "propagation_changes_to_graph_events",
+            return_value=[],
+        ) as graph_events,
+    ):
+        sse.publish = AsyncMock()
+        await _run_population_propagation_phase(
+            simulation_id="s",
+            pop_id="p",
+            agents=_agents(600),
+            selected_agents=_agents(600),
+            individual_responses=[],
+            all_edges=[],
+            aggregation={},
+            session=session,
+            seed=None,
+            propagation_cfg=_cfg(),
+        )
+
+    visual_changes = graph_events.call_args.args[0]
+    assert len(visual_changes) == 500
+    assert delta.changed_count == 600
 
 
 @pytest.mark.asyncio

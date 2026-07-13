@@ -72,6 +72,10 @@ async def _run_pulse(single_result, *, diagnostic_cfg=None, single_error=None):
             return_value=fake_activation,
         ),
         patch(
+            "src.app.services.phases.society_pulse.load_hybrid_inference_config",
+            return_value=MagicMock(enabled=False),
+        ),
+        patch(
             "src.app.services.phases.society_pulse.generate_persona_narratives_post_activation",
             new_callable=AsyncMock,
             return_value=fake_agents,

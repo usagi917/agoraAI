@@ -698,12 +698,17 @@ export function useSimulationSSE(simulationId: string) {
         if (payload.selected_agents) {
           societyGraphStore.setSelectedAgents(payload.selected_agents)
         }
-        vizStore.addSystemEvent('◎', 'エージェント選抜', `${payload.total_population}人から${payload.selected_count}人を選出`)
-        activity.addEntry('event', '◎', `${payload.selected_count}人を選抜`, {
-          detail: `${payload.total_population}人から${payload.selected_count}人を選出`,
+        {
+          const activatedTarget = Number(payload.activated_target_count ?? payload.selected_count ?? 0)
+          const visualizedCount = Number(payload.visualized_count ?? payload.selected_agents?.length ?? 0)
+          const detail = `全${activatedTarget.toLocaleString('ja-JP')}人を活性化、グラフ表示${visualizedCount.toLocaleString('ja-JP')}人`
+          vizStore.addSystemEvent('◎', '住民活性化対象', detail)
+          activity.addEntry('event', '◎', `${activatedTarget.toLocaleString('ja-JP')}人を活性化対象に設定`, {
+            detail,
           track: 'agent',
           status: 'completed',
-        })
+          })
+        }
         break
 
       case 'society_social_graph_structure':

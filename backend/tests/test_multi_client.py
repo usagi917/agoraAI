@@ -75,6 +75,67 @@ class TestMultiLLMClientRouting:
         assert adapter is mock_adapter
         assert limiter is mock_limiter
 
+    def test_local_population_provider_never_falls_back_to_paid_api(self):
+        client = MultiLLMClient()
+        client._initialized = True
+        client._adapters = {"openai": MagicMock()}
+        client._rate_limiters = {"openai": MagicMock()}
+        client._fallback_order = ["openai"]
+        client._no_fallback_providers = {"liquid"}
+
+        with pytest.raises(RuntimeError, match="Fallback disabled"):
+            client._resolve_provider("liquid")
+
+    def test_initializes_local_ollama_provider_without_api_key(self):
+        client = MultiLLMClient()
+        with patch("src.app.llm.multi_client.settings") as mock_settings:
+            mock_settings.load_llm_providers_config.return_value = {
+                "providers": {
+                    "liquid": {
+                        "type": "ollama",
+                        "model": "lfm",
+                        "api_base": "http://127.0.0.1:11434",
+                        "enabled": True,
+                        "rate_limit": {},
+                    }
+                },
+                "fallback_order": ["openai"],
+            }
+
+            client.initialize()
+
+        assert client.available_providers() == ["liquid"]
+        assert client._adapters["liquid"].api_key == ""
+
+    def test_rejects_unknown_adapter_type_instead_of_silently_using_openai(self):
+        client = MultiLLMClient()
+        with patch("src.app.llm.multi_client.settings") as mock_settings:
+            mock_settings.load_llm_providers_config.return_value = {
+                "providers": {
+                    "broken": {
+                        "type": "mystery",
+                        "model": "unknown",
+                        "enabled": True,
+                    }
+                }
+            }
+
+            with pytest.raises(ValueError, match="Unknown LLM adapter type"):
+                client.initialize()
+
+    @pytest.mark.asyncio
+    async def test_provider_preflight_is_delegated_to_adapter(self):
+        client = MultiLLMClient()
+        client._initialized = True
+        mock_adapter = MagicMock()
+        mock_adapter.ensure_ready = AsyncMock()
+        client._adapters = {"liquid": mock_adapter}
+        client._rate_limiters = {"liquid": MagicMock()}
+
+        await client.ensure_provider_ready("liquid")
+
+        mock_adapter.ensure_ready.assert_awaited_once_with()
+
 
 class TestMultiLLMClientBatch:
     @pytest.mark.asyncio
@@ -149,3 +210,4 @@ class TestMultiLLMClientBatch:
         results = await client.call_batch_by_provider(calls)
         assert len(results) == 1
         assert results[0][0]["_error"] is True  # error dict on failure
+        assert mock_adapter.call.await_count == 3

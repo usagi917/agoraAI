@@ -1,13 +1,18 @@
 """活性化レイヤー: 選抜された住民をLLMで活性化し、意見分布を集計する"""
 
 import hashlib
+import inspect
 import logging
 import re
 from collections import Counter
 from typing import Any
 
 from src.app.llm.multi_client import multi_llm_client
-from src.app.services.society.activation_prompts import build_activation_prompt
+from src.app.services.society.activation_prompts import (
+    STANCE_ENUM,
+    build_activation_prompt,
+    build_activation_response_format,
+)
 from src.app.services.society.output_validator import classify_response_quality
 from src.app.services.society.statistical_inference import (
     bootstrap_confidence_intervals,
@@ -19,6 +24,10 @@ from src.app.services.society.statistical_inference import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class ActivationStageUnavailableError(RuntimeError):
+    """Raised when an entire fresh chunk fails, indicating provider outage."""
 
 
 def stable_agent_seed(agent_id: object, fallback_index: int = 0) -> int:
@@ -111,13 +120,31 @@ def _parse_activation_response(result: dict | str) -> dict:
         }
 
     if isinstance(result, dict):
-        return {
-            "stance": result.get("stance", "中立"),
-            "confidence": float(result.get("confidence", 0.5)),
+        try:
+            confidence = max(0.0, min(1.0, float(result.get("confidence", 0.5))))
+        except (TypeError, ValueError):
+            confidence = 0.5
+        stance = result.get("stance", "中立")
+        if stance not in STANCE_ENUM:
+            logger.warning("Activation response has invalid stance: %r", stance)
+            return {
+                "stance": "",
+                "confidence": 0.0,
+                "reason": "",
+                "concern": "",
+                "priority": "",
+                "_failed": True,
+            }
+        parsed = {
+            "stance": stance,
+            "confidence": confidence,
             "reason": result.get("reason", ""),
             "concern": result.get("concern", ""),
             "priority": result.get("priority", ""),
         }
+        if "personal_story" in result:
+            parsed["personal_story"] = result.get("personal_story", "")
+        return parsed
 
     # 文字列の場合: テキストからスタンスキーワード抽出を試みる
     text = str(result) if result else ""
@@ -350,6 +377,16 @@ async def run_activation(
     max_tokens: int = 1024,
     max_concurrency: int = 30,
     on_progress: Any = None,
+    *,
+    provider_override: str | None = None,
+    compact: bool = False,
+    minimal: bool = False,
+    chunk_size: int | None = None,
+    resume_responses: dict[str, dict] | None = None,
+    on_chunk: Any = None,
+    abort_on_full_chunk_failure: bool = False,
+    require_provider_ready: bool = False,
+    max_retries: int = 2,
 ) -> dict:
     """活性化レイヤーを実行する。
 
@@ -362,52 +399,114 @@ async def run_activation(
         }
     """
     multi_llm_client.initialize()
+    resumed = resume_responses or {}
+    has_pending_calls = any(str(agent.get("id") or "") not in resumed for agent in agents)
+    if require_provider_ready and has_pending_calls:
+        if not provider_override:
+            raise ValueError("provider_override is required for provider readiness checks")
+        await multi_llm_client.ensure_provider_ready(provider_override)
 
-    # プロンプト構築
-    calls = []
-    for idx, agent in enumerate(agents):
-        system_prompt, user_prompt = build_activation_prompt(
-            agent, theme, grounding_facts=agent.get("grounding_facts")
-        )
-        agent_temperature = _temperature_from_big_five(
-            agent.get("big_five", {}), base_temperature=temperature,
-        )
-        # エージェント別seedで応答多様性を確保
-        agent_seed = stable_agent_seed(agent.get("id"), idx)
-        calls.append({
-            "provider": agent.get("llm_backend", "openai"),
-            "system_prompt": system_prompt,
-            "user_prompt": user_prompt,
-            "temperature": agent_temperature,
-            "max_tokens": max_tokens,
-            "seed": agent_seed,
-            "response_format": {"type": "json_object"},
-        })
-
-    # バッチ呼び出し
-    raw_results = await multi_llm_client.call_batch_by_provider(calls, max_concurrency)
-
-    # レスポンスパース
-    responses = []
+    responses: list[dict] = []
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     provider_usage: dict[str, dict] = {}
+    resolved_chunk_size = max(1, int(chunk_size or len(agents) or 1))
+    response_format = build_activation_response_format(compact=compact, minimal=minimal)
 
-    for i, (result, usage) in enumerate(raw_results):
-        parsed = _parse_activation_response(result)
-        responses.append(parsed)
+    for start in range(0, len(agents), resolved_chunk_size):
+        chunk_agents = agents[start : start + resolved_chunk_size]
+        calls: list[dict] = []
+        pending_positions: list[int] = []
+        chunk_responses: list[dict | None] = [None] * len(chunk_agents)
 
-        total_usage["prompt_tokens"] += usage.get("prompt_tokens", 0)
-        total_usage["completion_tokens"] += usage.get("completion_tokens", 0)
-        total_usage["total_tokens"] += usage.get("total_tokens", 0)
+        for local_index, agent in enumerate(chunk_agents):
+            agent_id = str(agent.get("id") or "")
+            if agent_id in resumed:
+                parsed = _parse_activation_response(resumed[agent_id])
+                parsed["agent_id"] = agent_id
+                chunk_responses[local_index] = parsed
+                continue
+            global_index = start + local_index
+            system_prompt, user_prompt = build_activation_prompt(
+                agent,
+                theme,
+                grounding_facts=agent.get("grounding_facts"),
+                compact=compact,
+                minimal=minimal,
+            )
+            calls.append({
+                "provider": provider_override or agent.get("llm_backend", "openai"),
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "temperature": _temperature_from_big_five(
+                    agent.get("big_five", {}), base_temperature=temperature
+                ),
+                "max_tokens": max_tokens,
+                "seed": stable_agent_seed(agent.get("id"), global_index),
+                "response_format": response_format,
+            })
+            pending_positions.append(local_index)
 
-        provider = usage.get("provider", "unknown")
-        if provider not in provider_usage:
-            provider_usage[provider] = {"calls": 0, "total_tokens": 0}
-        provider_usage[provider]["calls"] += 1
-        provider_usage[provider]["total_tokens"] += usage.get("total_tokens", 0)
+        retry_count = max(0, int(max_retries))
+        if calls and retry_count == 2:
+            # Preserve the legacy/default call shape for existing adapters and mocks.
+            raw_results = await multi_llm_client.call_batch_by_provider(
+                calls,
+                max_concurrency,
+            )
+        elif calls:
+            raw_results = await multi_llm_client.call_batch_by_provider(
+                calls,
+                max_concurrency,
+                max_retries=retry_count,
+            )
+        else:
+            raw_results = []
+        checkpoint_records: list[dict] = []
+        failed_pending_count = 0
+        for call_index, (position, (result, usage)) in enumerate(
+            zip(pending_positions, raw_results, strict=True)
+        ):
+            parsed = _parse_activation_response(result)
+            if parsed.get("_failed"):
+                failed_pending_count += 1
+            agent = chunk_agents[position]
+            parsed["agent_id"] = str(agent.get("id") or "")
+            chunk_responses[position] = parsed
 
-        if on_progress and (i + 1) % 10 == 0:
-            await on_progress(i + 1, len(agents))
+            for key in total_usage:
+                total_usage[key] += int(usage.get(key, 0) or 0)
+            provider = str(usage.get("provider") or calls[call_index]["provider"])
+            provider_stats = provider_usage.setdefault(provider, {"calls": 0, "total_tokens": 0})
+            provider_stats["calls"] += 1
+            provider_stats["total_tokens"] += int(usage.get("total_tokens", 0) or 0)
+            checkpoint_records.append({
+                "agent_id": parsed["agent_id"],
+                "agent_index": agent.get("agent_index", start + position),
+                "provider": provider,
+                "model": usage.get("model", ""),
+                "response": parsed,
+                "usage": usage,
+            })
+
+        responses.extend(response for response in chunk_responses if response is not None)
+        completed = min(start + len(chunk_agents), len(agents))
+        if on_chunk and checkpoint_records:
+            callback_result = on_chunk(checkpoint_records, completed, len(agents))
+            if inspect.isawaitable(callback_result):
+                await callback_result
+        if (
+            abort_on_full_chunk_failure
+            and calls
+            and failed_pending_count == len(calls)
+        ):
+            providers = ", ".join(sorted({str(call["provider"]) for call in calls}))
+            raise ActivationStageUnavailableError(
+                f"Activation provider unavailable ({providers}); entire chunk failed"
+            )
+        if on_progress:
+            progress_result = on_progress(completed, len(agents))
+            if inspect.isawaitable(progress_result):
+                await progress_result
 
     # 集計（agents を渡して統計的推論を有効化）
     aggregation = _aggregate_opinions(responses, agents=agents)

@@ -1,3 +1,4 @@
+from src.app.models.agent_activation_result import AgentActivationResult
 from src.app.models.agent_profile import AgentProfile
 from src.app.models.agent_state import AgentState
 from src.app.models.aggregation_result import AggregationResult
@@ -72,6 +73,7 @@ __all__ = [
     "EnvironmentRule",
     "Population",
     "AgentProfile",
+    "AgentActivationResult",
     "SocialEdge",
     "SocietyResult",
     "EvaluationResult",

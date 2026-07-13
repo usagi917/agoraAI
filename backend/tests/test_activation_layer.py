@@ -39,6 +39,12 @@ class TestParseActivationResponse:
         assert result["stance"] == "中立"
         assert result["confidence"] == 0.5
 
+    def test_rejects_out_of_schema_stance_from_local_model(self):
+        result = _parse_activation_response({"stance": "どちらとも言えない", "confidence": 0.8})
+
+        assert result["_failed"] is True
+        assert result["stance"] == ""
+
 
 class TestAggregateOpinions:
     def test_basic_aggregation(self):

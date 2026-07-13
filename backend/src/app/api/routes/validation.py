@@ -66,7 +66,11 @@ async def _load_sample_reasons(session: AsyncSession, sim_id: str, limit: int = 
     record = result.scalar_one_or_none()
     if not record or not record.phase_data:
         return []
-    responses = list(record.phase_data.get("responses") or [])
+    responses = list(
+        record.phase_data.get("responses")
+        or record.phase_data.get("response_sample")
+        or []
+    )
     reasons = []
     for response in responses:
         reason = str(response.get("reason") or "").strip()
