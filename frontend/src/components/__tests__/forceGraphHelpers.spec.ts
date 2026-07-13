@@ -4,6 +4,7 @@ import {
   DEFAULT_PHYSICS,
   PENDING_AGENT_COLOR,
   POPULATION_NODE_RADIUS,
+  RELATION_EDGE_COLORS,
   TYPE_COLORS,
   ambientPulse,
   assignLinkCurvatures,
@@ -165,30 +166,35 @@ describe('nodeRadius', () => {
 })
 
 describe('linkWidth', () => {
-  it('stays hair-thin across the weight range', () => {
-    expect(linkWidth(0)).toBe(0.35)
-    expect(linkWidth(1)).toBeCloseTo(0.95, 5)
-    expect(linkWidth(undefined)).toBe(0.35)
+  it('uses the more visible width range and clamps weights', () => {
+    expect(linkWidth(0)).toBe(0.5)
+    expect(linkWidth(1)).toBeCloseTo(1.2, 5)
+    expect(linkWidth(undefined)).toBe(0.5)
+    expect(linkWidth(2)).toBeCloseTo(1.2, 5)
   })
 })
 
 describe('linkColor', () => {
-  it('ignores relation type and reduces alpha when dimmed', () => {
-    const normal = linkColor('friend', 0.5, false)
-    const dimmed = linkColor('friend', 0.5, true)
-    expect(normal).toMatch(/^rgba\(/)
-    expect(normal).toBe(linkColor('risk', 0.5, false))
-    expect(dimmed).toContain('0.03')
-    const normalAlpha = Number(normal.match(/, (0\.\d+)\)/)?.[1])
-    expect(normalAlpha).toBeGreaterThan(0.03)
+  it('colors edges by relation type', () => {
+    expect(linkColor('friend', 0.5, false)).toBe('rgba(90, 160, 200, 0.21000000000000002)')
+    expect(linkColor('family', 0.5, false)).toBe('rgba(201, 163, 115, 0.21000000000000002)')
+    expect(linkColor('friend', 0.5, false)).not.toBe(linkColor('family', 0.5, false))
   })
 
-  it('keeps the delicate alpha band [0.06, 0.16]', () => {
-    const lo = linkColor('friend', 0, false)
-    const hi = linkColor('friend', 1, false)
-    expect(lo).toContain('0.06')
-    const hiAlpha = Number(hi.match(/, (0\.\d+)\)/)?.[1])
-    expect(hiAlpha).toBeCloseTo(0.16)
+  it('falls back to the default relation color for unknown types', () => {
+    expect(linkColor('unknown', 0.5, false)).toBe(linkColor('default', 0.5, false))
+    expect(RELATION_EDGE_COLORS.default).toBe('#7c8aa0')
+  })
+
+  it('uses alpha 0.04 when dimmed regardless of weight', () => {
+    expect(linkColor('friend', 0, true)).toBe('rgba(90, 160, 200, 0.04)')
+    expect(linkColor('friend', 1, true)).toBe('rgba(90, 160, 200, 0.04)')
+  })
+
+  it('uses and clamps the visible alpha band [0.14, 0.28]', () => {
+    expect(linkColor('friend', -1, false)).toBe('rgba(90, 160, 200, 0.14)')
+    expect(linkColor('friend', 1, false)).toBe('rgba(90, 160, 200, 0.28)')
+    expect(linkColor('friend', 2, false)).toBe('rgba(90, 160, 200, 0.28)')
   })
 })
 

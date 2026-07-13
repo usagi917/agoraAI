@@ -35,7 +35,6 @@ import DigitalWorkspaceBackground from '../components/DigitalWorkspaceBackground
 import DebateCards from '../components/DebateCards.vue'
 import ForceGraph2D from '../components/ForceGraph2D.vue'
 import AgentStoryDrawer from '../components/AgentStoryDrawer.vue'
-import ConversationsTab from '../components/ConversationsTab.vue'
 import { useTheaterStore } from '../stores/theaterStore'
 import { unifiedPhaseLabel } from '../constants/phases'
 import { formatPercent, parseServerDate } from '../utils/format'
@@ -321,7 +320,6 @@ const liveLayoutContext = computed(() => ({
 const livePrimaryView = computed<LivePrimaryView>(() => getLivePrimaryView(liveLayoutContext.value))
 const liveSecondaryTabs = computed<LiveSecondaryTab[]>(() => getLiveSecondaryTabs(liveLayoutContext.value))
 const liveSecondaryLabels: Record<LiveSecondaryTab, string> = {
-  conversations: '会話',
   analysis: '分析',
   progress: 'Progress',
   debate: 'Debate',
@@ -857,8 +855,8 @@ function goToResults() {
                 <span class="phase-icon">{{ phaseOverlay.icon }}</span>
                 <span class="phase-label">{{ phaseOverlay.label }}</span>
               </div>
+              <AgentActivityTicker />
             </template>
-            <AgentActivityTicker />
           </div>
           <div v-if="!store.isSocietyMode && graphStore.nodes.length > 0" class="graph-legend">
             <span class="legend-item" v-for="(color, type) in entityTypeColors" :key="type">
@@ -958,13 +956,6 @@ function goToResults() {
           <ThinkingPanel />
         </div>
 
-        <div v-if="activeSecondaryTab === 'conversations'" class="panel-card">
-          <ConversationsTab
-            @select-agent="selectedAgentForStory = $event"
-            @highlight-edge="handleConnectionHighlight"
-          />
-        </div>
-
         <div v-if="activeSecondaryTab === 'analysis'" class="panel-stack">
           <div class="panel-card">
             <div class="panel-header">
@@ -987,7 +978,11 @@ function goToResults() {
     </div>
 
     <!-- SNS-style live feed (society mode) -->
-    <SocietyLiveFeed v-if="store.isSocietyMode" />
+    <SocietyLiveFeed
+      v-if="store.isSocietyMode"
+      @select-agent="selectedAgentForStory = $event"
+      @highlight-edge="handleConnectionHighlight"
+    />
 
     <!-- Agent Story Drawer (society mode) -->
     <AgentStoryDrawer

@@ -147,6 +147,35 @@ describe('useSimulationSSE', () => {
   })
 
   describe('全人口伝播 (population propagation) handling', () => {
+    it('population_voice を feedEntries に混流する', async () => {
+      const { useSocietyGraphStore } = await import('../../stores/societyGraphStore')
+      const graph = useSocietyGraphStore()
+      const { start } = await createSSE()
+      start()
+      const source = MockEventSource.instances[MockEventSource.instances.length - 1]
+      expect(source.listeners.population_voice).toHaveLength(1)
+
+      source.emit('population_voice', {
+        round: 2,
+        voices: [{
+          agent_id: 'citizen-3',
+          agent_index: 3,
+          comment: '地域の声も反映してほしい。',
+          stance: '条件付き賛成',
+          prev_stance: null,
+          occupation: '自営業',
+          age_bracket: '50代',
+        }],
+      })
+
+      expect(graph.feedEntries).toContainEqual(expect.objectContaining({
+        kind: 'population_voice',
+        round: 2,
+        agent_id: 'citizen-3',
+        comment: '地域の声も反映してほしい。',
+      }))
+    })
+
     it('population_propagation_started の古い取得結果は reset 後に適用しない', async () => {
       const { useSocietyGraphStore } = await import('../../stores/societyGraphStore')
       const graph = useSocietyGraphStore()

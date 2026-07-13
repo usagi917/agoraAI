@@ -130,8 +130,8 @@ describe('SimulationPage', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-testid="simulation-primary-view"]').text()).toContain('Society Live')
-    // society mode uses consolidated 3-tab layout: 会話 / Progress / 分析
-    expect(wrapper.text()).toContain('会話')
+    // society mode uses consolidated 3-tab layout: Debate / Progress / 分析
+    expect(wrapper.text()).toContain('Debate')
     expect(wrapper.text()).toContain('分析')
     expect(wrapper.text()).not.toContain('Colonies')
   })

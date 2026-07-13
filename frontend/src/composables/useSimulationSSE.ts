@@ -131,6 +131,7 @@ export function useSimulationSSE(simulationId: string) {
       'meeting_dialogue',
       'meeting_round_completed',
       'meeting_completed',
+      'population_voice',
       // KG Evolution イベント
       'kg_evolution',
       // 認知シミュレーション イベント
@@ -865,6 +866,12 @@ export function useSimulationSSE(simulationId: string) {
           track: 'phase',
           status: 'completed',
         })
+        break
+
+      case 'population_voice':
+        societyGraphStore.appendPopulationVoices(
+          payload as Parameters<typeof societyGraphStore.appendPopulationVoices>[0],
+        )
         break
 
       case 'society_social_graph_ready':

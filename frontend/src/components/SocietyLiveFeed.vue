@@ -3,19 +3,11 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useSocietyGraphStore, type FeedEntry } from '../stores/societyGraphStore'
 import { useSimulationStore } from '../stores/simulationStore'
 import { getStanceColor } from '../constants/stances'
+import { resolveAgentByName } from '../utils/agentNameResolver'
 
 type Side = 'left' | 'right' | 'center'
 
-/** Content-derived display metadata; stable per FeedEntry id, so it is memoized. */
-interface DisplayMeta {
-  stanceClass: string
-  stanceColor: string
-  fromColor: string
-  toColor: string
-  body: string
-}
-
-interface DisplayEntry extends FeedEntry, DisplayMeta {
+interface DisplayEntry extends FeedEntry {
   side: Side
 }
 
@@ -26,9 +18,35 @@ const LIVE_STATUSES = new Set(['running', 'generating_report', 'connecting'])
 
 const societyGraphStore = useSocietyGraphStore()
 const simulationStore = useSimulationStore()
+const emit = defineEmits<{
+  (e: 'select-agent', agentId: string): void
+  (e: 'highlight-edge', sourceId: string, targetId: string): void
+}>()
 
 const scrollEl = ref<HTMLElement | null>(null)
 const autoFollow = ref(true)
+const filterMode = ref<'all' | 'shifts_only'>('all')
+const filterAgentId = ref<string | null>(null)
+
+const agentOptions = computed(() => Array.from(societyGraphStore.liveAgents.values()).map((agent) => ({
+  id: agent.id,
+  name: agent.displayName,
+})))
+
+function resolveAgentId(name?: string): string | undefined {
+  if (!name) return undefined
+  return resolveAgentByName(societyGraphStore.liveAgents.values(), name)?.id
+}
+
+function selectNamedAgent(name?: string) {
+  if (name) emit('select-agent', resolveAgentId(name) ?? name)
+}
+
+function highlightAddressedEdge(entry: FeedEntry) {
+  const sourceId = resolveAgentId(entry.participant_name)
+  const targetId = resolveAgentId(entry.addressed_to)
+  if (sourceId && targetId) emit('highlight-edge', sourceId, targetId)
+}
 
 function deriveStanceClass(position?: string): string {
   if (!position) return 'stance-neutral'
@@ -43,43 +61,26 @@ function truncate(text: string | undefined, limit: number): string {
   return text.length > limit ? `${text.slice(0, limit)}…` : text
 }
 
-// Per-entry content metadata is expensive (stance colors + truncate) but stable
-// per id, so memoize it and only compute newly-arrived entries.
-const metaCache = new Map<string, DisplayMeta>()
-
-function metaFor(entry: FeedEntry): DisplayMeta {
-  const cached = metaCache.get(entry.id)
-  if (cached) return cached
-  const meta: DisplayMeta = {
-    stanceClass: deriveStanceClass(entry.position),
-    stanceColor: getStanceColor(entry.position),
-    fromColor: getStanceColor(entry.from),
-    toColor: getStanceColor(entry.to),
-    body: truncate(entry.argument, BODY_LIMIT),
-  }
-  metaCache.set(entry.id, meta)
-  return meta
-}
-
 const displayEntries = computed<DisplayEntry[]>(() => {
-  const entries = societyGraphStore.feedEntries
+  const entries = societyGraphStore.feedEntries.filter((entry) => {
+    if (
+      filterMode.value === 'shifts_only'
+      && (entry.kind === 'dialogue' || entry.kind === 'population_voice')
+    ) return false
+    if (!filterAgentId.value || entry.kind === 'round') return true
+    if (entry.kind === 'population_voice') return false
+    const relatedName = entry.kind === 'dialogue' ? entry.participant_name : entry.participant
+    return resolveAgentId(relatedName) === filterAgentId.value
+  })
   let sideCount = 0
-  const result = entries.map((entry) => {
+  return entries.map((entry) => {
     let side: Side = 'center'
     if (entry.kind !== 'round') {
       side = sideCount % 2 === 0 ? 'left' : 'right'
       sideCount++
     }
-    return { ...entry, side, ...metaFor(entry) }
+    return { ...entry, side }
   })
-  // Drop cache entries for ids that trimmed out of the (capped) buffer.
-  if (metaCache.size > entries.length * 2) {
-    const live = new Set(entries.map((e) => e.id))
-    for (const id of metaCache.keys()) {
-      if (!live.has(id)) metaCache.delete(id)
-    }
-  }
-  return result
 })
 
 // Only render the tail; keeps DOM node count bounded under high-frequency streaming.
@@ -145,6 +146,19 @@ onBeforeUnmount(() => {
       </span>
     </div>
 
+    <div class="feed-filters">
+      <select v-model="filterMode" class="feed-filter-select feed-filter-mode">
+        <option value="all">全発言</option>
+        <option value="shifts_only">スタンス変化のみ</option>
+      </select>
+      <select v-model="filterAgentId" class="feed-filter-select feed-filter-agent">
+        <option :value="null">全員</option>
+        <option v-for="agent in agentOptions" :key="agent.id" :value="agent.id">
+          {{ agent.name }}
+        </option>
+      </select>
+    </div>
+
     <div ref="scrollEl" class="feed-scroll" @scroll="onScroll">
       <div v-if="displayEntries.length === 0" class="feed-empty">
         議論の発言・スタンス変化を待機中...
@@ -170,29 +184,57 @@ onBeforeUnmount(() => {
             <div v-else-if="entry.kind === 'stance_shift'" class="feed-card feed-stance-shift">
               <div class="shift-head">
                 <span class="shift-icon" aria-hidden="true">◉</span>
-                <span class="shift-participant">{{ entry.participant }}</span>
+                <button class="shift-participant feed-person-button" type="button" @click="selectNamedAgent(entry.participant)">
+                  {{ entry.participant }}
+                </button>
               </div>
               <div class="shift-transition">
-                <span class="shift-chip shift-from" :style="{ '--chip-color': entry.fromColor }">{{ entry.from }}</span>
+                <span class="shift-chip shift-from" :style="{ '--chip-color': getStanceColor(entry.from) }">{{ entry.from }}</span>
                 <span class="shift-arrow" aria-hidden="true">→</span>
-                <span class="shift-chip shift-to" :style="{ '--chip-color': entry.toColor }">{{ entry.to }}</span>
+                <span class="shift-chip shift-to" :style="{ '--chip-color': getStanceColor(entry.to) }">{{ entry.to }}</span>
               </div>
               <p v-if="entry.reason" class="shift-reason">{{ entry.reason }}</p>
             </div>
 
-            <!-- Dialogue -->
-            <div
-              v-else
-              class="feed-card feed-dialogue"
-              :class="entry.stanceClass"
-              :style="{ '--stance-color': entry.stanceColor }"
+            <!-- Population voice -->
+            <button
+              v-else-if="entry.kind === 'population_voice'"
+              class="feed-card feed-population-voice"
+              type="button"
+              :style="{ '--stance-color': getStanceColor(entry.stance) }"
+              @click="entry.agent_id && emit('select-agent', entry.agent_id)"
             >
               <div class="feed-card-head">
-                <span class="feed-speaker">{{ entry.participant_name }}</span>
-                <span v-if="entry.addressed_to" class="feed-addressed">→ {{ entry.addressed_to }}</span>
+                <span class="feed-voice-badge">市民の声</span>
+                <span class="feed-voice-person">{{ [entry.age_bracket, entry.occupation].filter(Boolean).join('・') }}</span>
+              </div>
+              <div class="feed-voice-stance">
+                <template v-if="entry.prev_stance != null">
+                  <span :style="{ color: getStanceColor(entry.prev_stance) }">{{ entry.prev_stance }}</span>
+                  <span aria-hidden="true">→</span>
+                </template>
+                <span :style="{ color: getStanceColor(entry.stance) }">{{ entry.stance }}</span>
+              </div>
+              <p class="feed-body">{{ truncate(entry.comment, BODY_LIMIT) }}</p>
+            </button>
+
+            <!-- Dialogue -->
+            <div
+              v-else-if="entry.kind === 'dialogue'"
+              class="feed-card feed-dialogue"
+              :class="deriveStanceClass(entry.position)"
+              :style="{ '--stance-color': getStanceColor(entry.position) }"
+            >
+              <div class="feed-card-head">
+                <button class="feed-speaker feed-person-button" type="button" @click="selectNamedAgent(entry.participant_name)">
+                  {{ entry.participant_name }}
+                </button>
+                <button v-if="entry.addressed_to" class="feed-addressed feed-person-button" type="button" @click="highlightAddressedEdge(entry)">
+                  → {{ entry.addressed_to }}
+                </button>
                 <span v-if="entry.position" class="feed-position">{{ entry.position }}</span>
               </div>
-              <p class="feed-body">{{ entry.body }}</p>
+              <p class="feed-body">{{ truncate(entry.argument, BODY_LIMIT) }}</p>
             </div>
           </div>
         </TransitionGroup>
@@ -252,6 +294,21 @@ onBeforeUnmount(() => {
 .feed-status.live {
   color: var(--success);
   background: rgba(34, 197, 94, 0.12);
+}
+
+.feed-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.feed-filter-select {
+  min-width: 8rem;
+  padding: 0.3rem 0.5rem;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
 }
 
 .feed-scroll {
@@ -348,6 +405,18 @@ onBeforeUnmount(() => {
   font-size: var(--text-xs);
 }
 
+.feed-person-button {
+  padding: 0;
+  color: inherit;
+  background: none;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.feed-person-button:hover {
+  text-decoration: underline;
+}
+
 /* Dialogue */
 .feed-dialogue {
   border-left: 3px solid var(--stance-color, var(--accent));
@@ -385,6 +454,38 @@ onBeforeUnmount(() => {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Population voices are intentionally quieter than council dialogue. */
+.feed-population-voice {
+  display: block;
+  width: 100%;
+  text-align: left;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+  border-color: color-mix(in srgb, var(--border) 72%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--stance-color, var(--border)) 55%, transparent);
+  cursor: pointer;
+  opacity: 0.86;
+}
+.feed-voice-badge {
+  padding: 0.05rem 0.35rem;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.56rem;
+}
+.feed-voice-person,
+.feed-voice-stance {
+  font-size: 0.62rem;
+}
+.feed-voice-stance {
+  display: flex;
+  gap: 0.3rem;
+  margin-bottom: 0.25rem;
+}
+.feed-population-voice .feed-body {
+  font-size: 0.66rem;
 }
 
 /* Stance shift */

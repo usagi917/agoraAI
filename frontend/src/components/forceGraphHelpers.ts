@@ -50,6 +50,16 @@ export const TYPE_COLORS: Record<string, string> = {
   default: '#aab4d6',
 }
 
+export const RELATION_EDGE_COLORS: Record<string, string> = {
+  friend: '#5aa0c8',
+  family: '#c9a373',
+  colleague: '#6faa8f',
+  neighbor: '#5fa0a6',
+  acquaintance: '#8593a8',
+  mentions: '#8a7fbf',
+  default: '#7c8aa0',
+}
+
 const NODE_PROP_KEYS = [
   'id',
   'label',
@@ -160,7 +170,7 @@ export function spawnProgress(spawnedAt: number | undefined, now: number): numbe
 }
 
 export function linkWidth(weight: number | null | undefined): number {
-  return 0.35 + clamp01(weight) * 0.6
+  return 0.5 + clamp01(weight) * 0.7
 }
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
@@ -184,8 +194,9 @@ export function withAlpha(color: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${a})`
 }
 
-export function linkColor(_relation_type: string, weight: number | null | undefined, dimmed: boolean): string {
-  return withAlpha('#8a96c8', dimmed ? 0.03 : 0.06 + clamp01(weight) * 0.1)
+export function linkColor(relation_type: string, weight: number | null | undefined, dimmed: boolean): string {
+  const color = RELATION_EDGE_COLORS[relation_type] ?? RELATION_EDGE_COLORS.default
+  return withAlpha(color, dimmed ? 0.04 : 0.14 + clamp01(weight) * 0.14)
 }
 
 export interface GraphPhysics {

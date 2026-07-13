@@ -316,7 +316,6 @@ describe('societyGraphStore', () => {
       expect(dialogues[0].position).toBe('賛成')
       expect(dialogues[0].addressed_to).toBe('佐藤花子')
       expect(dialogues[0].round).toBe(1)
-      expect(typeof dialogues[0].receivedAt).toBe('number')
     })
 
     it('retains feed entries across round changes and inserts a round marker', () => {
@@ -357,6 +356,73 @@ describe('societyGraphStore', () => {
       expect(shifts[0].from).toBe('中立')
       expect(shifts[0].to).toBe('賛成')
       expect(shifts[0].reason).toBe('議論で納得した')
+    })
+
+    it('appends population_voice entries with every contracted field', () => {
+      const store = useSocietyGraphStore()
+
+      store.appendPopulationVoices({
+        round: 3,
+        voices: [
+          {
+            agent_id: 'citizen-42',
+            agent_index: 42,
+            comment: '暮らしへの影響を慎重に見たいです。',
+            stance: '条件付き賛成',
+            prev_stance: '中立',
+            occupation: '会社員',
+            age_bracket: '40代',
+          },
+          {
+            agent_id: 'citizen-7',
+            agent_index: 7,
+            comment: '将来世代への投資に賛成です。',
+            stance: '賛成',
+            prev_stance: null,
+            occupation: '学生',
+            age_bracket: '20代',
+          },
+        ],
+      })
+
+      const voices = store.feedEntries.filter((entry) => entry.kind === 'population_voice')
+      expect(voices).toHaveLength(2)
+      expect(voices[0]).toMatchObject({
+        kind: 'population_voice',
+        round: 3,
+        agent_id: 'citizen-42',
+        agent_index: 42,
+        comment: '暮らしへの影響を慎重に見たいです。',
+        stance: '条件付き賛成',
+        prev_stance: '中立',
+        occupation: '会社員',
+        age_bracket: '40代',
+      })
+      expect(voices[1].prev_stance).toBeNull()
+    })
+
+    it('caps population_voice entries at 300 and clears them on reset', () => {
+      const store = useSocietyGraphStore()
+
+      store.appendPopulationVoices({
+        round: 4,
+        voices: Array.from({ length: 350 }, (_, index) => ({
+          agent_id: `citizen-${index}`,
+          agent_index: index,
+          comment: `voice-${index}`,
+          stance: '中立',
+          prev_stance: null,
+          occupation: '会社員',
+          age_bracket: '30代',
+        })),
+      })
+
+      expect(store.feedEntries).toHaveLength(300)
+      expect(store.feedEntries[0].agent_id).toBe('citizen-50')
+      expect(store.feedEntries[299].comment).toBe('voice-349')
+
+      store.reset()
+      expect(store.feedEntries).toHaveLength(0)
     })
 
     it('does not add a duplicate dialogue entry', () => {

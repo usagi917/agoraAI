@@ -395,9 +395,10 @@ function getPipelineStageLabel(stage: string) {
     <details class="how-it-works">
       <summary class="how-it-works-summary">仕組みを見る</summary>
       <div class="phase-workflow">
-        <div class="phase-step"><span class="phase-num">01</span><strong>Society Pulse</strong> — 1,000人のAIエージェントから意見を収集</div>
-        <div class="phase-step"><span class="phase-num">02</span><strong>Council</strong> — 10人の代表者が3ラウンドの議論</div>
-        <div class="phase-step"><span class="phase-num">03</span><strong>Synthesis</strong> — エビデンス付きのDecision Briefを生成</div>
+        <div class="phase-step"><span class="phase-num">01</span><strong>問いを入力</strong> — 自由入力や質問例を選び、必要に応じて根拠文書を添付</div>
+        <div class="phase-step"><span class="phase-num">02</span><strong>社会反応を測定</strong> — 1,000人のデジタル住民を生成し、意見とスタンスを集約</div>
+        <div class="phase-step"><span class="phase-num">03</span><strong>分析モード別に深掘り</strong> — 標準は代表評議会、検証強化は論点抽出と介入比較を実行</div>
+        <div class="phase-step"><span class="phase-num">04</span><strong>判断材料を生成</strong> — 進捗をリアルタイムに可視化し、根拠・反対意見・次のアクションを整理</div>
       </div>
     </details>
 

@@ -56,11 +56,14 @@ async function runPopulationHarness(populationSize: number) {
   }
 
   const stanceOf = new Map<number, string>()
-  let frontier: number[] = []
-  for (let i = 0; i < Math.min(101, populationSize); i++) {
-    stanceOf.set(i, STANCES[i % STANCES.length])
-    frontier.push(i)
+  const anchorCount = Math.min(101, populationSize)
+  const anchors = new Set<number>()
+  for (let i = 0; i < anchorCount; i++) {
+    const anchor = Math.floor(i * populationSize / anchorCount)
+    anchors.add(anchor)
+    stanceOf.set(anchor, STANCES[i % STANCES.length])
   }
+  let frontier = [...anchors]
 
   for (let round = 0; round < 8 && frontier.length; round++) {
     if (cancelled) return
@@ -172,7 +175,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div style="position: fixed; inset: 0">
+  <div style="position: fixed; inset: 60px 0 0">
     <LiveSocietyGraph simulation-id="dev-sim" />
   </div>
 </template>

@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1.0] - 2026-07-13
+
+### Changed
+- Social-graph edges now render in their relation-type color with higher base opacity, so on-canvas edges match the legend
+- Conditional stance colors shifted to lime (条件付き賛成) and orange (条件付き反対) so they stay distinguishable from 賛成/反対 through the node glow
+- Graph dev harness (`/__dev__/graph?pop=N`) scatters propagation anchors across the whole population so the demo wave sweeps the entire field
+
+### Fixed
+- Dev graph page overlays (phase badge, layer toggles) no longer hide behind the app header
+
 ## [0.2.0.0] - 2026-07-05
 
 ### Added

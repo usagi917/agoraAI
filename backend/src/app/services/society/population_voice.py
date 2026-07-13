@@ -7,7 +7,6 @@ import random
 from src.app.services.society.age_utils import age_bracket_5
 from src.app.services.society.constants import STANCE_ORDER
 
-
 _STANCE_PHRASES: dict[str, tuple[str, str, str, str]] = {
     "賛成": (
         "この案には賛成です", "これは進める価値があると思います", "私は支持します", "ぜひ実現してほしいです",

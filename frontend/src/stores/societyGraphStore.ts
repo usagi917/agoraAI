@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type { GraphNode, GraphEdge } from './graphStore'
 import type { SocialGraphNode, SocialGraphEdge } from '../api/client'
 import { useKGEvolutionStore } from './kgEvolutionStore'
+import { resolveAgentByName } from '../utils/agentNameResolver'
 
 type LiveAgentStatus = 'selected' | 'activating' | 'activated' | 'speaking' | 'idle'
 
@@ -91,12 +92,10 @@ export const POPULATION_EDGE_DISPLAY_CAP = 12000
  */
 export interface FeedEntry {
   id: string
-  kind: 'dialogue' | 'stance_shift' | 'round'
+  kind: 'dialogue' | 'stance_shift' | 'round' | 'population_voice'
   round: number
-  receivedAt: number
   // dialogue
   participant_name?: string
-  role?: string
   position?: string
   argument?: string
   addressed_to?: string
@@ -107,6 +106,14 @@ export interface FeedEntry {
   reason?: string
   // round
   round_name?: string
+  // population_voice
+  agent_id?: string
+  agent_index?: number
+  comment?: string
+  stance?: string
+  prev_stance?: string | null
+  occupation?: string
+  age_bracket?: string
 }
 
 const FEED_MAX = 300
@@ -307,7 +314,6 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
       id: `round-${round}-${feedSeq++}`,
       kind: 'round',
       round,
-      receivedAt: Date.now(),
       round_name: roundName,
     })
   }
@@ -319,9 +325,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
       id,
       kind: 'dialogue',
       round,
-      receivedAt: Date.now(),
       participant_name: arg.participant_name,
-      role: arg.role,
       position: arg.position,
       argument: arg.argument,
       addressed_to: arg.addressed_to,
@@ -652,6 +656,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     // Dedup by content key (participant/from/to/round) so a re-sent meeting_completed
     // does not double-record; the feedSeq-based id stays unique for the :key.
     const round = currentRound.value
+    const events: StanceShiftEvent[] = []
     for (const shift of shifts) {
       const isDuplicate = feedEntries.value.some((e) =>
         e.kind === 'stance_shift'
@@ -660,42 +665,61 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
         && e.from === shift.from
         && e.to === shift.to,
       )
-      if (isDuplicate) continue
-      _pushFeedEntry({
-        id: `stance-${shift.participant}-${shift.from}-${shift.to}-${feedSeq++}`,
-        kind: 'stance_shift',
-        round,
-        receivedAt: Date.now(),
-        participant: shift.participant,
-        from: shift.from,
-        to: shift.to,
-        reason: shift.reason,
-      })
-    }
+      if (!isDuplicate) {
+        _pushFeedEntry({
+          id: `stance-${shift.participant}-${shift.from}-${shift.to}-${feedSeq++}`,
+          kind: 'stance_shift',
+          round,
+          participant: shift.participant,
+          from: shift.from,
+          to: shift.to,
+          reason: shift.reason,
+        })
+      }
 
-    const events: StanceShiftEvent[] = []
-    for (const shift of shifts) {
-      // 参加者名からagentIdを検索
-      for (const agent of liveAgents.value.values()) {
-        const nameMatch = agent.displayName === shift.participant
-          || agent.label.includes(shift.participant)
-          || shift.participant.includes(agent.occupation)
-        if (nameMatch) {
-          events.push({
-            agentId: agent.id,
-            fromStance: shift.from,
-            toStance: shift.to,
-            reason: shift.reason,
-          })
-          // スタンスも実際に更新
-          agent.stance = shift.to
-          break
-        }
+      const agent = resolveAgentByName(liveAgents.value.values(), shift.participant)
+      if (agent) {
+        events.push({
+          agentId: agent.id,
+          fromStance: shift.from,
+          toStance: shift.to,
+          reason: shift.reason,
+        })
+        // スタンスも実際に更新
+        agent.stance = shift.to
       }
     }
     if (events.length) {
       pendingStanceShifts.value = events
       liveAgents.value = new Map(liveAgents.value)
+    }
+  }
+
+  function appendPopulationVoices(payload: {
+    round: number
+    voices: Array<{
+      agent_id: string
+      agent_index: number
+      comment: string
+      stance: string
+      prev_stance: string | null
+      occupation: string
+      age_bracket: string
+    }>
+  }) {
+    for (const voice of payload.voices) {
+      _pushFeedEntry({
+        id: `voice-${voice.agent_id}-${payload.round}-${feedSeq++}`,
+        kind: 'population_voice',
+        round: payload.round,
+        agent_id: voice.agent_id,
+        agent_index: voice.agent_index,
+        comment: voice.comment,
+        stance: voice.stance,
+        prev_stance: voice.prev_stance,
+        occupation: voice.occupation,
+        age_bracket: voice.age_bracket,
+      })
     }
   }
 
@@ -876,6 +900,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     completeMeetingRound,
     clearSpeaking,
     addStanceShifts,
+    appendPopulationVoices,
     clearStanceShifts,
     updateStancesFromPropagation,
     setPopulationNetwork,

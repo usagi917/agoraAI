@@ -10,7 +10,7 @@ import NodeDetailPanel from './NodeDetailPanel.vue'
 import TemporalSlider from './TemporalSlider.vue'
 import ForceGraph2D from './ForceGraph2D.vue'
 import GraphSettingsPanel from './GraphSettingsPanel.vue'
-import { DEFAULT_PHYSICS, type GraphPhysics } from './forceGraphHelpers'
+import { DEFAULT_PHYSICS, RELATION_EDGE_COLORS, type GraphPhysics } from './forceGraphHelpers'
 import { derivePulseUpdate, type PulseCursor } from './liveGraphPulses'
 
 interface GraphEdgePayload {
@@ -22,13 +22,13 @@ interface GraphEdgePayload {
 }
 
 const RELATION_TYPE_STYLES: Record<string, { color: string; width: number; particleColor: string }> = {
-  friend: { color: '#5aa0c8', width: 1.4, particleColor: '#8fc4e0' },
-  family: { color: '#c9a373', width: 1.6, particleColor: '#e0c9a0' },
-  colleague: { color: '#6faa8f', width: 1.2, particleColor: '#a0cbb8' },
-  neighbor: { color: '#5fa0a6', width: 1.1, particleColor: '#94cbcf' },
-  acquaintance: { color: '#8593a8', width: 0.9, particleColor: '#b8c2d0' },
-  mentions: { color: '#8a7fbf', width: 1.0, particleColor: '#b8aed8' },
-  default: { color: '#7c8aa0', width: 1.0, particleColor: '#b0bccc' },
+  friend: { color: RELATION_EDGE_COLORS.friend, width: 1.4, particleColor: '#8fc4e0' },
+  family: { color: RELATION_EDGE_COLORS.family, width: 1.6, particleColor: '#e0c9a0' },
+  colleague: { color: RELATION_EDGE_COLORS.colleague, width: 1.2, particleColor: '#a0cbb8' },
+  neighbor: { color: RELATION_EDGE_COLORS.neighbor, width: 1.1, particleColor: '#94cbcf' },
+  acquaintance: { color: RELATION_EDGE_COLORS.acquaintance, width: 0.9, particleColor: '#b8c2d0' },
+  mentions: { color: RELATION_EDGE_COLORS.mentions, width: 1.0, particleColor: '#b8aed8' },
+  default: { color: RELATION_EDGE_COLORS.default, width: 1.0, particleColor: '#b0bccc' },
 }
 
 const props = defineProps<{

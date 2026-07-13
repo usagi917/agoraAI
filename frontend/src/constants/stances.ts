@@ -4,9 +4,9 @@ type StanceLabel = typeof STANCE_ORDER[number]
 
 export const STANCE_COLORS: Record<string, string> = {
   '賛成': '#22c55e',
-  '条件付き賛成': '#86efac',
+  '条件付き賛成': '#a3e635',
   '中立': '#a3a3a3',
-  '条件付き反対': '#fca5a5',
+  '条件付き反対': '#f97316',
   '反対': '#ef4444',
 }
 

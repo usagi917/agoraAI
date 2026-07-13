@@ -108,20 +108,20 @@ describe('layoutRules', () => {
         mode: 'society_first',
         hasColonies: true,
         hasActivity: true,
-      })).toEqual(['conversations', 'progress', 'analysis', 'debate'])
+      })).toEqual(['debate', 'progress', 'analysis'])
       expect(getDefaultLiveSecondaryTab({
         mode: 'society_first',
         hasColonies: true,
         hasActivity: true,
-      })).toBe('conversations')
+      })).toBe('debate')
     })
 
     it('uses consolidated tabs for all society modes', () => {
       for (const mode of ['quick', 'standard', 'deep', 'research', 'society', 'unified', 'meta_simulation']) {
         expect(getLiveSecondaryTabs({ mode, hasColonies: false, hasActivity: false }))
-          .toEqual(['conversations', 'progress', 'analysis', 'debate'])
+          .toEqual(['debate', 'progress', 'analysis'])
         expect(getDefaultLiveSecondaryTab({ mode, hasColonies: false, hasActivity: false }))
-          .toBe('conversations')
+          .toBe('debate')
       }
     })
 

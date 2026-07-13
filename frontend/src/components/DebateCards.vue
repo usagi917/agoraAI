@@ -24,9 +24,9 @@ function resolveAgentId(rawId: string): string {
 
 const stanceColor: Record<string, string> = {
   '賛成': 'var(--success)',
-  '条件付き賛成': '#86efac',
+  '条件付き賛成': '#a3e635',
   '中立': 'var(--text-muted)',
-  '条件付き反対': '#fca5a5',
+  '条件付き反対': '#f97316',
   '反対': 'var(--danger)',
 }
 
