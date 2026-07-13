@@ -8,6 +8,7 @@ Swarm Intelligence Pipeline:
   → Meeting → Evaluation → Narrative → Memory/Graph Evolution
 """
 
+import inspect
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -23,6 +24,11 @@ from src.app.models.population import Population
 from src.app.models.simulation import Simulation
 from src.app.models.social_edge import SocialEdge
 from src.app.models.society_result import SocietyResult
+from src.app.services.graph_activity import (
+    GraphActivityCreate,
+    persist_graph_activity_events,
+    propagation_changes_to_graph_events,
+)
 from src.app.services.scenario_pair_status import refresh_scenario_pair_status
 from src.app.services.society.activation_layer import _aggregate_opinions, run_activation
 from src.app.services.society.agent_selector import select_agents
@@ -32,7 +38,10 @@ from src.app.services.society.deliberation_quality import compute_dqi, measure_o
 from src.app.services.society.demographic_analyzer import analyze_demographics
 from src.app.services.society.emergence_tracker import EmergenceTracker
 from src.app.services.society.evaluation import evaluate_society_simulation
-from src.app.services.society.graph_evolution import evolve_social_graph
+from src.app.services.society.graph_evolution import (
+    evolve_social_graph,
+    relationship_changes_to_graph_events,
+)
 from src.app.services.society.meeting_layer import enrich_meeting_with_clusters, run_meeting
 from src.app.services.society.meeting_report import generate_meeting_report
 from src.app.services.society.memory_compressor import update_agent_memories
@@ -750,6 +759,17 @@ async def _phase_network_propagation(
         })
 
         async def on_propagation_timestep(record):
+            graph_events = propagation_changes_to_graph_events(
+                getattr(record, "changes", []),
+                phase="network_propagation",
+                round=record.timestep,
+                stance_source_key="target_id",
+            )
+            await persist_graph_activity_events(
+                session,
+                simulation_id,
+                graph_events,
+            )
             await sse_manager.publish(simulation_id, "propagation_timestep", {
                 "timestep": record.timestep,
                 "opinion_distribution": record.opinion_distribution,
@@ -1054,10 +1074,16 @@ async def _phase_meeting(ctx: "SocietyRunContext", session, total_usage: dict) -
             responses_with_ids,
         )
 
+    meeting_kwargs = {
+        "simulation_id": simulation_id,
+        "num_rounds": 3,
+    }
+    if "session" in inspect.signature(run_meeting).parameters:
+        meeting_kwargs["session"] = session
     meeting_result = await run_meeting(
-        meeting_participants, theme,
-        simulation_id=simulation_id,
-        num_rounds=3,
+        meeting_participants,
+        theme,
+        **meeting_kwargs,
     )
 
     total_usage["prompt_tokens"] += meeting_result["usage"].get("prompt_tokens", 0)
@@ -1391,8 +1417,16 @@ async def _phase_persistent_society(ctx: "SocietyRunContext", session, theme_est
         accuracy_flags=_acc_flags,
     )
 
-    await evolve_social_graph(
+    evolution_result = await evolve_social_graph(
         session, pop_id, ctx.meeting_result, ctx.meeting_participants,
+    )
+    await persist_graph_activity_events(
+        session,
+        simulation_id,
+        relationship_changes_to_graph_events(
+            evolution_result,
+            len(ctx.meeting_result.get("rounds", [])),
+        ),
     )
 
     # ソーシャルグラフ準備完了を通知
@@ -1481,6 +1515,15 @@ async def run_society(simulation_id: str) -> None:
 
         try:
             # === Phase 1: Population ===
+            await persist_graph_activity_events(
+                session,
+                simulation_id,
+                [GraphActivityCreate(
+                    phase="population",
+                    kind="phase_changed",
+                    payload={"phase": "population"},
+                )],
+            )
             await sse_manager.publish(simulation_id, "society_started", {
                 "simulation_id": simulation_id,
                 "theme": theme[:100],
@@ -1527,6 +1570,30 @@ async def run_society(simulation_id: str) -> None:
                     for i, a in enumerate(selected_agents)
                 ],
             })
+            await persist_graph_activity_events(
+                session,
+                simulation_id,
+                [
+                    GraphActivityCreate(
+                        phase="selection",
+                        kind="phase_changed",
+                        payload={"phase": "selection"},
+                    ),
+                    *[
+                        GraphActivityCreate(
+                            phase="selection",
+                            kind="node_status",
+                            source_id=agent.get("id"),
+                            payload={
+                                "status": "selected",
+                                "agent_index": agent.get("agent_index", index),
+                            },
+                        )
+                        for index, agent in enumerate(selected_agents)
+                        if agent.get("id")
+                    ],
+                ],
+            )
 
             # === Phase 2.7: Grounding ===
             grounding_facts = _phase_grounding(theme, selected_agents)
@@ -1549,6 +1616,15 @@ async def run_society(simulation_id: str) -> None:
             await sse_manager.publish(simulation_id, "society_activation_started", {
                 "agent_count": len(selected_agents),
             })
+            await persist_graph_activity_events(
+                session,
+                simulation_id,
+                [GraphActivityCreate(
+                    phase="activation",
+                    kind="phase_changed",
+                    payload={"phase": "activation"},
+                )],
+            )
 
             async def on_progress(completed: int, total: int):
                 await sse_manager.publish(simulation_id, "society_activation_progress", {
@@ -1640,6 +1716,23 @@ async def run_society(simulation_id: str) -> None:
                 "selected_agent_ids": selected_agent_ids,
                 "usage": activation_result["usage"],
             })
+            await persist_graph_activity_events(
+                session,
+                simulation_id,
+                [
+                    GraphActivityCreate(
+                        phase="activation",
+                        kind="node_status",
+                        source_id=response["agent_id"],
+                        payload={
+                            "status": "activated",
+                            "stance": response["stance"],
+                            "confidence": response["confidence"],
+                        },
+                    )
+                    for response in individual_responses
+                ],
+            )
 
             ctx = SocietyRunContext(
                 simulation_id=simulation_id,
@@ -1735,6 +1828,16 @@ async def run_society(simulation_id: str) -> None:
                 "time_axis_available": time_axis_available,
                 "usage": total_usage,
             })
+            await persist_graph_activity_events(
+                session,
+                simulation_id,
+                [GraphActivityCreate(
+                    phase="completed",
+                    round=len(ctx.meeting_result.get("rounds", [])),
+                    kind="phase_changed",
+                    payload={"phase": "completed"},
+                )],
+            )
 
             logger.info("Society simulation %s completed", simulation_id)
 

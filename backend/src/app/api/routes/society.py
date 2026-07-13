@@ -12,10 +12,13 @@ from src.app.api.deps import get_session
 from src.app.models.agent_profile import AgentProfile
 from src.app.models.conversation_log import ConversationLog
 from src.app.models.evaluation_result import EvaluationResult
+from src.app.models.graph_activity_event import GraphActivityEvent
 from src.app.models.population import Population
 from src.app.models.simulation import Simulation
 from src.app.models.social_edge import SocialEdge
 from src.app.models.society_result import SocietyResult
+from src.app.schemas.graph_activity import GraphActivityEventDTO
+from src.app.services.graph_activity import graph_activity_dto
 from src.app.services.society.population_generator import (
     generate_population,
     get_default_population_size,
@@ -428,12 +431,33 @@ async def get_social_graph(
                 response_map[aid] = resp
                 selected_agent_ids.append(aid)
 
+    # 活性化結果がまだ無いライブ初期状態では、永続 node_status から選抜集合を復元する。
+    if not selected_agent_ids:
+        status_result = await session.execute(
+            select(GraphActivityEvent)
+            .where(
+                GraphActivityEvent.simulation_id == sim_id,
+                GraphActivityEvent.kind == "node_status",
+                GraphActivityEvent.source_id.is_not(None),
+            )
+            .order_by(GraphActivityEvent.id)
+        )
+        seen_selected_ids: set[str] = set()
+        for event in status_result.scalars().all():
+            status = event.payload.get("status") if event.payload else None
+            if status not in {"selected", "activating", "activated", "speaking", "idle"}:
+                continue
+            if event.source_id and event.source_id not in seen_selected_ids:
+                selected_agent_ids.append(event.source_id)
+                seen_selected_ids.add(event.source_id)
+
     # 選抜済みエージェントのプロファイルを取得
     if selected_agent_ids:
         agents_result = await session.execute(
             select(AgentProfile).where(AgentProfile.id.in_(selected_agent_ids))
         )
-        agents = agents_result.scalars().all()
+        agents_by_id = {agent.id: agent for agent in agents_result.scalars().all()}
+        agents = [agents_by_id[agent_id] for agent_id in selected_agent_ids if agent_id in agents_by_id]
     else:
         # フォールバック: population の全エージェント（最大200）
         agents_result = await session.execute(
@@ -535,6 +559,93 @@ async def get_population_network(
         "edge_count": len(edges),
         "nodes": nodes,
         "edges": edges,
+    }
+
+
+@router.get(
+    "/simulations/{sim_id}/graph-events",
+    response_model=list[GraphActivityEventDTO],
+)
+async def get_graph_events(
+    sim_id: str,
+    after_id: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=1000),
+    session: AsyncSession = Depends(get_session),
+):
+    """カーソル以降の永続グラフイベントを ID 順で返す。"""
+    if await session.get(Simulation, sim_id) is None:
+        raise HTTPException(status_code=404, detail="シミュレーションが見つかりません")
+
+    result = await session.execute(
+        select(GraphActivityEvent)
+        .where(
+            GraphActivityEvent.simulation_id == sim_id,
+            GraphActivityEvent.id > after_id,
+        )
+        .order_by(GraphActivityEvent.id)
+        .limit(limit)
+    )
+    return [graph_activity_dto(event) for event in result.scalars().all()]
+
+
+@router.get("/simulations/{sim_id}/graph-state")
+async def get_graph_state(
+    sim_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """代表ノードと低詳細度人口層を同じ再生カーソルで返す。"""
+    simulation = await session.get(Simulation, sim_id)
+    if simulation is None:
+        raise HTTPException(status_code=404, detail="シミュレーションが見つかりません")
+
+    # このカーソルより後のイベントは、トポロジーに既に反映されていても
+    # クライアント側 reducer が冪等に再適用できる。先に固定することで欠落を防ぐ。
+    latest_result = await session.execute(
+        select(GraphActivityEvent)
+        .where(GraphActivityEvent.simulation_id == sim_id)
+        .order_by(GraphActivityEvent.id.desc())
+        .limit(1)
+    )
+    latest_event = latest_result.scalar_one_or_none()
+
+    if not simulation.population_id:
+        return {
+            "simulation_id": sim_id,
+            "population_id": None,
+            "nodes": [],
+            "edges": [],
+            "population_network": {
+                "population_id": None,
+                "node_count": 0,
+                "edge_count": 0,
+                "nodes": [],
+                "edges": [],
+            },
+            "current_phase": (
+                latest_event.phase
+                if latest_event is not None
+                else simulation.pipeline_stage or simulation.status
+            ),
+            "current_round": latest_event.round if latest_event is not None else 0,
+            "latest_event_id": latest_event.id if latest_event is not None else 0,
+        }
+
+    social_graph = await get_social_graph(sim_id, session)
+    population_network = await get_population_network(sim_id, session)
+
+    return {
+        "simulation_id": sim_id,
+        "population_id": social_graph["population_id"],
+        "nodes": social_graph["nodes"],
+        "edges": social_graph["edges"],
+        "population_network": population_network,
+        "current_phase": (
+            latest_event.phase
+            if latest_event is not None
+            else simulation.pipeline_stage or simulation.status
+        ),
+        "current_round": latest_event.round if latest_event is not None else 0,
+        "latest_event_id": latest_event.id if latest_event is not None else 0,
     }
 
 

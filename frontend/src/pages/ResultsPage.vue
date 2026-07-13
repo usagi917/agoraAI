@@ -42,10 +42,12 @@ import AgreementHeatmap from '../components/AgreementHeatmap.vue'
 import PropagationDashboard from '../components/PropagationDashboard.vue'
 import IntegratedReport from '../components/IntegratedReport.vue'
 import LiveSocietyGraph from '../components/LiveSocietyGraph.vue'
+import SocialGraphWorkspace from '../components/SocialGraphWorkspace.vue'
 import ForceGraph2D from '../components/ForceGraph2D.vue'
 import { useTimeAxis } from '../composables/useTimeAxis'
 import { useGraphStore } from '../stores/graphStore'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
+import { useSocialGraphTopologyStore } from '../stores/socialGraphTopologyStore'
 import { formatPercent } from '../utils/format'
 import {
   getDefaultResultsSecondaryTab,
@@ -61,6 +63,7 @@ const route = useRoute()
 const router = useRouter()
 const simId = route.params.id as string
 const societyGraphStore = useSocietyGraphStore()
+const socialGraphTopology = useSocialGraphTopologyStore()
 const graphStore = useGraphStore()
 
 const sim = ref<SimulationResponse | null>(null)
@@ -87,13 +90,19 @@ const graphView = computed<LivePrimaryView>(() =>
 )
 const isSocietyGraph = computed(() => graphView.value === 'society')
 const hasGraphData = computed(() =>
-  isSocietyGraph.value ? societyGraphStore.nodeCount > 0 : graphStore.nodes.length > 0,
+  isSocietyGraph.value
+    ? socialGraphTopology.selectedNodes.length > 0 || societyGraphStore.nodeCount > 0
+    : graphStore.nodes.length > 0,
 )
 const graphNodeCount = computed(() =>
-  isSocietyGraph.value ? societyGraphStore.nodeCount : graphStore.nodes.length,
+  isSocietyGraph.value
+    ? socialGraphTopology.selectedNodes.length || societyGraphStore.nodeCount
+    : graphStore.nodes.length,
 )
 const graphEdgeCount = computed(() =>
-  isSocietyGraph.value ? societyGraphStore.edgeCount : graphStore.edges.length,
+  isSocietyGraph.value
+    ? socialGraphTopology.socialEdges.length || societyGraphStore.edgeCount
+    : graphStore.edges.length,
 )
 
 const graphPanelOpenKey = `results-graph-open:${simId}`
@@ -882,12 +891,17 @@ function renderMarkdown(content: string): string {
           </div>
         </div>
         <div v-if="graphPanelOpen" class="results-graph-body" data-testid="results-graph-body">
-          <LiveSocietyGraph
-            v-if="isSocietyGraph && hasGraphData"
+          <SocialGraphWorkspace
+            v-if="isSocietyGraph"
             :simulation-id="simId"
-          />
+            mode="replay"
+          >
+            <template #legacy-fallback>
+              <LiveSocietyGraph :simulation-id="simId" />
+            </template>
+          </SocialGraphWorkspace>
           <ForceGraph2D
-            v-else-if="!isSocietyGraph && hasGraphData"
+            v-else-if="hasGraphData"
             :nodes="graphStore.nodes"
             :edges="graphStore.edges"
             :selected-node-id="null"

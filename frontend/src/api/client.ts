@@ -855,6 +855,27 @@ export interface SocialGraphResponse {
   population_id: string
 }
 
+export type GraphActivityKind =
+  | 'phase_changed'
+  | 'node_status'
+  | 'dialogue'
+  | 'influence'
+  | 'stance_shift'
+  | 'relationship_changed'
+
+export interface GraphActivityEvent {
+  id: number
+  simulation_id: string
+  occurred_at: string
+  phase: string
+  round: number
+  kind: GraphActivityKind
+  source_id?: string | null
+  target_id?: string | null
+  edge_id?: string | null
+  payload: Record<string, unknown>
+}
+
 export interface AgentConnection {
   id: string
   agent_id: string
@@ -945,12 +966,45 @@ export async function getSocialGraph(simId: string): Promise<SocialGraphResponse
 }
 
 export interface PopulationNetworkResponse {
-  population_id: string
+  population_id: string | null
   node_count: number
   edge_count: number
   nodes: Array<{ id: string; agent_index: number }>
   /** [source_index, target_index, strength] の圧縮形式 */
   edges: Array<[number, number, number]>
+}
+
+export interface GraphStateResponse extends Omit<SocialGraphResponse, 'population_id'> {
+  simulation_id: string
+  population_id: string | null
+  population_network: PopulationNetworkResponse
+  current_phase: string
+  current_round: number
+  latest_event_id: number
+}
+
+export async function getGraphState(
+  simId: string,
+  options?: { signal?: AbortSignal },
+): Promise<GraphStateResponse> {
+  const { data } = await api.get(`/society/simulations/${simId}/graph-state`, {
+    signal: options?.signal,
+  })
+  return data
+}
+
+export async function getGraphEvents(
+  simId: string,
+  options?: { afterId?: number; limit?: number; signal?: AbortSignal },
+): Promise<GraphActivityEvent[]> {
+  const { data } = await api.get(`/society/simulations/${simId}/graph-events`, {
+    params: {
+      after_id: options?.afterId ?? 0,
+      limit: options?.limit ?? 500,
+    },
+    signal: options?.signal,
+  })
+  return data
 }
 
 export async function getPopulationNetwork(

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { GraphNode, GraphEdge } from './graphStore'
-import type { SocialGraphNode, SocialGraphEdge } from '../api/client'
+import type { GraphActivityEvent, SocialGraphNode, SocialGraphEdge } from '../api/client'
 import { useKGEvolutionStore } from './kgEvolutionStore'
 import { resolveAgentByName } from '../utils/agentNameResolver'
 
@@ -68,7 +68,7 @@ interface StanceShiftEvent {
 
 /** GET /society/simulations/{id}/population-network のレスポンス */
 interface PopulationNetworkPayload {
-  population_id: string
+  population_id: string | null
   node_count: number
   edge_count: number
   nodes: Array<{ id: string; agent_index: number }>
@@ -836,6 +836,44 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     selectedEdge.value = edge
   }
 
+  /** 新しい永続イベント基盤から旧コンポーネントへ反映する互換ファサード。 */
+  function applyGraphActivityEvent(event: GraphActivityEvent) {
+    currentRound.value = event.round
+    if (event.kind === 'dialogue') {
+      appendMeetingDialogue(event.round, event.payload as unknown as MeetingArgument)
+      return
+    }
+    if (event.kind === 'node_status' || event.kind === 'stance_shift') {
+      const agent = event.source_id ? liveAgents.value.get(event.source_id) : undefined
+      if (!agent) return
+      if (event.kind === 'node_status') {
+        agent.status = String(event.payload.status ?? agent.status) as LiveAgentStatus
+        agent.confidence = Number(event.payload.confidence ?? agent.confidence)
+      }
+      const nextStance = event.payload.after_stance ?? event.payload.stance
+      if (typeof nextStance === 'string') agent.stance = nextStance
+      liveAgents.value = new Map(liveAgents.value)
+      return
+    }
+    if (event.kind === 'relationship_changed' && event.edge_id) {
+      const edgeIndex = liveEdges.value.findIndex((edge) => edge.id === event.edge_id)
+      const strength = Number(event.payload.after_strength ?? 0)
+      if (edgeIndex >= 0) {
+        liveEdges.value = liveEdges.value.map((edge, index) => (
+          index === edgeIndex ? { ...edge, strength } : edge
+        ))
+      } else if (event.source_id && event.target_id) {
+        liveEdges.value = [...liveEdges.value, {
+          id: event.edge_id,
+          source: event.source_id,
+          target: event.target_id,
+          relationType: String(event.payload.relation_type ?? 'acquaintance'),
+          strength,
+        }]
+      }
+    }
+  }
+
   function reset() {
     generation.value += 1
     liveAgents.value = new Map()
@@ -908,6 +946,7 @@ export const useSocietyGraphStore = defineStore('societyGraph', () => {
     applyPropagationRound,
     setHoveredEdge,
     setSelectedEdge,
+    applyGraphActivityEvent,
     reset,
   }
 })

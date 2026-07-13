@@ -2,17 +2,48 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import LiveSocietyGraph from '../components/LiveSocietyGraph.vue'
+import SocialGraphWorkspace from '../components/SocialGraphWorkspace.vue'
 import { useSocietyGraphStore, type PropagationChange } from '../stores/societyGraphStore'
 import { useSimulationStore } from '../stores/simulationStore'
-import type { SocialGraphNode, SocialGraphEdge } from '../api/client'
+import { useSocialGraphActivityStore } from '../stores/socialGraphActivityStore'
+import { useSocialGraphTopologyStore } from '../stores/socialGraphTopologyStore'
+import type {
+  GraphActivityEvent,
+  GraphActivityKind,
+  SocialGraphNode,
+  SocialGraphEdge,
+} from '../api/client'
 
 const societyGraphStore = useSocietyGraphStore()
 const simulationStore = useSimulationStore()
+const graphActivityStore = useSocialGraphActivityStore()
+const topologyStore = useSocialGraphTopologyStore()
 const route = useRoute()
 
 const STANCES = ['賛成', '条件付き賛成', '中立', '条件付き反対', '反対']
 const RELATIONS = ['friend', 'family', 'colleague', 'neighbor', 'acquaintance']
 let cancelled = false
+let graphEventId = 2
+
+function emitGraphActivity(
+  kind: GraphActivityKind,
+  phase: string,
+  options: Partial<GraphActivityEvent> = {},
+) {
+  const event: GraphActivityEvent = {
+    id: graphEventId++,
+    simulation_id: 'dev-sim',
+    occurred_at: `2026-07-13T00:00:${String(graphEventId).padStart(2, '0')}Z`,
+    phase,
+    round: options.round ?? 0,
+    kind,
+    source_id: options.source_id,
+    target_id: options.target_id,
+    edge_id: options.edge_id,
+    payload: options.payload ?? {},
+  }
+  graphActivityStore.receive(event, topologyStore.applyEvent)
+}
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
@@ -39,6 +70,13 @@ async function runPopulationHarness(populationSize: number) {
 
   if (cancelled) return
   societyGraphStore.setPopulationNetwork({
+    population_id: 'pop-dev',
+    node_count: nodes.length,
+    edge_count: edges.length,
+    nodes,
+    edges,
+  })
+  topologyStore.setPopulationNetwork({
     population_id: 'pop-dev',
     node_count: nodes.length,
     edge_count: edges.length,
@@ -125,10 +163,57 @@ onMounted(async () => {
 
   societyGraphStore.setSocialEdges(edges)
 
+  const earlyNodes = Array.from({ length: 101 }, (_, i) => ({
+    id: `agent-${i}`,
+    agent_index: i,
+    stance: '',
+    confidence: 0.5,
+    demographics: {
+      occupation: ['会社員', '自営業', '学生', '主婦', '医師'][i % 5],
+      age: 20 + (i % 60),
+      region: ['北海道', '東北', '関東', '関西', '九州'][i % 5],
+    },
+  })) as unknown as SocialGraphNode[]
+  topologyStore.hydrate({
+    simulation_id: 'dev-sim',
+    population_id: 'pop-dev',
+    nodes: earlyNodes,
+    edges,
+    population_network: {
+      population_id: 'pop-dev',
+      node_count: 0,
+      edge_count: 0,
+      nodes: [],
+      edges: [],
+    },
+    current_phase: 'selection',
+    current_round: 0,
+    latest_event_id: 1,
+  })
+  graphActivityStore.beginBuffering('dev-sim')
+  graphActivityStore.hydrateHistory([{
+    id: 1,
+    simulation_id: 'dev-sim',
+    occurred_at: '2026-07-13T00:00:01Z',
+    phase: 'population',
+    round: 0,
+    kind: 'phase_changed',
+    payload: { phase: 'population', agent_count: 10000 },
+  }], 1)
+  graphActivityStore.completeBuffering([], topologyStore.applyEvent)
+  emitGraphActivity('phase_changed', 'selection', { payload: { phase: 'selection' } })
+  for (let i = 0; i < 101; i++) {
+    emitGraphActivity('node_status', 'selection', {
+      source_id: `agent-${i}`,
+      payload: { status: 'selected', agent_index: i },
+    })
+  }
+
   // ?stage=early で「意見未確定・暖色グロー＋実エッジの輪」の初期状態を固定表示する
   if (route.query.stage === 'early') return
   await sleep(600)
   if (cancelled) return
+  emitGraphActivity('phase_changed', 'activation', { payload: { phase: 'activation' } })
 
   // 3. 活性化進捗 (SSE: society_activation_progress)
   for (let done = 10; done <= 101; done += 30) {
@@ -148,6 +233,16 @@ onMounted(async () => {
   })) as unknown as SocialGraphNode[]
 
   societyGraphStore.hydrateWithSocialGraph(nodes, edges)
+  for (const node of nodes) {
+    emitGraphActivity('node_status', 'activation', {
+      source_id: node.id,
+      payload: {
+        status: 'activated',
+        stance: node.stance,
+        confidence: node.confidence,
+      },
+    })
+  }
   await sleep(400)
   if (cancelled) return
 
@@ -159,6 +254,60 @@ onMounted(async () => {
     role: 'representative',
     argument: '結局のところ数字が示していることは…',
   })
+  emitGraphActivity('phase_changed', 'meeting', {
+    round: 3,
+    payload: { phase: 'meeting', round_name: '最終立場表明' },
+  })
+  emitGraphActivity('dialogue', 'meeting', {
+    round: 3,
+    source_id: 'agent-0',
+    target_id: 'agent-5',
+    edge_id: 'edge-0',
+    payload: {
+      participant_name: '松田 章太',
+      participant_index: 0,
+      argument: '結局のところ数字が示していることは…',
+      addressed_to: 'Agent-5',
+    },
+  })
+  await sleep(350)
+  if (cancelled) return
+  emitGraphActivity('influence', 'population_propagation', {
+    round: 4,
+    source_id: 'agent-0',
+    target_id: 'agent-5',
+    edge_id: 'edge-0',
+    payload: {
+      primary_influencer_id: 'agent-0',
+      before_stance: '中立',
+      after_stance: '条件付き賛成',
+      opinion_delta: 0.18,
+      edge_strength: 0.8,
+    },
+  })
+  emitGraphActivity('stance_shift', 'population_propagation', {
+    round: 4,
+    source_id: 'agent-5',
+    payload: {
+      before_stance: '中立',
+      after_stance: '条件付き賛成',
+      opinion_delta: 0.18,
+      reason: 'network propagation',
+    },
+  })
+  emitGraphActivity('relationship_changed', 'relationship_evolution', {
+    round: 4,
+    source_id: 'agent-0',
+    target_id: 'agent-5',
+    edge_id: 'edge-0',
+    payload: {
+      relation_type: 'friend',
+      before_strength: 0.4,
+      after_strength: 0.8,
+      delta: 0.4,
+      is_new: false,
+    },
+  })
 
   // 6. 全人口レイヤー（?pop=N 指定時のみ）
   const popSize = Number(route.query.pop)
@@ -167,6 +316,10 @@ onMounted(async () => {
     if (cancelled) return
     await runPopulationHarness(Math.min(popSize, 10000))
   }
+  emitGraphActivity('phase_changed', 'completed', {
+    round: 4,
+    payload: { phase: 'completed' },
+  })
 })
 
 onUnmounted(() => {
@@ -176,6 +329,10 @@ onUnmounted(() => {
 
 <template>
   <div style="position: fixed; inset: 60px 0 0">
-    <LiveSocietyGraph simulation-id="dev-sim" />
+    <SocialGraphWorkspace simulation-id="dev-sim" mode="live" :auto-bootstrap="false">
+      <template #legacy-fallback>
+        <LiveSocietyGraph simulation-id="dev-sim" />
+      </template>
+    </SocialGraphWorkspace>
   </div>
 </template>

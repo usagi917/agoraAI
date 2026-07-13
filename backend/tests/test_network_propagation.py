@@ -216,6 +216,63 @@ class TestRunNetworkPropagation:
         assert final_range < initial_range
 
     @pytest.mark.asyncio
+    async def test_single_stored_edge_influences_target_endpoint(self):
+        """An undirected edge stored once must influence an agent present only as target_id."""
+        agents = [
+            _make_agent(0, big_five_c=0.1),
+            _make_agent(1, big_five_c=0.1),
+        ]
+        responses = [
+            _make_response(0, "賛成", 1.0),
+            _make_response(1, "中立", 1.0),
+        ]
+
+        result = await run_network_propagation(
+            agents=agents,
+            initial_responses=responses,
+            edges=[_make_edge(0, 1, 0.9)],
+            theme="テスト政策",
+            max_timesteps=4,
+            confidence_threshold=1.0,
+        )
+
+        assert result.final_opinions[1][0] > 0.5
+
+    @pytest.mark.asyncio
+    async def test_timestep_change_reports_primary_influencer_deterministically(self):
+        agents = [_make_agent(index, big_five_c=0.1) for index in range(3)]
+        responses = [
+            _make_response(0, "賛成", 1.0),
+            _make_response(1, "賛成", 1.0),
+            _make_response(2, "中立", 1.0),
+        ]
+        edges = [
+            _make_edge(2, 1, 0.9),
+            _make_edge(2, 0, 0.9),
+        ]
+
+        result = await run_network_propagation(
+            agents=agents,
+            initial_responses=responses,
+            edges=edges,
+            theme="テスト政策",
+            max_timesteps=4,
+            confidence_threshold=1.0,
+        )
+
+        target_change = next(
+            change
+            for timestep in result.timestep_history
+            for change in timestep.changes
+            if change["target_id"] == "agent_2"
+        )
+        assert target_change["source_id"] == "agent_0"
+        assert target_change["before_stance"] == "中立"
+        assert target_change["after_stance"] in ("条件付き賛成", "賛成")
+        assert target_change["opinion_delta"] > 0
+        assert target_change["edge_strength"] == pytest.approx(0.9)
+
+    @pytest.mark.asyncio
     async def test_propagation_respects_max_timesteps(self):
         """Should not exceed max_timesteps."""
         agents = [_make_agent(i) for i in range(3)]

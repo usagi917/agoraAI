@@ -24,6 +24,7 @@ import ActivityFeed from '../components/ActivityFeed.vue'
 import SocietyProgress from '../components/SocietyProgress.vue'
 import OpinionDistribution from '../components/OpinionDistribution.vue'
 import LiveSocietyGraph from '../components/LiveSocietyGraph.vue'
+import SocialGraphWorkspace from '../components/SocialGraphWorkspace.vue'
 import SocietyLiveFeed from '../components/SocietyLiveFeed.vue'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useSocietyStore } from '../stores/societyStore'
@@ -818,12 +819,19 @@ function goToResults() {
           </div>
           <div class="graph-container" :class="[graphContainerClass, { 'society-live': store.isSocietyMode }]">
             <!-- Society mode: Live Social Graph -->
-            <LiveSocietyGraph
+            <SocialGraphWorkspace
               v-if="store.isSocietyMode"
               :simulation-id="simId"
-              :spotlight-agent-id="selectedAgentForStory"
-              @select-agent="selectedAgentForStory = $event"
-            />
+              mode="live"
+            >
+              <template #legacy-fallback>
+                <LiveSocietyGraph
+                  :simulation-id="simId"
+                  :spotlight-agent-id="selectedAgentForStory"
+                  @select-agent="selectedAgentForStory = $event"
+                />
+              </template>
+            </SocialGraphWorkspace>
             <!-- Other modes: 2D Knowledge Graph -->
             <template v-else>
               <ForceGraph2D
@@ -1157,7 +1165,7 @@ function goToResults() {
 .graph-container.society-live {
   flex: none;
   min-height: 0;
-  height: clamp(20rem, 42vh, 30rem);
+  height: clamp(38rem, 68vh, 50rem);
   border-color: var(--border);
 }
 

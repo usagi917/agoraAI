@@ -6,6 +6,10 @@ from typing import Any
 from src.app.llm.multi_client import multi_llm_client
 from src.app.models.conversation_log import ConversationLog
 from src.app.services.conversation_log_store import persist_conversation_logs
+from src.app.services.graph_activity import (
+    GraphActivityCreate,
+    persist_graph_activity_events,
+)
 from src.app.services.society.activation_layer import _temperature_from_big_five
 from src.app.services.society.meeting_prompts import (
     _build_balanced_briefing,
@@ -692,6 +696,16 @@ async def run_meeting(
     balanced_briefing = _build_balanced_briefing(theme, grounding_facts if grounding_facts else None)
 
     if simulation_id and emit_lifecycle_events:
+        if session:
+            await persist_graph_activity_events(
+                session,
+                simulation_id,
+                [GraphActivityCreate(
+                    phase="meeting",
+                    kind="phase_changed",
+                    payload={"phase": "meeting"},
+                )],
+            )
         await sse_manager.publish(simulation_id, "meeting_started", {
             "participant_count": len(participants),
             "num_rounds": min(num_rounds, len(round_names)),
@@ -743,6 +757,63 @@ async def run_meeting(
                 logger.warning("Theater events failed for round %d: %s", round_idx + 1, e)
 
         if simulation_id:
+            if session:
+                agent_id_by_index = {
+                    _resolve_participant_index(participant, index): (
+                        participant.get("agent_profile", {}) or {}
+                    ).get("id")
+                    for index, participant in enumerate(participants)
+                }
+                previous_positions = {
+                    argument.get("participant_index"): argument.get("position", "")
+                    for argument in previous
+                }
+                graph_events = [GraphActivityCreate(
+                    phase="meeting",
+                    round=round_idx + 1,
+                    kind="phase_changed",
+                    payload={
+                        "phase": "meeting",
+                        "round_name": round_name,
+                    },
+                )]
+                for argument in arguments:
+                    participant_index = argument.get("participant_index")
+                    target_index = argument.get("addressed_to_participant_index")
+                    source_id = agent_id_by_index.get(participant_index)
+                    target_id = agent_id_by_index.get(target_index)
+                    graph_events.append(GraphActivityCreate(
+                        phase="meeting",
+                        round=round_idx + 1,
+                        kind="dialogue",
+                        source_id=source_id,
+                        target_id=target_id,
+                        edge_id=(
+                            f"dialogue:{source_id}:{target_id}"
+                            if source_id and target_id
+                            else None
+                        ),
+                        payload=_serialize_argument_for_stream(argument, round_name),
+                    ))
+                    previous_position = previous_positions.get(participant_index)
+                    current_position = argument.get("position", "")
+                    if previous_position and current_position != previous_position:
+                        graph_events.append(GraphActivityCreate(
+                            phase="meeting",
+                            round=round_idx + 1,
+                            kind="stance_shift",
+                            source_id=source_id,
+                            payload={
+                                "before_stance": previous_position,
+                                "after_stance": current_position,
+                                "reason": argument.get("belief_update") or "meeting dialogue",
+                            },
+                        ))
+                await persist_graph_activity_events(
+                    session,
+                    simulation_id,
+                    graph_events,
+                )
             await sse_manager.publish(simulation_id, "meeting_round_completed", {
                 "round": round_idx + 1,
                 "round_name": round_name,

@@ -3,11 +3,11 @@ export const STANCE_ORDER = ['賛成', '条件付き賛成', '中立', '条件�
 type StanceLabel = typeof STANCE_ORDER[number]
 
 export const STANCE_COLORS: Record<string, string> = {
-  '賛成': '#22c55e',
-  '条件付き賛成': '#a3e635',
-  '中立': '#a3a3a3',
-  '条件付き反対': '#f97316',
-  '反対': '#ef4444',
+  '賛成': '#34d399',
+  '条件付き賛成': '#67e8f9',
+  '中立': '#fbbf24',
+  '条件付き反対': '#fb923c',
+  '反対': '#fb7185',
 }
 
 const DEFAULT_STANCE_COLOR = '#6366f1'

@@ -141,7 +141,7 @@ describe('lavender color mixing', () => {
   })
 
   it('softens stance colors 45% toward lavender', () => {
-    expect(softenStanceColor('賛成', '#000000')).toBe(mixHex('#22c55e', '#c3cdf2', 0.45))
+    expect(softenStanceColor('賛成', '#000000')).toBe(mixHex('#34d399', '#c3cdf2', 0.45))
     expect(softenStanceColor('不明', '#aabbcc')).toBe(mixHex('#aabbcc', '#c3cdf2', 0.45))
   })
 })

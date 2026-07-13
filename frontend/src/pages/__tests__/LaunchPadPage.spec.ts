@@ -197,7 +197,7 @@ describe('LaunchPadPage', () => {
 
     const workflow = wrapper.get('.phase-workflow').text()
     expect(workflow).toContain('根拠文書を添付')
-    expect(workflow).toContain('1,000人のデジタル住民')
+    expect(workflow).toContain('デジタル住民たち')
     expect(workflow).toContain('標準は代表評議会')
     expect(workflow).toContain('検証強化は論点抽出と介入比較')
     expect(workflow).toContain('進捗をリアルタイムに可視化')

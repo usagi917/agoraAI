@@ -153,6 +153,7 @@ describe('ResultsPage — unified report', () => {
           ScenarioCompare: true,
           AgreementHeatmap: true,
           PropagationDashboard: true,
+          SocialGraphWorkspace: true,
         },
       },
     })

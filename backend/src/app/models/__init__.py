@@ -11,6 +11,7 @@ from src.app.models.entity import Entity
 from src.app.models.environment_rule import EnvironmentRule
 from src.app.models.evaluation_result import EvaluationResult
 from src.app.models.experiment_config import ExperimentConfig
+from src.app.models.graph_activity_event import GraphActivityEvent
 from src.app.models.graph_diff import GraphDiff
 from src.app.models.graph_state import GraphState
 from src.app.models.kg_edge import KGEdge
@@ -52,6 +53,7 @@ __all__ = [
     "WorldState",
     "GraphState",
     "GraphDiff",
+    "GraphActivityEvent",
     "TimelineEvent",
     "Report",
     "CodexReview",

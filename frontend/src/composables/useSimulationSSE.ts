@@ -5,11 +5,16 @@ import { useActivityStore } from '../stores/activityStore'
 import { useSocietyStore } from '../stores/societyStore'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { getPopulationNetwork } from '../api/client'
+import type { GraphActivityEvent } from '../api/client'
 import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
 import { useAgentVisualizationStore } from '../stores/agentVisualizationStore'
 import { useCognitiveSSE } from './useCognitiveSSE'
 import { useTheaterSSE } from './useTheaterSSE'
 import { formatPercent } from '../utils/format'
+import { handleGraphActivityEvent } from '../services/graphActivityAdapter'
+import { bootstrapGraphActivity } from '../services/graphActivitySync'
+import { useSocialGraphActivityStore } from '../stores/socialGraphActivityStore'
+import { useSocialGraphTopologyStore } from '../stores/socialGraphTopologyStore'
 
 function getSimulationStreamUrl(simulationId: string) {
   const base = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '')
@@ -28,6 +33,8 @@ export function useSimulationSSE(simulationId: string) {
   const activity = useActivityStore()
   const societyStore = useSocietyStore()
   const societyGraphStore = useSocietyGraphStore()
+  const graphActivityStore = useSocialGraphActivityStore()
+  const graphTopologyStore = useSocialGraphTopologyStore()
   const vizStore = useAgentVisualizationStore()
   const { handleCognitiveEvent } = useCognitiveSSE()
   const { handleTheaterEvent } = useTheaterSSE()
@@ -36,6 +43,23 @@ export function useSimulationSSE(simulationId: string) {
   const MAX_RECONNECTS = 3
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let populationNetworkAbort: AbortController | null = null
+  let graphBootstrapAbort: AbortController | null = null
+
+  function synchronizeGraphActivity(bufferingStarted = false) {
+    if (!bufferingStarted) graphActivityStore.beginBuffering(simulationId)
+    graphBootstrapAbort?.abort()
+    graphBootstrapAbort = new AbortController()
+    const bootstrapController = graphBootstrapAbort
+    void bootstrapGraphActivity(simulationId, {
+      signal: bootstrapController.signal,
+      bufferingStarted: true,
+    }).catch((error) => {
+      if (error?.name === 'AbortError' || error?.code === 'ERR_CANCELED') return
+      console.warn('graph activity の初期同期に失敗:', error)
+    }).finally(() => {
+      if (graphBootstrapAbort === bootstrapController) graphBootstrapAbort = null
+    })
+  }
 
   function start() {
     const e2eEvents = (window as Window & {
@@ -52,6 +76,7 @@ export function useSimulationSSE(simulationId: string) {
     }
 
     const url = getSimulationStreamUrl(simulationId)
+    graphActivityStore.beginBuffering(simulationId)
     source = new EventSource(url)
 
     const eventTypes = [
@@ -123,6 +148,7 @@ export function useSimulationSSE(simulationId: string) {
       // Society ソーシャルグラフ
       'society_social_graph_structure',
       'society_social_graph_ready',
+      'graph_activity',
       // Unified モード イベント
       'unified_phase_changed',
       'persona_generation_started',
@@ -171,11 +197,15 @@ export function useSimulationSSE(simulationId: string) {
       })
     }
 
+    synchronizeGraphActivity(true)
+
     source.onerror = () => {
       if (store.status === 'completed' || store.status === 'failed') return
       store.setStatus('disconnected')
       source?.close()
       source = null
+      graphBootstrapAbort?.abort()
+      graphBootstrapAbort = null
 
       if (reconnectAttempts < MAX_RECONNECTS) {
         const delay = Math.pow(2, reconnectAttempts) * 1000
@@ -190,6 +220,10 @@ export function useSimulationSSE(simulationId: string) {
 
   function handleEvent(eventType: string, payload: Record<string, any>) {
     reconnectAttempts = 0
+    if (eventType === 'graph_activity') {
+      handleGraphActivityEvent(payload as unknown as GraphActivityEvent)
+      return
+    }
     switch (eventType) {
       // === Meta Simulation イベント ===
       case 'meta_started':
@@ -678,6 +712,7 @@ export function useSimulationSSE(simulationId: string) {
         if (payload.edges) {
           societyGraphStore.setSocialEdges(payload.edges)
         }
+        if (!graphTopologyStore.selectedNodes.length) synchronizeGraphActivity()
         break
 
       case 'society_activation_started':
@@ -986,6 +1021,8 @@ export function useSimulationSSE(simulationId: string) {
     source = null
     populationNetworkAbort?.abort()
     populationNetworkAbort = null
+    graphBootstrapAbort?.abort()
+    graphBootstrapAbort = null
   }
 
   onUnmounted(close)
