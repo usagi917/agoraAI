@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from src.app.api.routes.admin import router as admin_router
+from src.app.api.routes.analytics import router as analytics_router
 from src.app.api.routes.codex import router as codex_router
 from src.app.api.routes.projects import router as projects_router
 from src.app.api.routes.runs import router as runs_router
@@ -21,6 +22,7 @@ api_router.include_router(projects_router, prefix="/projects", tags=["projects"]
 api_router.include_router(templates_router, prefix="/templates", tags=["templates"])
 api_router.include_router(runs_router, prefix="/runs", tags=["runs"])
 api_router.include_router(admin_router, prefix="/admin", tags=["admin"])
+api_router.include_router(analytics_router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(codex_router, prefix="/codex", tags=["codex"])
 api_router.include_router(simulations_router, prefix="/simulations", tags=["simulations"])
 api_router.include_router(validation_router, tags=["validation"])

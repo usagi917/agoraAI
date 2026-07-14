@@ -20,6 +20,10 @@ const societyResetStub = {
 
 const push = vi.fn()
 
+const usageMocks = vi.hoisted(() => ({
+  trackUsageEvent: vi.fn(),
+}))
+
 const apiMocks = vi.hoisted(() => ({
   getSimulation: vi.fn(),
   getSimulationReport: vi.fn(),
@@ -96,6 +100,7 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('../../api/client', () => apiMocks)
+vi.mock('../../services/usageAnalytics', () => usageMocks)
 
 describe('ResultsPage', () => {
   beforeEach(() => {
@@ -172,6 +177,18 @@ describe('ResultsPage', () => {
     })
     apiMocks.getTranscript.mockResolvedValue([])
     apiMocks.getPropagation.mockResolvedValue(null)
+  })
+
+  it('records that an anonymous visitor reached the result view', async () => {
+    const { wrapper } = mountResults()
+
+    await flushPromises()
+
+    expect(usageMocks.trackUsageEvent).toHaveBeenCalledWith('result_viewed', {
+      simulationId: 'sim-unsupported',
+      path: '/sim/sim-unsupported/results',
+    })
+    wrapper.unmount()
   })
 
   it('renders unsupported quality state with strict error context', async () => {

@@ -76,4 +76,21 @@ describe('api client validation token headers', () => {
     expect(topicsConfig).not.toHaveProperty('headers')
     expect(reportConfig).not.toHaveProperty('headers')
   })
+
+  it('attaches anonymous usage context to simulation creation', async () => {
+    const { createSimulation } = await loadClient()
+
+    await createSimulation({ inputMethod: 'wizard' })
+
+    expect(mockApi.post).toHaveBeenCalledWith(
+      '/simulations',
+      expect.objectContaining({
+        usage_context: {
+          visitor_id: expect.stringMatching(/^[a-zA-Z0-9_-]{8,64}$/),
+          session_id: expect.stringMatching(/^[a-zA-Z0-9_-]{8,64}$/),
+          input_method: 'wizard',
+        },
+      }),
+    )
+  })
 })

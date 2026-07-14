@@ -49,6 +49,7 @@ import { useGraphStore } from '../stores/graphStore'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useSocialGraphTopologyStore } from '../stores/socialGraphTopologyStore'
 import { formatPercent } from '../utils/format'
+import { trackUsageEvent } from '../services/usageAnalytics'
 import {
   getDefaultResultsSecondaryTab,
   getResultsPrimaryView,
@@ -527,6 +528,10 @@ onMounted(async () => {
   try {
     sim.value = await getSimulation(simId)
     if (isUnmounted) return
+    void trackUsageEvent('result_viewed', {
+      simulationId: simId,
+      path: `/sim/${simId}/results`,
+    })
     getCodexHealth()
       .then((health) => {
         codexHealth.value = health

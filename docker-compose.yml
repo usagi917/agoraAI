@@ -52,6 +52,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       BACKEND_HOST: 0.0.0.0
       BACKEND_PORT: 8000
+      ANALYTICS_ADMIN_TOKEN: ${ANALYTICS_ADMIN_TOKEN:-local-analytics-token}
     depends_on:
       postgres:
         condition: service_healthy

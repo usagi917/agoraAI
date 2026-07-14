@@ -53,6 +53,51 @@ def _normalize_model_datetimes(session: Session, _flush_context, _instances) -> 
                 setattr(obj, attr.key, normalized)
 
 
+@event.listens_for(AsyncSession.sync_session_class, "before_flush")
+def _record_simulation_usage_status(session: Session, _flush_context, _instances) -> None:
+    from src.app.models.simulation import Simulation
+    from src.app.models.usage_event import UsageEvent
+
+    event_names = {
+        "completed": "simulation_completed",
+        "failed": "simulation_failed",
+    }
+    for obj in list(session.dirty):
+        if not isinstance(obj, Simulation):
+            continue
+
+        status_history = inspect(obj).attrs.status.history
+        event_name = event_names.get(obj.status)
+        if not event_name or not status_history.has_changes():
+            continue
+
+        metadata = obj.metadata_json if isinstance(obj.metadata_json, dict) else {}
+        analytics = metadata.get("analytics")
+        if not isinstance(analytics, dict):
+            continue
+
+        visitor_id = str(analytics.get("visitor_id") or "")
+        session_id = str(analytics.get("session_id") or "")
+        if not visitor_id or not session_id:
+            continue
+
+        session.add(
+            UsageEvent(
+                event_name=event_name,
+                visitor_id=visitor_id,
+                session_id=session_id,
+                simulation_id=obj.id,
+                path=f"/sim/{obj.id}",
+                properties_json={
+                    "mode": obj.mode,
+                    "template_name": obj.template_name,
+                    "execution_profile": obj.execution_profile,
+                    "input_method": str(analytics.get("input_method") or "unknown"),
+                },
+            )
+        )
+
+
 def _ensure_sqlite_database_dir() -> None:
     if not settings.is_sqlite:
         return

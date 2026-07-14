@@ -3,10 +3,11 @@
 import logging
 import os
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +22,7 @@ from src.app.models.graph_state import GraphState
 from src.app.models.report import Report
 from src.app.models.simulation import Simulation, normalize_mode
 from src.app.models.timeline_event import TimelineEvent
+from src.app.models.usage_event import UsageEvent
 from src.app.services.codex_review_service import CodexReviewService
 from src.app.services.decision_briefing import (
     build_single_decision_brief,
@@ -68,6 +70,19 @@ RERUN_EXECUTION_METADATA_KEYS = {
 }
 
 
+class UsageContext(BaseModel):
+    visitor_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{8,64}$")
+    session_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{8,64}$")
+    input_method: Literal[
+        "manual",
+        "wizard",
+        "document",
+        "document_with_prompt",
+        "system",
+        "unknown",
+    ] = "unknown"
+
+
 class SimulationCreate(BaseModel):
     project_id: str | None = None
     template_name: str = ""
@@ -77,6 +92,7 @@ class SimulationCreate(BaseModel):
     evidence_mode: str = "prefer"  # strict | prefer | off (legacy aliases accepted)
     seed: int | None = None
     diagnostic: dict | None = None
+    usage_context: UsageContext | None = None
 
 
 class HistoricalOutcome(BaseModel):
@@ -132,6 +148,7 @@ async def create_simulation(
         _require_validation_token(x_validation_token)
         await _ensure_no_running_validation(session)
 
+    analytics = body.usage_context.model_dump() if body.usage_context else None
     sim = Simulation(
         id=str(uuid.uuid4()),
         project_id=body.project_id,
@@ -147,9 +164,26 @@ async def create_simulation(
                 "trust_mode": "strict",
             },
             **({"diagnostic": body.diagnostic} if body.diagnostic is not None else {}),
+            **({"analytics": analytics} if analytics is not None else {}),
         },
     )
     session.add(sim)
+    if analytics is not None:
+        session.add(
+            UsageEvent(
+                event_name="simulation_started",
+                visitor_id=analytics["visitor_id"],
+                session_id=analytics["session_id"],
+                simulation_id=sim.id,
+                path=f"/sim/{sim.id}",
+                properties_json={
+                    "mode": normalized_mode,
+                    "template_name": body.template_name,
+                    "execution_profile": body.execution_profile,
+                    "input_method": analytics["input_method"],
+                },
+            )
+        )
     if body.diagnostic is not None:
         await session.flush()
         try:

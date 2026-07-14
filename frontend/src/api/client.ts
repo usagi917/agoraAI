@@ -1,5 +1,10 @@
 import axios from 'axios'
 
+import {
+  getUsageContext,
+  type UsageInputMethod,
+} from '../services/usageAnalytics'
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
 })
@@ -709,8 +714,10 @@ export async function createSimulation(
     evidenceMode?: string
     seed?: number
     diagnostic?: Record<string, any>
+    inputMethod?: UsageInputMethod
   } = {},
 ): Promise<SimulationResponse> {
+  const usageContext = getUsageContext()
   const payload = {
     project_id: options.projectId || null,
     template_name: options.templateName || '',
@@ -720,6 +727,11 @@ export async function createSimulation(
     evidence_mode: options.evidenceMode || 'strict',
     seed: options.seed ?? null,
     diagnostic: options.diagnostic ?? null,
+    usage_context: {
+      visitor_id: usageContext.visitorId,
+      session_id: usageContext.sessionId,
+      input_method: options.inputMethod || 'unknown',
+    },
   }
   const headers = validationHeaders()
   const { data } = headers

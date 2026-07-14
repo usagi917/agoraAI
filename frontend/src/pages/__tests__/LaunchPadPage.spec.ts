@@ -74,6 +74,7 @@ describe('LaunchPadPage', () => {
     expect(apiMocks.createSimulation).toHaveBeenCalledWith(
       expect.objectContaining({
         evidenceMode: 'strict',
+        inputMethod: 'manual',
         mode: 'standard',
       }),
     )
@@ -89,6 +90,17 @@ describe('LaunchPadPage', () => {
     expect(wrapper.text()).not.toContain('実行履歴')
     expect(wrapper.find('.history-details').exists()).toBe(false)
     expect(apiMocks.listSimulations).not.toHaveBeenCalled()
+  })
+
+  it('discloses anonymous usage and input logging before launch', async () => {
+    const wrapper = mount(LaunchPadPage, {
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    const notice = wrapper.get('[data-testid="usage-logging-notice"]')
+    expect(notice.text()).toContain('アクセス情報・匿名の利用状況・入力内容を記録')
+    expect(notice.text()).toContain('個人情報や機密情報は入力しないでください')
   })
 
   it('shows exactly one completed analysis example linking to its result', async () => {

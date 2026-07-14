@@ -215,6 +215,9 @@ async function handleLaunch() {
       mode: selectedPreset.value,
       promptText: finalPrompt,
       evidenceMode: 'strict',
+      inputMethod: files.value.length > 0
+        ? (finalPrompt ? 'document_with_prompt' : 'document')
+        : (wizardPrompt ? 'wizard' : 'manual'),
     })
 
     router.push(`/sim/${sim.id}`)
@@ -348,6 +351,9 @@ async function handleLaunch() {
       <p class="launch-note">
         {{ selectedModeInfo?.time ?? '約3分' }}
         — {{ selectedModeInfo?.desc ?? '' }}
+      </p>
+      <p class="usage-logging-notice" data-testid="usage-logging-notice">
+        デモ改善のため、アクセス情報・匿名の利用状況・入力内容を記録します。個人情報や機密情報は入力しないでください。
       </p>
     </section>
 
@@ -908,6 +914,15 @@ async function handleLaunch() {
   color: var(--text-muted);
   margin-top: 0.6rem;
   letter-spacing: 0.01em;
+}
+
+.usage-logging-notice {
+  margin: 0.75rem auto 0;
+  max-width: 42rem;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  line-height: 1.6;
+  text-align: center;
 }
 
 /* Legacy wizard-form (kept for compat) */

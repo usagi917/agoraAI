@@ -35,6 +35,7 @@ from src.app.models.society_result import SocietyResult
 from src.app.models.template import Template
 from src.app.models.timeline_event import TimelineEvent
 from src.app.models.token_usage import TokenUsage
+from src.app.models.usage_event import UsageEvent
 from src.app.models.validation_record import ValidationRecord
 from src.app.models.world_state import WorldState
 
@@ -59,6 +60,7 @@ __all__ = [
     "Report",
     "CodexReview",
     "TokenUsage",
+    "UsageEvent",
     "Log",
     "OutcomeClaim",
     "ClaimCluster",
