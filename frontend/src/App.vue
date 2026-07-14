@@ -12,18 +12,15 @@
             <p class="app-subtitle">Swarm Intelligence Simulation Platform</p>
           </div>
         </router-link>
-        <nav class="header-nav">
+        <nav class="header-nav" aria-label="分析メニュー">
           <router-link to="/" class="nav-link" active-class="active">
-            1件分析
+            新規分析
           </router-link>
           <router-link to="/compare" class="nav-link" active-class="active">
-            2条件比較
+            条件を比較
           </router-link>
           <router-link to="/populations" class="nav-link" active-class="active">
-            母集団
-          </router-link>
-          <router-link to="/validate" class="nav-link" active-class="active">
-            検証
+            対象者を管理
           </router-link>
         </nav>
       </div>

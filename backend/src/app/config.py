@@ -22,8 +22,6 @@ _project_root = _resolve_project_root()
 
 class Settings(BaseSettings):
     openai_api_key: str = ""
-    google_api_key: str = ""
-    anthropic_api_key: str = ""
     llm_model: str = "gpt-4o"
     database_url: str = "postgresql+asyncpg://agentai:agentai@localhost:5432/agentai"
     redis_url: str = "redis://localhost:6379/0"

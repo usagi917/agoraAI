@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent AI — A4 Product Poster</title>
+  <style>
+    :root {
+      --ink: #f4f7ff;
+      --muted: #96a3ba;
+      --paper: #070b13;
+      --panel: #0d1522;
+      --panel-2: #101b2b;
+      --line: rgba(135, 167, 214, 0.18);
+      --blue: #4d96ff;
+      --cyan: #4fe0d1;
+      --pink: #ff6f91;
+      --amber: #ffbd3e;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      min-height: 100%;
+      margin: 0;
+      background: #d9dee8;
+      color: var(--ink);
+      font-family: "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+
+    .poster {
+      position: relative;
+      isolation: isolate;
+      width: 210mm;
+      height: 297mm;
+      overflow: hidden;
+      padding: 9.5mm 10mm 8.5mm;
+      background:
+        radial-gradient(circle at 82% 12%, rgba(77, 150, 255, 0.16), transparent 28%),
+        radial-gradient(circle at 4% 72%, rgba(79, 224, 209, 0.07), transparent 23%),
+        linear-gradient(145deg, #090e18 0%, var(--paper) 58%, #060910 100%);
+      box-shadow: 0 24px 80px rgba(24, 34, 54, 0.35);
+    }
+
+    .poster::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      opacity: 0.24;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+      background-size: 11mm 11mm;
+      mask-image: linear-gradient(to bottom, black, transparent 62%);
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 5mm;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 2.2mm;
+      font-size: 4.2mm;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .brand-mark {
+      width: 2.8mm;
+      height: 2.8mm;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 6mm rgba(77, 150, 255, 0.7);
+    }
+
+    .brand small {
+      display: block;
+      margin-top: 0.6mm;
+      color: #68758c;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 1.7mm;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+    }
+
+    .edition {
+      display: flex;
+      align-items: center;
+      gap: 2.2mm;
+      color: #8794aa;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 1.9mm;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+
+    .edition::before {
+      content: "";
+      width: 10mm;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--blue));
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 0.82fr 1.18fr;
+      gap: 6mm;
+      align-items: stretch;
+      min-height: 98mm;
+    }
+
+    .hero-copy {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 2mm 0 2mm;
+    }
+
+    .eyebrow,
+    .section-label {
+      color: #76aaff;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 2mm;
+      font-weight: 800;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 2mm;
+      margin-bottom: 3.5mm;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 4mm;
+      height: 1px;
+      background: var(--blue);
+      box-shadow: 0 0 3mm var(--blue);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 11.8mm;
+      line-height: 1.04;
+      letter-spacing: -0.065em;
+      text-wrap: balance;
+    }
+
+    h1 .accent {
+      color: transparent;
+      background: linear-gradient(96deg, #f7fbff 4%, #75adff 55%, #54e4d4 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+    }
+
+    .lead {
+      max-width: 72mm;
+      margin: 4mm 0 0;
+      color: #aeb9cb;
+      font-size: 3.05mm;
+      font-weight: 550;
+      line-height: 1.75;
+    }
+
+    .use-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.5mm;
+      margin-top: 4.2mm;
+    }
+
+    .use-tag {
+      padding: 1.2mm 2.2mm;
+      border: 1px solid rgba(100, 153, 236, 0.22);
+      border-radius: 99px;
+      background: rgba(23, 43, 70, 0.58);
+      color: #b9c9e2;
+      font-size: 2.15mm;
+      font-weight: 700;
+    }
+
+    .product-window {
+      position: relative;
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid rgba(111, 160, 234, 0.27);
+      border-radius: 3.4mm;
+      background: #07101c;
+      box-shadow: 0 9mm 24mm rgba(0, 0, 0, 0.34), 0 0 15mm rgba(50, 112, 209, 0.10);
+    }
+
+    .window-bar {
+      position: absolute;
+      inset: 0 0 auto;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 9mm;
+      padding: 0 3mm;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      background: rgba(5, 10, 18, 0.84);
+      backdrop-filter: blur(6px);
+    }
+
+    .window-dots { display: flex; gap: 1.2mm; }
+    .window-dots i { width: 1.5mm; height: 1.5mm; border-radius: 50%; background: #32425b; }
+    .window-dots i:first-child { background: var(--pink); }
+    .window-dots i:nth-child(2) { background: var(--amber); }
+    .window-dots i:last-child { background: var(--cyan); }
+
+    .live-label {
+      display: flex;
+      align-items: center;
+      gap: 1.3mm;
+      color: #d7e3f3;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 1.8mm;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .live-label b {
+      width: 1.5mm;
+      height: 1.5mm;
+      border-radius: 50%;
+      background: #63f6b9;
+      box-shadow: 0 0 2.4mm #63f6b9;
+    }
+
+    .product-shot {
+      position: absolute;
+      inset: 9mm 0 19mm;
+      width: 100%;
+      height: calc(100% - 28mm);
+      object-fit: cover;
+      object-position: 44% 48%;
+      filter: saturate(1.08) contrast(1.03);
+    }
+
+    .product-window::after {
+      content: "";
+      position: absolute;
+      inset: 9mm 0 19mm;
+      pointer-events: none;
+      background: linear-gradient(to bottom, transparent 68%, #07101c 100%);
+    }
+
+    .screen-stats {
+      position: absolute;
+      inset: auto 0 0;
+      z-index: 3;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      min-height: 19mm;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      background: rgba(7, 16, 28, 0.94);
+    }
+
+    .screen-stat {
+      padding: 3mm 3.2mm 2.5mm;
+      border-right: 1px solid rgba(255,255,255,0.07);
+    }
+
+    .screen-stat:last-child { border-right: 0; }
+
+    .screen-stat strong {
+      display: block;
+      font-size: 4.3mm;
+      line-height: 1;
+      letter-spacing: -0.05em;
+    }
+
+    .screen-stat span {
+      display: block;
+      margin-top: 1.2mm;
+      color: #7f8fa8;
+      font-size: 1.75mm;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+
+    .screen-stat:first-child strong { color: var(--cyan); }
+    .screen-stat:nth-child(2) strong { color: #72aaff; }
+    .screen-stat:last-child strong { color: #ffcb62; }
+
+    .benefits {
+      margin-top: 7mm;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      margin-bottom: 3mm;
+    }
+
+    h2 {
+      margin: 1.2mm 0 0;
+      font-size: 5.5mm;
+      letter-spacing: -0.045em;
+    }
+
+    .section-note {
+      color: #65748b;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 1.65mm;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .benefit-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2.5mm;
+    }
+
+    .benefit-card {
+      position: relative;
+      min-height: 47mm;
+      overflow: hidden;
+      padding: 4mm 4mm 3.6mm;
+      border: 1px solid var(--line);
+      border-radius: 2.8mm;
+      background: linear-gradient(145deg, rgba(16, 27, 43, 0.96), rgba(10, 17, 29, 0.94));
+    }
+
+    .benefit-card::after {
+      content: attr(data-no);
+      position: absolute;
+      right: 2mm;
+      bottom: -4.5mm;
+      color: rgba(111, 160, 234, 0.08);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 20mm;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .benefit-icon {
+      display: grid;
+      place-items: center;
+      width: 7.5mm;
+      height: 7.5mm;
+      margin-bottom: 3mm;
+      border: 1px solid rgba(99, 154, 238, 0.26);
+      border-radius: 2.2mm;
+      background: rgba(44, 91, 160, 0.20);
+      color: #78adff;
+    }
+
+    .benefit-icon svg { width: 4.4mm; height: 4.4mm; }
+
+    .benefit-card:nth-child(2) .benefit-icon {
+      border-color: rgba(79, 224, 209, 0.27);
+      background: rgba(35, 122, 114, 0.18);
+      color: var(--cyan);
+    }
+
+    .benefit-card:nth-child(3) .benefit-icon {
+      border-color: rgba(255, 189, 62, 0.27);
+      background: rgba(158, 109, 23, 0.17);
+      color: var(--amber);
+    }
+
+    .benefit-card h3 {
+      margin: 0;
+      font-size: 3.45mm;
+      letter-spacing: -0.03em;
+    }
+
+    .benefit-card p {
+      position: relative;
+      z-index: 1;
+      margin: 2mm 0 0;
+      color: #96a4b9;
+      font-size: 2.35mm;
+      font-weight: 540;
+      line-height: 1.7;
+    }
+
+    .architecture {
+      margin-top: 7mm;
+      padding: 4.5mm 4.2mm 4.2mm;
+      border: 1px solid rgba(111, 160, 234, 0.20);
+      border-radius: 3mm;
+      background: linear-gradient(120deg, rgba(11, 19, 32, 0.95), rgba(12, 24, 39, 0.9));
+    }
+
+    .architecture .section-head { margin-bottom: 3.2mm; }
+    .architecture h2 { font-size: 4.6mm; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr 6mm 1fr 6mm 1.16fr 6mm 1fr 6mm 1.18fr;
+      align-items: stretch;
+    }
+
+    .flow-node {
+      position: relative;
+      min-height: 29mm;
+      padding: 3mm 2.4mm 2.7mm;
+      border: 1px solid rgba(118, 153, 204, 0.18);
+      border-radius: 2.2mm;
+      background: rgba(14, 26, 43, 0.76);
+    }
+
+    .flow-node.featured {
+      border-color: rgba(79, 224, 209, 0.34);
+      background: linear-gradient(150deg, rgba(25, 74, 77, 0.40), rgba(15, 31, 48, 0.84));
+      box-shadow: inset 0 0 7mm rgba(79, 224, 209, 0.05);
+    }
+
+    .flow-node.output {
+      border-color: rgba(255, 189, 62, 0.30);
+      background: linear-gradient(150deg, rgba(80, 59, 22, 0.32), rgba(22, 29, 42, 0.86));
+    }
+
+    .flow-no {
+      color: #58718f;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 1.55mm;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+    }
+
+    .flow-node strong {
+      display: block;
+      margin-top: 1.8mm;
+      font-size: 2.8mm;
+      line-height: 1.25;
+      letter-spacing: -0.03em;
+    }
+
+    .flow-node span:last-child {
+      display: block;
+      margin-top: 1.2mm;
+      color: #77869d;
+      font-size: 1.8mm;
+      font-weight: 650;
+      line-height: 1.45;
+    }
+
+    .arrow {
+      display: grid;
+      place-items: center;
+      color: #4e6b92;
+      font-family: monospace;
+      font-size: 3.7mm;
+    }
+
+    .stack {
+      display: flex;
+      align-items: center;
+      gap: 2.1mm;
+      margin-top: 3.3mm;
+      padding-top: 3mm;
+      border-top: 1px solid rgba(255,255,255,0.07);
+      color: #677890;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 1.62mm;
+      font-weight: 700;
+      letter-spacing: 0.045em;
+    }
+
+    .stack-label {
+      color: #8da2be;
+      letter-spacing: 0.11em;
+    }
+
+    .stack i {
+      width: 1px;
+      height: 2.5mm;
+      background: rgba(255,255,255,0.12);
+    }
+
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 7mm;
+      padding-top: 4mm;
+      border-top: 1px solid rgba(255,255,255,0.09);
+    }
+
+    .footer-copy {
+      font-size: 3.6mm;
+      font-weight: 800;
+      letter-spacing: -0.035em;
+    }
+
+    .footer-copy span { color: #6fa6ff; }
+
+    .footer-meta {
+      text-align: right;
+      color: #68778e;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 1.65mm;
+      font-weight: 700;
+      line-height: 1.6;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    @page { size: A4 portrait; margin: 0; }
+
+    @media print {
+      html, body { width: 210mm; height: 297mm; background: var(--paper); }
+      body { padding: 0; }
+      .poster { box-shadow: none; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    }
+
+    @media screen and (max-width: 860px) {
+      body { place-items: start center; padding: 0; background: var(--paper); }
+      .poster {
+        width: 100vw;
+        height: 141.428vw;
+        min-height: 0;
+        transform-origin: top left;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="poster" aria-label="Agent AI 製品紹介ポスター">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>Agent AI<small>SWARM INTELLIGENCE SIMULATION PLATFORM</small></span>
+      </div>
+      <div class="edition">Product overview / 01</div>
+    </header>
+
+    <section class="hero">
+      <div class="hero-copy">
+        <div class="eyebrow">Decision simulation</div>
+        <h1>問いを入れる。<br><span class="accent">1万人の社会が<br>動き出す。</span></h1>
+        <p class="lead">市場参入、製品受容、政策影響。現実に打つ前に、社会の反応・対立・波及をシミュレーションする。</p>
+        <div class="use-tags" aria-label="主な用途">
+          <span class="use-tag">市場分析</span>
+          <span class="use-tag">製品受容</span>
+          <span class="use-tag">政策影響</span>
+          <span class="use-tag">シナリオ比較</span>
+        </div>
+      </div>
+
+      <figure class="product-window" aria-label="Agent AI 社会ネットワーク画面">
+        <div class="window-bar">
+          <div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+          <div class="live-label"><b aria-hidden="true"></b>Live / Society Pulse</div>
+        </div>
+        <img class="product-shot" src="./agent-ai-social-graph.png" alt="10,000人の合成人口から101人の代表を抽出し、社会ネットワーク上の反応を可視化した実際のAgent AI画面" />
+        <div class="screen-stats" aria-label="画面例の数値">
+          <div class="screen-stat"><strong>10,000</strong><span>合成人口</span></div>
+          <div class="screen-stat"><strong>101</strong><span>代表エージェント</span></div>
+          <div class="screen-stat"><strong>LIVE</strong><span>SSEで進捗配信</span></div>
+        </div>
+      </figure>
+    </section>
+
+    <section class="benefits">
+      <div class="section-head">
+        <div><div class="section-label">Why Agent AI</div><h2>決める前に、社会を試す。</h2></div>
+        <div class="section-note">Reaction → Debate → Decision</div>
+      </div>
+      <div class="benefit-grid">
+        <article class="benefit-card" data-no="01">
+          <div class="benefit-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18V9m5 9V5m5 13v-7m5 7V3"/><path d="M2.5 21h19"/></svg>
+          </div>
+          <h3>声の分布を読む</h3>
+          <p>賛否だけでなく、職業・地域・立場ごとの反応と、その変化を社会ネットワーク上で可視化。</p>
+        </article>
+        <article class="benefit-card" data-no="02">
+          <div class="benefit-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 10h8M8 14h5"/><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-5 3v-3H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/></svg>
+          </div>
+          <h3>盲点を議論で潰す</h3>
+          <p>市民代表と専門家が反証を交えながら討議。見落とした論点やリスクを多視点で掘り下げる。</p>
+        </article>
+        <article class="benefit-card" data-no="03">
+          <div class="benefit-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/></svg>
+          </div>
+          <h3>判断を次の一手へ</h3>
+          <p>根拠、シナリオ比較、推奨アクションをDecision Briefに集約。分析をそのまま意思決定へ。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="architecture">
+      <div class="section-head">
+        <div><div class="section-label">Architecture</div><h2>ひとつの問いが、判断材料に変わるまで。</h2></div>
+        <div class="section-note">Evidence-grounded pipeline</div>
+      </div>
+      <div class="flow" aria-label="分析アーキテクチャ">
+        <div class="flow-node">
+          <span class="flow-no">01 / INPUT</span>
+          <strong>問い ＋ 資料</strong>
+          <span>自由入力・TXT・MD・PDF</span>
+        </div>
+        <div class="arrow" aria-hidden="true">›</div>
+        <div class="flow-node">
+          <span class="flow-no">02 / GROUND</span>
+          <strong>GraphRAG</strong>
+          <span>根拠と関係性を構造化</span>
+        </div>
+        <div class="arrow" aria-hidden="true">›</div>
+        <div class="flow-node featured">
+          <span class="flow-no">03 / SIMULATE</span>
+          <strong>Society Pulse</strong>
+          <span>合成人口・反応・伝播を生成</span>
+        </div>
+        <div class="arrow" aria-hidden="true">›</div>
+        <div class="flow-node">
+          <span class="flow-no">04 / DELIBERATE</span>
+          <strong>Council</strong>
+          <span>代表者＋専門家が反証</span>
+        </div>
+        <div class="arrow" aria-hidden="true">›</div>
+        <div class="flow-node output">
+          <span class="flow-no">05 / ACT</span>
+          <strong>Decision Brief</strong>
+          <span>比較・根拠・次アクション</span>
+        </div>
+      </div>
+      <div class="stack" aria-label="技術スタック">
+        <span class="stack-label">SYSTEM</span><i></i>
+        <span>Vue 3</span><i></i><span>FastAPI + SSE</span><i></i>
+        <span>SQLite / PostgreSQL</span><i></i><span>OpenAI-compatible / Anthropic / Ollama</span>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div class="footer-copy">現実に打つ前に、<span>反応を見よう。</span></div>
+      <div class="footer-meta">Synthetic population × Multi-agent council<br>Decision intelligence, made visible.</div>
+    </footer>
+  </main>
+</body>
+</html>

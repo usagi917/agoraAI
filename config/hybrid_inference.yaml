@@ -1,6 +1,7 @@
-# M4 MacBook Air (32 GB) 向け Liquid + GPT ハイブリッド設定。
-# 通常実行は API 費用 $1.00 の包絡内に収め、ローカル推論時間を主な制約とする。
-enabled: true
+# OpenAI API 専用の標準実行設定。
+# 全人口ハイブリッドを無効にし、cognitive.yaml の上限（既定200人）で
+# GPTサンプルを生成してから、10,000人の社会ネットワークへ数値伝播する。
+enabled: false
 
 budget:
   hard_limit_usd: 0.85
@@ -8,12 +9,12 @@ budget:
   shadow_stop_usd: 0.70
 
 population_activation:
-  provider: liquid
-  target_count: 10000
+  provider: openai
+  target_count: 200
   max_tokens: 160
-  minimal_output: true
-  chunk_size: 128
-  max_concurrency: 1
+  minimal_output: false
+  chunk_size: 25
+  max_concurrency: 20
 
 gpt_shadow:
   provider: openai_shadow

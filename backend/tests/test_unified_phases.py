@@ -117,7 +117,7 @@ class TestRunSocietyPulse:
                 return_value=fake_agents,
             ),
             patch(
-                "src.app.services.phases.society_pulse.run_hybrid_activation",
+                "src.app.services.phases.society_pulse.run_activation",
                 new_callable=AsyncMock,
                 return_value=fake_activation,
             ),

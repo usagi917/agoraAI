@@ -1,0 +1,408 @@
+- generic [ref=f1e3]:
+  - banner [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - link [ref=f1e6] [cursor=pointer]:
+        - /url: /
+        - generic [ref=f1e8]:
+          - heading "Agent AI" [level=1] [ref=f1e9]
+          - paragraph [ref=f1e10]: Swarm Intelligence Simulation Platform
+      - navigation "分析メニュー" [ref=f1e11]:
+        - link "新規分析" [ref=f1e12] [cursor=pointer]:
+          - /url: /
+        - link "条件を比較" [ref=f1e13] [cursor=pointer]:
+          - /url: /compare
+        - link "対象者を管理" [ref=f1e14] [cursor=pointer]:
+          - /url: /populations
+        - link "精度を検証" [ref=f1e15] [cursor=pointer]:
+          - /url: /validate
+  - main [ref=f1e16]:
+    - generic [ref=f1e17]:
+      - generic [ref=f1e18]:
+        - generic [ref=f1e19]:
+          - heading "Analysis Results" [level=2] [ref=f1e20]
+          - generic [ref=f1e21]: market_entry · standard
+        - generic [ref=f1e22]:
+          - button "PDF保存" [ref=f1e23] [cursor=pointer]
+          - button "再実行" [ref=f1e24] [cursor=pointer]
+          - link "実行画面" [ref=f1e25] [cursor=pointer]:
+            - /url: /sim/8a258ab6-b395-4f12-ba08-4d822ab31347
+      - generic [ref=f1e26]:
+        - strong [ref=f1e27]: Unsupported
+        - generic [ref=f1e28]: strict_document_evidence_required
+        - generic [ref=f1e29]: mode=strict · document=0 · refs=1
+      - generic [ref=f1e30]:
+        - strong [ref=f1e31]: 検証状態
+        - generic [ref=f1e32]: 未検証 · 過去ケース未検証
+        - generic [ref=f1e33]: calibration=uncalibrated
+      - generic [ref=f1e34]:
+        - generic [ref=f1e35]:
+          - heading "Evidence" [level=3] [ref=f1e36]
+          - text: 1 refs
+        - generic [ref=f1e38]:
+          - generic [ref=f1e39]:
+            - generic [ref=f1e40]: User prompt
+            - generic [ref=f1e41]: prompt_input
+          - paragraph [ref=f1e42]: 日本のEVバッテリー市場に新規参入すべきか。自社は独自の固体電池技術を持つ一方、量産体制は未整備である。顧客受容性、規制リスク、既存競合の反応、参入条件を分析してほしい。
+      - generic [ref=f1e43]:
+        - generic [ref=f1e44]:
+          - button "▾ Social Graph" [expanded] [ref=f1e45] [cursor=pointer]:
+            - generic [ref=f1e46]: ▾
+            - generic [ref=f1e47]: Social Graph
+          - generic [ref=f1e48]:
+            - generic [ref=f1e49]: 0 agents
+            - generic [ref=f1e50]: 12000 edges
+        - generic [ref=f1e52]:
+          - generic [ref=f1e53]:
+            - generic [ref=f1e54]:
+              - generic [ref=f1e55]: Social pulse
+              - strong [ref=f1e56]: pending · Round 0
+            - generic [ref=f1e57]: Live
+            - generic [ref=f1e59]:
+              - generic [ref=f1e60]:
+                - term [ref=f1e61]: 活動中
+                - definition [ref=f1e62]: "0"
+              - generic [ref=f1e63]:
+                - term [ref=f1e64]: 変化
+                - definition [ref=f1e65]: "0"
+              - generic [ref=f1e66]:
+                - term [ref=f1e67]: 代表
+                - definition [ref=f1e68]: "0"
+            - generic [ref=f1e69]:
+              - generic [ref=f1e70]: エージェント検索
+              - searchbox "エージェント検索" [ref=f1e71]
+          - generic [ref=f1e72]:
+            - generic [ref=f1e73]:
+              - generic:
+                - generic:
+                  - strong: 社会ネットワーク
+                  - generic: 検索またはノード選択で詳しく確認
+                - generic:
+                  - text: 代表 0人
+                  - generic: /
+                  - text: 全体 0人
+              - generic [ref=f1e74]:
+                - generic:
+                  - generic:
+                    - generic: 準備中...
+                    - generic: エージェントを選抜しています
+                - generic [ref=f1e78]:
+                  - button "人口" [ref=f1e79] [cursor=pointer]
+                  - button "社会" [ref=f1e80] [cursor=pointer]
+                  - button "知識" [ref=f1e81] [cursor=pointer]
+                  - button "リンク" [ref=f1e82] [cursor=pointer]
+                - generic [ref=f1e83]:
+                  - generic [ref=f1e84]: 人口
+                  - generic [ref=f1e85]: 10,000 人
+              - generic [ref=f1e86]: グラフを同期中…
+              - generic "グラフ表現の凡例" [ref=f1e87]:
+                - generic [ref=f1e88]: ● 市民代表
+                - generic [ref=f1e89]: ■ 専門家
+                - generic [ref=f1e90]: 発光 = 活動度
+            - complementary "グラフ詳細" [ref=f1e91]:
+              - generic [ref=f1e92]:
+                - text: Inspector
+                - heading "人物または関係を選択" [level=3] [ref=f1e93]
+                - paragraph [ref=f1e94]: 最近の活動、立場、接続先と影響履歴を確認できます。
+          - generic [ref=f1e95]:
+            - generic [ref=f1e96]: Activity timeline
+            - list "グラフ活動履歴" [ref=f1e98]
+      - generic [ref=f1e99]:
+        - generic [ref=f1e100]:
+          - generic [ref=f1e101]:
+            - generic [ref=f1e102]:
+              - generic [ref=f1e103]: Decision Workspace
+              - heading "意思決定の結論と次アクションを読む" [level=3] [ref=f1e104]
+              - paragraph [ref=f1e105]: Recommendation、判断根拠、直近アクションを先に確認できる構成です。
+            - generic [ref=f1e107]:
+              - generic [ref=f1e108]: Recommendation
+              - strong [ref=f1e109]: 条件付きGo
+              - paragraph [ref=f1e110]: 固体電池の技術力は評価され得るが、新規参入の最大論点は“量産できるか（納期と歩留まり）”“規制/認証に遅れないか”“品質と安全責任を運用で担保できるか”。これらが未整備なら、顧客離反・競合の価格攻勢・資金繰り悪化に直結し、最終的に生活と取引の安定を損なうため、まず供給安定と規制対応の確実化が条件になる。
+          - generic [ref=f1e111]:
+            - generic [ref=f1e112]:
+              - generic [ref=f1e113]:
+                - generic [ref=f1e114]:
+                  - generic [ref=f1e115]: 条件付きGo
+                  - paragraph [ref=f1e116]: 固体電池の技術力は評価され得るが、新規参入の最大論点は“量産できるか（納期と歩留まり）”“規制/認証に遅れないか”“品質と安全責任を運用で担保できるか”。これらが未整備なら、顧客離反・競合の価格攻勢・資金繰り悪化に直結し、最終的に生活と取引の安定を損なうため、まず供給安定と規制対応の確実化が条件になる。
+                - generic [ref=f1e117]:
+                  - generic [ref=f1e118]: 合意スコア
+                  - generic [ref=f1e119]: 65%
+              - generic [ref=f1e122]:
+                - heading "判断の基準" [level=4] [ref=f1e123]
+                - generic [ref=f1e124]:
+                  - generic [ref=f1e125]:
+                    - generic [ref=f1e126]:
+                      - generic [ref=f1e127]: 実行条件
+                      - generic [ref=f1e128]: mode=strict / trust=low_trust / refs=1
+                    - paragraph [ref=f1e129]: quality=unsupported。 document=0 / prompt=1 を根拠に構成。
+                  - generic [ref=f1e130]:
+                    - generic [ref=f1e131]:
+                      - generic [ref=f1e132]: 検証状態
+                      - generic [ref=f1e133]: n/a
+                    - paragraph [ref=f1e134]: 明示的な verification は未実行。quality と evidence refs を基準に読む。
+                  - generic [ref=f1e135]:
+                    - generic [ref=f1e136]:
+                      - generic [ref=f1e137]: 使いどころ
+                      - generic [ref=f1e138]: 論点抽出用に使う
+                    - paragraph [ref=f1e139]: 結論をそのまま採用せず、critical_unknowns と evidence_gaps を follow-up の起点に使う。
+              - generic [ref=f1e140]:
+                - heading "議論ハイライト" [level=4] [ref=f1e141]
+                - paragraph [ref=f1e142]: 議論は「量産未整備のままの単独参入は危険」という点で強く一致し、条件付き参入へ収束した。決め手は技術よりも“納期遅延→保証→回収→在庫滞留”によるキャッシュアウト連鎖を、責任上限と欠陥判定・未達時フローで止められるか
+                - generic [ref=f1e143]:
+                  - generic [ref=f1e144]:
+                    - generic [ref=f1e145]: 量産体制が未整備な状態での単独フルコミット参入は危険（出荷できる再現性と供給の確実性が前提）。
+                    - paragraph [ref=f1e147]: 合意形成済み
+                  - generic [ref=f1e148]:
+                    - generic [ref=f1e149]: 顧客が恐れるのは性能差そのものより、事故・納期・品質の再現性であり、受容性は「契約運用の再現性」に左右される。
+                    - paragraph [ref=f1e151]: 合意形成済み
+                  - generic [ref=f1e152]:
+                    - generic [ref=f1e153]: 納期遅延→返品/保証→回収→在庫滞留の“キャッシュアウト連鎖”が最重要の失敗パターンとして共有された。
+                    - paragraph [ref=f1e155]: 合意形成済み
+                - generic [ref=f1e156]:
+                  - generic [ref=f1e158]:
+                    - generic [ref=f1e159]: 参入の可否の最終判断（原則）
+                    - generic [ref=f1e160]: unresolved
+                  - generic [ref=f1e162]:
+                    - generic [ref=f1e163]: 契約設計の主眼（“何を最優先で縫うか”）
+                    - generic [ref=f1e164]: unresolved
+                  - generic [ref=f1e166]:
+                    - generic [ref=f1e167]: 共同量産/実証の是非と条件の厳格さ
+                    - generic [ref=f1e168]: unresolved
+                - blockquote [ref=f1e170]:
+                  - paragraph [ref=f1e171]: 「量産未整備のまま出荷すると、歩留まり/納期の不確実性が納期遅延→返品・保証→回収・在庫滞留というキャッシュアウト連鎖を起こし、さらに規制・認証が後追いで締まるので出費だけ先行する。競合は値下げと供給量で代替調達を誘発し、結局“技術勝負...」
+                  - generic [ref=f1e172]: — 佐伯 さえ（会社員・35歳） (最も説得力があった主張)
+              - generic [ref=f1e173]:
+                - heading "まだ足りない根拠" [level=4] [ref=f1e174]
+                - list [ref=f1e175]:
+                  - listitem [ref=f1e176]: KGデータなし
+              - generic [ref=f1e177]:
+                - heading "次のステップ" [level=4] [ref=f1e178]
+                - list [ref=f1e179]:
+                  - listitem [ref=f1e180]: 量産体制が未整備な状態での単独フルコミット参入は危険（出荷できる再現性と供給の確実性が前提）。
+                  - listitem [ref=f1e181]: 顧客が恐れるのは性能差そのものより、事故・納期・品質の再現性であり、受容性は「契約運用の再現性」に左右される。
+              - generic [ref=f1e182]:
+                - heading "合意内訳" [level=4] [ref=f1e183]
+                - generic [ref=f1e184]:
+                  - generic [ref=f1e185]:
+                    - generic [ref=f1e186]: 社会
+                    - generic [ref=f1e187]: n/a%
+                  - generic [ref=f1e188]:
+                    - generic [ref=f1e189]: 評議会
+                    - generic [ref=f1e190]: n/a%
+                  - generic [ref=f1e191]:
+                    - generic [ref=f1e192]: 統合分析
+                    - generic [ref=f1e193]: n/a%
+            - generic [ref=f1e194]:
+              - heading "評議会メンバー" [level=4] [ref=f1e195]
+              - generic [ref=f1e196]:
+                - generic [ref=f1e197]:
+                  - text: 佐伯 さえ（会社員・35歳・四国）
+                  - generic [ref=f1e198]: 条件付き反対
+                - generic [ref=f1e199]:
+                  - text: 北川 まこと（事務職・49歳・中部）
+                  - generic [ref=f1e200]: 条件付き反対
+                - generic [ref=f1e201]:
+                  - text: 村上 たえ（教師・53歳・関西（郊外））
+                  - generic [ref=f1e202]: 条件付き反対
+                - generic [ref=f1e203]:
+                  - text: 森下 ひろこ（エンジニア・71歳・関東（郊外））
+                  - generic [ref=f1e204]: 条件付き反対
+                - generic [ref=f1e205]:
+                  - text: 田中 ゆりな（パート/アルバイト・19歳・中部）
+                  - generic [ref=f1e206]: 条件付き賛成
+                - generic [ref=f1e207]:
+                  - text: 小島 れん（退職者・18歳・関東（都市部））
+                  - generic [ref=f1e208]: 条件付き賛成
+                - generic [ref=f1e209]: 高瀬 みつお（policy_analyst）
+                - generic [ref=f1e210]: 遠藤 さとし（technologist）
+                - generic [ref=f1e211]: 本間 かずあき（economist）
+                - generic [ref=f1e212]: 白石 えりこ（legal_scholar）
+              - generic [ref=f1e213]:
+                - heading "反証役サマリー" [level=4] [ref=f1e214]
+                - paragraph [ref=f1e215]: "反証役の懸念: 怖いのは、規制リスクや競合対抗より「量産体制がないままPoCで消耗する」こと。顧客受容性は企業側の努力で買い叩けるけど、納期遅れと品質不安は値引きじゃ埋まらない。"
+            - generic [ref=f1e216]:
+              - paragraph [ref=f1e218]: 本文レポートも下に保持します。
+              - generic [ref=f1e219]:
+                - heading "統合シミュレーションレポート" [level=2] [ref=f1e220]
+                - paragraph
+                - paragraph
+                - heading "Decision Memo" [level=3] [ref=f1e221]
+                - paragraph
+                - paragraph [ref=f1e222]:
+                  - strong [ref=f1e223]: 推奨
+                  - text: ": 条件付きGo"
+                  - strong [ref=f1e224]: 判断スコア
+                  - text: ": 65%"
+                - paragraph [ref=f1e225]: 固体電池の技術力は評価され得るが、新規参入の最大論点は“量産できるか（納期と歩留まり）”“規制/認証に遅れないか”“品質と安全責任を運用で担保できるか”。これらが未整備なら、顧客離反・競合の価格攻勢・資金繰り悪化に直結し、最終的に生活と取引の安定を損なうため、まず供給安定と規制対応の確実化が条件になる。
+                - paragraph
+                - heading "議論ハイライト" [level=4] [ref=f1e226]
+                - text: 議論は「量産未整備のままの単独参入は危険」という点で強く一致し、条件付き参入へ収束した。決め手は技術よりも“納期遅延→保証→回収→在庫滞留”によるキャッシュアウト連鎖を、責任上限と欠陥判定・未達時フローで止められるか
+                - listitem [ref=f1e227]: "合意: 量産体制が未整備な状態での単独フルコミット参入は危険（出荷できる再現性と供給の確実性が前提）。 (合意形成済み)"
+                - listitem [ref=f1e228]: "合意: 顧客が恐れるのは性能差そのものより、事故・納期・品質の再現性であり、受容性は「契約運用の再現性」に左右される。 (合意形成済み)"
+                - listitem [ref=f1e229]: "合意: 納期遅延→返品/保証→回収→在庫滞留の“キャッシュアウト連鎖”が最重要の失敗パターンとして共有された。 (合意形成済み)"
+                - listitem [ref=f1e230]: "対立: 参入の可否の最終判断（原則） [unresolved]"
+                - listitem [ref=f1e231]: "対立: 契約設計の主眼（“何を最優先で縫うか”） [unresolved]"
+                - listitem [ref=f1e232]: "対立: 共同量産/実証の是非と条件の厳格さ [unresolved]"
+                - listitem [ref=f1e233]: "> 「量産未整備のまま出荷すると、歩留まり/納期の不確実性が納期遅延→返品・保証→回収・在庫滞留というキャッシュアウト連鎖を起こし、さらに規制・認証が後追いで締まるので出費だけ先行する。競合は値下げと供給量で代替調達を誘発し、結局“技術勝負...」 — 佐伯 さえ（会社員・35歳） (最も説得力があった主張)"
+                - paragraph
+                - paragraph
+                - heading "まだ足りない根拠" [level=4] [ref=f1e234]
+                - listitem [ref=f1e235]: KGデータなし
+                - paragraph
+                - paragraph
+                - separator [ref=f1e236]
+                - paragraph
+                - paragraph
+                - heading "エグゼクティブサマリー" [level=3] [ref=f1e237]
+                - paragraph
+                - paragraph [ref=f1e238]: 固体電池の技術力は評価され得るが、新規参入の最大論点は“量産できるか（納期と歩留まり）”“規制/認証に遅れないか”“品質と安全責任を運用で担保できるか”。これらが未整備なら、顧客離反・競合の価格攻勢・資金繰り悪化に直結し、最終的に生活と取引の安定を損なうため、まず供給安定と規制対応の確実化が条件になる。
+                - paragraph [ref=f1e239]:
+                  - strong [ref=f1e240]: "判断: 条件付きGo"
+                  - text: "（合意度: 65%）"
+                - paragraph
+                - paragraph
+                - separator [ref=f1e241]
+                - paragraph
+                - paragraph
+                - heading "社会の声" [level=3] [ref=f1e242]
+                - paragraph
+                - paragraph [ref=f1e243]: "合計200人のエージェントに意見を聴取しました。スタンス分布は 賛成: 19%、条件付き賛成: 34%、中立: 16%、条件付き反対: 24%、反対: 7% となり、平均信頼度は77%でした。"
+                - paragraph [ref=f1e244]: "主な懸念として以下が挙がりました:"
+                - listitem [ref=f1e245]: 一番怖いのは、固体電池の技術は良くても“量産遅れ”で採用が後ろ倒しになり、顧客の検収タイミングを逃すこと。さらに競合が先に低価格・大量供給で席を取りに来ると、回収が長引いて資金繰りが厳しくなります。
+                - listitem [ref=f1e246]: 一番のリスクは、規制や認証で遅れて納期が崩れることと、量産未整備で品質・コストが出ないこと。顧客受容性も“技術の良さ”じゃなく“届くかと安いか”で決まるから、失敗時の損失がデカい。
+                - listitem [ref=f1e247]: 一番怖いのは、量産の立ち上げ遅延で納期が崩れ、顧客が別サプライヤーへ乗り換えること。固体は魅力でも、認証・安全性・量産コストの壁で“良い技術”が“高いゴミ”になる最悪を先に踏む。
+                - listitem [ref=f1e248]: 私の経験上、立ち上げ期の品質ばらつきは避けにくいです。電池は安全上のトラブルが一度表に出ると回復が難しく、監査・回収・賠償の負担が増えます。既存競合が販促や契約条件で強く出ると、価格で防戦せざるを得なくなる点も心配です。
+                - listitem [ref=f1e249]: 最悪は、性能は良くても量産立上げで歩留まりが崩れて納期が乱れ、顧客の信頼を失うことです。規制や安全対応も後追いになれば、手戻り費用と責任が増えて自社が耐えにくいと思います。
+                - paragraph
+                - paragraph
+                - separator [ref=f1e250]
+                - paragraph
+                - paragraph
+                - heading "議論のストーリー" [level=3] [ref=f1e251]
+                - paragraph
+                - paragraph [ref=f1e252]: 会議の緊張は「約束すれば進められる」という前向きさと、「約束では止まらない」という恐怖が衝突した瞬間に最大化した。森下は納期保証や損害負担の曖昧さが“夜も眠れない案件”を再生産すると怒り、高瀬はそれを認めつつ、供給保証単独では免責や品質未達の返金・損害負担が絵に描いた餅になり得ると踏み込んだ。議論は技術の良し悪しではなく、事故った時の支払い停止条件を誰がどう縫い込むかへ一気に切り替わった。
+                - paragraph
+                - heading "転機" [level=4] [ref=f1e253]
+                - text: ラウンド2で、遠藤 さとしが共同量産・実証でデータを潰す案を、資金・損害が止まる“支払い構造”まで契約とKPIで縫うべきだと修正した。。議論の軸が「技術/データ」から「キャッシュアウトと停止条件の設計」へ移り、条件提示が具体化した。
+                - paragraph
+                - paragraph
+                - heading "最も白熱した議論" [level=4] [ref=f1e254]
+                - strong [ref=f1e255]: "論点: 供給保証だけでは不十分で、事故らない設計として責任分界・品質KPIまで契約に入れるべきか"
+                - paragraph
+                - paragraph [ref=f1e256]: 森下は供給保証“だけ”では再現性がなく、納期保証・解析費/交換費負担・安全認証と実車検証遅延時のペナルティまで縛って初めて約束が実装になると反論。高瀬は同意し、保証の免責条件や品質未達時の返金/損害負担が曖昧だと絵に描いた餅になるため、量産KPI（歩留まり等）と認証・不具合時の責任分界（リコール上限、保険）を契約範囲に入れるべきだと補強した。
+                - paragraph
+                - separator [ref=f1e257]
+                - paragraph
+                - paragraph
+                - heading "エージェントの声" [level=3] [ref=f1e258]
+                - paragraph
+                - paragraph [ref=f1e259]: "> 「量産体制が未整備の段階で参入すると、最初に襲うのは顧客受容性じゃなくて、歩留まりと品質ばらつきによる損失です。納期遅延→返品/保証→回収・在庫滞留で資金が溶けます。技術自慢だけでは耐えられません。」 > — 佐伯 さえ（ラウンド1）"
+                - paragraph [ref=f1e260]: "> 「“固体電池の技術があります”って言っても、顧客が一番怖がってるのは性能じゃなくて事故と納期ですよ。量産の工程能力が未整備なら「約束だけ」に見える。最悪は“出荷できない”まま信用だけ失うことです。」 > — 森下 ひろこ（ラウンド1）"
+                - paragraph [ref=f1e261]: "> 「量産未整備のまま日本のEVバッテリー市場へ正面突破すると、法規制と契約責任が一気に重くのしかかります。補償範囲（リコール費用・代替費用・損害賠償）が無制限に膨らむ設計になりがちです。」 > — 白石 えりこ（ラウンド1）"
+                - paragraph [ref=f1e262]: "> 「供給保証は免責条件や品質未達時の返金・損害負担が曖昧だと絵に描いた餅になります。条件は“出荷できること”を証明するための量産KPIと、認証・不具合時の責任分界まで契約範囲に入れるべきです。」 > — 高瀬 みつお（ラウンド1）"
+                - paragraph
+                - separator [ref=f1e263]
+                - paragraph
+                - paragraph
+                - heading "信念の変化" [level=3] [ref=f1e264]
+                - paragraph
+                - paragraph
+                - heading "遠藤 さとし" [level=4] [ref=f1e265]
+                - text: "当初: 量産未整備でも、共同量産＋実証基地で受容性と規制適合を先に潰す「条件付き賛成」。 → 最終: 資金・損害が“止まる”構造として、責任上限やマイルストン停止まで契約とKPIで縫う条件付き賛成。"
+                - paragraph
+                - paragraph [ref=f1e266]: 当初は、技術が安全側にあるとしても、固体電池は“量産で安定して出せるか”が要で、共同製造や実証で運用データを固めれば顧客不安は潰せると主張した。しかし後の反論で、共同でも稼働・納期帰属が揺れ、データが揃う前に資金が尽きるリスクが浮上。そこで「データ化」だけでなく、支払いと損害の止まり方を契約に落とす必要を受け入れ、KPIと停止条項を明確化した。
+                - paragraph
+                - heading "本間 かずあき" [level=4] [ref=f1e267]
+                - text: "当初: 参入は合理的だが、量産未整備のままフルコミットは危険。契約で需要と責任を先に固定すべき。 → 最終: 法務に加え、経済性も同時に設計し、限定供給で“売上固定化”までを現金KPIで段階解放する条件付き参入へ収束。"
+                - paragraph
+                - paragraph [ref=f1e268]: 本間は、数字が示すのは技術性能よりも量産で単価を落とし保証責任を引き受けられるかだと説明し、量産ライン稼働マイルストンと責任分界の合意が必要だとした。ところが共同スキームの不確実性などから、撤退コストが膨らむ懸念が強まる。そこで「法的に握るだけ」では足りず、保証コスト期待値や段階的拡大の経済モデル、顧客受容性の検証を現金KPIに落として主軸化していった。
+                - paragraph
+                - heading "白石 えりこ" [level=4] [ref=f1e269]
+                - text: "当初: 単独ではなく、法的・契約的にリスク遮断した段階参入。責任上限や欠陥判定手続を重視。 → 最終: 量産KPIやマイルストンに加え、欠陥認定手続と法的射程（免責・期間制限の限界）を“止まり方”として最優先に位置付ける。"
+                - paragraph
+                - paragraph [ref=f1e270]: 白石は、量産未整備の正面突破は製造物責任や回収制度などの実務コストを直撃し、契約で補償範囲が無制限に膨らみやすい点を強調した。その後、他者の「現金KPI」要求に対し、契約だけでは無効化できない法理の領域があり、責任の射程を確定させる粒度が重要だと再整理。止まり方（欠陥の認定手続、免責の限界、求償設計）を最優先に据える方向へ具体化された。
+                - paragraph
+                - separator [ref=f1e271]
+                - paragraph
+                - paragraph
+                - heading "合意と対立" [level=3] [ref=f1e272]
+                - paragraph
+                - paragraph
+                - heading "合意に至った点" [level=4] [ref=f1e273]
+                - listitem [ref=f1e274]: 量産体制が未整備な状態での単独フルコミット参入は危険（出荷できる再現性と供給の確実性が前提）。
+                - listitem [ref=f1e275]: 顧客が恐れるのは性能差そのものより、事故・納期・品質の再現性であり、受容性は「契約運用の再現性」に左右される。
+                - listitem [ref=f1e276]: 納期遅延→返品/保証→回収→在庫滞留の“キャッシュアウト連鎖”が最重要の失敗パターンとして共有された。
+                - listitem [ref=f1e277]: 参入するなら共同/限定供給の段階参入が現実的で、量産KPI（歩留まり、不良率、納期遵守、稼働率）と責任分界（保証・解析・交換・回収の上限/範囲）を契約で先に固める必要がある。
+                - listitem [ref=f1e278]: 規制・認証は後追いでコスト/スケジュールが膨らみ得るため、机上適合ではなく試験ロードマップと責任分界を織り込むべき。
+                - listitem [ref=f1e279]: 共同/実証基地を使う場合でも、共同先の事情（ライン稼働・納期）が揺れる点を前提に、帰属・ペナルティ・代替供給の設計が必須。
+                - paragraph
+                - paragraph
+                - heading "残された対立" [level=4] [ref=f1e280]
+                - listitem [ref=f1e281]:
+                  - strong [ref=f1e282]: 参入の可否の最終判断（原則）
+                  - text: ": 量産未整備のまま参入は反対。責任上限・欠陥判定手続・未達時の供給停止/返金/回収手順まで確定できない限り見送る。, 現状は反対。量産稼働と原価、回収筋が見える（現金KPIで回る）まで待ってから条件付きにする。, 条件付き反対。量産KPIと責任分界・保証上限・供給KPI・回収手順が契約で確定できない限り見送る。, 原則反対。供給保証だけでなく、事故らない設計として納期保証、不具合解析・交換費負担、認証/実車検証遅延のペナルティまで契約に縛れれば検討。, 条件付き賛成だが単独突入は不可。量産・認証・責任分界が先に固まり現金KPIで回るなら段階的に容認。, 技術だけでは不足。量産・認証・責任分界（保証コスト/不具合解析含む）を実装計画と契約で示せない限り見送り。, 条件付きで賛成。単独フルコミットではなく、共同量産＋実証基地で“出荷できる証拠”と契約KPIを先に潰せるなら前進。, 参入は合理的だが、量産未整備のままの単独フルコミットは回避。契約で需要と責任を固定し段階拡大。, 参入は可。ただし損失の止まり方（法的に止まらない責任の射程）を最優先で遮断する必要があり、段階的な共同/限定供給に絞る。"
+                - listitem [ref=f1e283]:
+                  - strong [ref=f1e284]: 契約設計の主眼（“何を最優先で縫うか”）
+                  - text: ": 現金KPIとしての損失連鎖（納期→保証→回収→在庫）を止めるため、責任上限・回収手順・未達時停止/返金を最優先で確定。, 技術KPIではなく現金KPIに寄せ、共同/限定供給＋段階マイルストンで“売上より支出が先行する状態”を回避。, 量産KPIより前に、製造物責任・欠陥判定手続・免責期間の限界など“止まり方”を法的に遮断することを最優先。, 責任上限だけでなく、量産・認証・品質保証まで含めた実装計画としての契約KPIが必要。"
+                - listitem [ref=f1e285]:
+                  - strong [ref=f1e286]: 共同量産/実証の是非と条件の厳格さ
+                  - text: ": 共同量産＋実証でデータ化し、契約KPI（受入検査合格見込み、規制試験ロードマップ）を先に固めれば有効。, 共同でも稼働率・納期遵守は共同先都合で揺れる。契約で回収まで保証できない限り甘い。, 共同でも“欠陥認定の手続権限”や“回収/交換/解析費の上限・フロー”が固まらないと止まらない。"
+                - paragraph
+                - paragraph
+                - heading "次の検証ステップ" [level=3] [ref=f1e287]
+                - paragraph
+                - paragraph
+                - listitem [ref=f1e288]: 量産体制が未整備な状態での単独フルコミット参入は危険（出荷できる再現性と供給の確実性が前提）。
+                - listitem [ref=f1e289]: 顧客が恐れるのは性能差そのものより、事故・納期・品質の再現性であり、受容性は「契約運用の再現性」に左右される。
+        - generic [ref=f1e290]:
+          - generic [ref=f1e291]:
+            - heading "Details" [level=3] [ref=f1e293]
+            - generic [ref=f1e294]:
+              - button "Society" [ref=f1e295] [cursor=pointer]
+              - button "Evidence" [ref=f1e296] [cursor=pointer]
+          - generic [ref=f1e297]:
+            - heading "Society Summary" [level=3] [ref=f1e299]
+            - generic [ref=f1e300]:
+              - generic [ref=f1e301]:
+                - generic [ref=f1e302]:
+                  - generic [ref=f1e303]: 人口
+                  - generic [ref=f1e304]: 10,000
+                - generic [ref=f1e305]:
+                  - generic [ref=f1e306]: 活性化
+                  - generic [ref=f1e307]: "200"
+                - generic [ref=f1e308]:
+                  - generic [ref=f1e309]: GPT検証
+                  - generic [ref=f1e310]: "0"
+                - generic [ref=f1e311]:
+                  - generic [ref=f1e312]: 評議会代表
+                  - generic [ref=f1e313]: "10"
+                - generic [ref=f1e314]:
+                  - generic [ref=f1e315]: 平均信頼度
+                  - generic [ref=f1e316]: 76.5%
+              - generic [ref=f1e317]:
+                - heading "主要な懸念" [level=4] [ref=f1e318]
+                - list [ref=f1e319]:
+                  - listitem [ref=f1e320]: 一番怖いのは、固体電池の技術は良くても“量産遅れ”で採用が後ろ倒しになり、顧客の検収タイミングを逃すこと。さらに競合が先に低価格・大量供給で席を取りに来ると、回収が長引いて資金繰りが厳しくなります。
+                  - listitem [ref=f1e321]: 一番のリスクは、規制や認証で遅れて納期が崩れることと、量産未整備で品質・コストが出ないこと。顧客受容性も“技術の良さ”じゃなく“届くかと安いか”で決まるから、失敗時の損失がデカい。
+                  - listitem [ref=f1e322]: 一番怖いのは、量産の立ち上げ遅延で納期が崩れ、顧客が別サプライヤーへ乗り換えること。固体は魅力でも、認証・安全性・量産コストの壁で“良い技術”が“高いゴミ”になる最悪を先に踏む。
+                  - listitem [ref=f1e323]: 私の経験上、立ち上げ期の品質ばらつきは避けにくいです。電池は安全上のトラブルが一度表に出ると回復が難しく、監査・回収・賠償の負担が増えます。既存競合が販促や契約条件で強く出ると、価格で防戦せざるを得なくなる点も心配です。
+                  - listitem [ref=f1e324]: 最悪は、性能は良くても量産立上げで歩留まりが崩れて納期が乱れ、顧客の信頼を失うことです。規制や安全対応も後追いになれば、手戻り費用と責任が増えて自社が耐えにくいと思います。
+              - generic [ref=f1e325]:
+                - heading "予測精度" [level=4] [ref=f1e326]
+                - generic [ref=f1e328]:
+                  - generic [ref=f1e329]: 分布予測
+                  - generic [ref=f1e330]: pending
+                  - generic [ref=f1e331]: 0/1 validated
+          - generic [ref=f1e332]:
+            - generic [ref=f1e333]:
+              - heading "深くレビューしてもらう" [level=3] [ref=f1e334]
+              - generic [ref=f1e335]: 準備中
+            - generic [ref=f1e336]:
+              - paragraph [ref=f1e337]: この結果をもとに、「よかった点」「気になる点」「見落としていそうな点」を深く整理します。
+              - generic [ref=f1e338]: レビュー機能の準備ができていません。管理者に確認してください。
+              - button "深くレビューしてもらう" [disabled] [ref=f1e339]
+      - generic [ref=f1e341]:
+        - generic [ref=f1e342]:
+          - generic [ref=f1e343]: Time-axis Forecast
+          - heading "t0..t5 の予測分布と駆動要因" [level=3] [ref=f1e344]
+          - paragraph [ref=f1e345]: 6 時点ホライズンの分布、駆動要因、What-if 比較を確認できます。
+        - button "時系列レポートを開く" [ref=f1e346] [cursor=pointer]

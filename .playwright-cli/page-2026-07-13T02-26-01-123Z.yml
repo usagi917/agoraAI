@@ -1,0 +1,18 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - link [ref=e6] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e8]:
+          - heading "Agent AI" [level=1] [ref=e9]
+          - paragraph [ref=e10]: Swarm Intelligence Simulation Platform
+      - navigation [ref=e11]:
+        - link "1件分析" [ref=e12] [cursor=pointer]:
+          - /url: /
+        - link "2条件比較" [ref=e13] [cursor=pointer]:
+          - /url: /compare
+        - link "母集団" [ref=e14] [cursor=pointer]:
+          - /url: /populations
+        - link "検証" [ref=e15] [cursor=pointer]:
+          - /url: /validate
+  - main [ref=e16]

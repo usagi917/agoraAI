@@ -1,4 +1,4 @@
-"""Validated runtime configuration for Liquid + GPT society activation."""
+"""Validated runtime configuration for optional full-population activation."""
 
 from __future__ import annotations
 
@@ -93,17 +93,17 @@ def load_hybrid_inference_config(raw: dict | None = None) -> HybridInferenceConf
     shadow_stop = min(shadow_stop, hard_limit)
 
     return HybridInferenceConfig(
-        enabled=bool(data.get("enabled", True)),
+        enabled=bool(data.get("enabled", False)),
         budget=BudgetConfig(hard_limit, reserve, shadow_stop),
         population_activation=_role_config(
             data.get("population_activation") or {},
             {
-                "provider": "liquid",
+                "provider": "openai",
                 "max_tokens": 160,
-                "max_concurrency": 1,
-                "chunk_size": 128,
-                "target_count": 10_000,
-                "minimal_output": True,
+                "max_concurrency": 20,
+                "chunk_size": 25,
+                "target_count": 200,
+                "minimal_output": False,
             },
         ),
         gpt_shadow=_role_config(

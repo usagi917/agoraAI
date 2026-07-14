@@ -58,21 +58,29 @@ def test_load_hybrid_config_enforces_one_dollar_run_policy() -> None:
     assert config.budget.total_envelope_usd == pytest.approx(1.0)
 
 
-def test_repository_hybrid_config_targets_full_liquid_population() -> None:
+def test_repository_runtime_is_openai_only_and_keeps_paid_activation_bounded() -> None:
     config = load_hybrid_inference_config()
+    providers_config = settings.load_llm_providers_config()
+    providers = providers_config["providers"]
 
-    assert config.enabled is True
-    assert config.population_activation.provider == "liquid"
-    assert config.population_activation.target_count == 10_000
-    assert config.population_activation.max_concurrency == 1
-    assert config.population_activation.chunk_size == 128
-    assert config.population_activation.minimal_output is True
+    assert config.enabled is False
+    assert config.population_activation.provider == "openai"
+    assert config.population_activation.target_count == 200
+    assert config.population_activation.max_concurrency == 20
+    assert config.population_activation.chunk_size == 25
+    assert config.population_activation.minimal_output is False
     assert config.gpt_shadow.provider == "openai_shadow"
     assert config.gpt_shadow.sample_size == 800
     assert config.gpt_shadow.estimated_output_tokens >= 384
     assert config.gpt_escalation.provider == "openai_escalation"
     assert config.gpt_escalation.max_calls == 40
     assert config.gpt_escalation.estimated_output_tokens >= 512
+    assert set(providers) == {"openai", "openai_shadow", "openai_escalation"}
+    assert {provider["type"] for provider in providers.values()} == {"openai"}
+    assert {
+        provider["api_base"] for provider in providers.values()
+    } == {"https://api.openai.com/v1"}
+    assert providers_config["fallback_order"] == ["openai"]
 
 
 def test_hybrid_budget_guard_stops_shadow_before_reserve() -> None:

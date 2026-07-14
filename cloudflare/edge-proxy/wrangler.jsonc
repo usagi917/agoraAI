@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "agentai-thursday-demo",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
+  },
+  "vpc_networks": [
+    {
+      "binding": "AGENTAI_VPC",
+      "tunnel_id": "ab65fa79-022f-4fbb-97b9-e60a14e2f486",
+      "remote": true
+    }
+  ]
+}

@@ -1,23 +1,6 @@
-# マルチLLMプロバイダ設定
-# Society モードで住民ごとに異なるLLMプロバイダを割り当てる
+# OpenAI API 専用プロバイダ設定
 
 providers:
-  liquid:
-    type: ollama
-    model: hf.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF:Q8_0
-    api_base: http://127.0.0.1:11434
-    requires_api_key: false
-    allow_fallback: false
-    keep_alive: 30m
-    timeout_seconds: 1800
-    cost_per_1k_input: 0.0
-    cost_per_1k_output: 0.0
-    enabled: true
-    rate_limit:
-      rpm: 100000
-      tpm: 100000000
-      max_concurrent: 1
-
   openai:
     type: openai
     model: gpt-5.4-nano
@@ -66,34 +49,6 @@ providers:
       tpm: 200000
       max_concurrent: 5
 
-  gemini:
-    type: openai  # Gemini は OpenAI互換エンドポイント
-    model: gemini-3.1-flash-lite-preview
-    api_base: https://generativelanguage.googleapis.com/v1beta/openai
-    env_key: GOOGLE_API_KEY
-    cost_per_1k_input: 0.0
-    cost_per_1k_output: 0.0
-    enabled: true
-    rate_limit:
-      rpm: 1000
-      tpm: 1000000
-      max_concurrent: 30
-
-  anthropic:
-    type: anthropic
-    model: claude-haiku-4-5-20251001
-    api_base: https://api.anthropic.com
-    env_key: ANTHROPIC_API_KEY
-    cost_per_1k_input: 0.0008
-    cost_per_1k_output: 0.004
-    enabled: true
-    rate_limit:
-      rpm: 500
-      tpm: 200000
-      max_concurrent: 20
-
-# フォールバック順序: 有効なプロバイダが使えない場合の代替
+# 既存データに古い provider 名が残っていても OpenAI へ集約する。
 fallback_order:
   - openai
-  - gemini
-  - anthropic

@@ -11,6 +11,7 @@ build/
 
 # Node
 node_modules/
+.wrangler/
 .pnpm-store/
 playwright-report/
 frontend/test-results/

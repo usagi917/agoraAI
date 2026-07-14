@@ -52,7 +52,7 @@ flowchart LR
 
 | Route | 役割 | 主な内容 |
 | --- | --- | --- |
-| `/` | LaunchPad | 質問ウィザード、自由入力、ファイル添付、分析モード選択、実行履歴 |
+| `/` | LaunchPad | 質問ウィザード、自由入力、ファイル添付、分析モード選択 |
 | `/sim/:id` | Live Simulation | SSE 進捗、Activity Feed、社会反応、会話、ライブグラフ、Theater UI（ディベートカード・対話ストリーム） |
 | `/sim/:id/results` | Results | Decision Brief、シナリオ比較、Propagation、Transcript、グラフパネル（Social / Knowledge Graph、折りたたみ可）、Codex Review |
 | `/validate/:id?` | Validation | holdout 調査トピックの選択、診断シミュレーション、分布比較、hit/partial/miss 判定 |
@@ -63,13 +63,13 @@ flowchart LR
 実行時の大まかな流れは次の3段です。
 
 1. `Society Pulse`
-人口設定に基づいて大規模な合成人口を生成します。既定のハイブリッド構成では10,000人全員をローカルLiquidで活性化し、GPTの層化標本照合と全人口の社会ネットワーク更新を経て集約します。
+人口設定に基づいて10,000人の合成人口を生成します。既定構成では代表サンプル200人をOpenAI APIで活性化し、その反応を全人口の社会ネットワークへ伝播して集約します。
 2. `Council`
 市民代表と専門家を選び、複数ラウンドの構造化議論を行います。
 3. `Synthesis`
 社会反応、議論、品質情報をまとめて Decision Brief と比較可能なシナリオを生成します。
 
-M4 MacBook Air 32 GB向けのモデル、人数、費用包絡、実測時間、再開方法は [Liquid + GPT 1万人ハイブリッド推論](docs/hybrid-inference.md) を参照してください。
+過去のローカル推論構成は、参考資料として [Liquid + GPT 1万人ハイブリッド推論](docs/hybrid-inference.md) に残しています。現在の既定実行では使用しません。
 
 ### プリセット
 
@@ -132,7 +132,7 @@ flowchart LR
         Redis["Redis compose<br/>optional in local dev"]
         Config["config/*.yaml"]
         Templates["templates/ja/*.yaml"]
-        LLM["OpenAI-compatible APIs / Anthropic adapter / Ollama"]
+        LLM["OpenAI API"]
     end
 
     Frontend --> API
@@ -205,7 +205,7 @@ docker compose up --build
 
 注意:
 
-- 既定 provider は `openai` です。
+- 実行時 provider は `openai` のみです。
 - 新規シミュレーションを動かすには通常 `OPENAI_API_KEY` が必要です。
 - API キーがなくてもアプリは起動しますが、ライブ実行は無効になります。
 

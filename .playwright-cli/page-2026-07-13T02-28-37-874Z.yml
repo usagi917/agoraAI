@@ -1,0 +1,72 @@
+- generic [ref=f1e3]:
+  - banner [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - link [ref=f1e6] [cursor=pointer]:
+        - /url: /
+        - generic [ref=f1e8]:
+          - heading "Agent AI" [level=1] [ref=f1e9]
+          - paragraph [ref=f1e10]: Swarm Intelligence Simulation Platform
+      - navigation [ref=f1e11]:
+        - link "1件分析" [ref=f1e12] [cursor=pointer]:
+          - /url: /
+        - link "2条件比較" [ref=f1e13] [cursor=pointer]:
+          - /url: /compare
+        - link "母集団" [ref=f1e14] [cursor=pointer]:
+          - /url: /populations
+        - link "検証" [ref=f1e15] [cursor=pointer]:
+          - /url: /validate
+  - main [ref=f1e16]:
+    - generic [ref=f1e18]:
+      - generic [ref=f1e19]:
+        - generic [ref=f1e20]:
+          - generic [ref=f1e21]: Social pulse
+          - strong [ref=f1e22]: selection · Round 0
+        - generic [ref=f1e23]: Live
+        - generic [ref=f1e25]:
+          - generic [ref=f1e26]:
+            - term [ref=f1e27]: 活動中
+            - definition [ref=f1e28]: "1"
+          - generic [ref=f1e29]:
+            - term [ref=f1e30]: 変化
+            - definition [ref=f1e31]: "0"
+          - generic [ref=f1e32]:
+            - term [ref=f1e33]: 代表
+            - definition [ref=f1e34]: "101"
+        - generic [ref=f1e35]:
+          - generic [ref=f1e36]: エージェント検索
+          - searchbox "エージェント検索" [ref=f1e37]
+      - generic [ref=f1e38]:
+        - generic [ref=f1e39]:
+          - generic:
+            - generic:
+              - strong: 社会ネットワーク
+              - generic: 検索またはノード選択で詳しく確認
+            - generic:
+              - text: 代表 101人
+              - generic: /
+              - text: 全体 101人
+          - img "ソーシャルグラフ。代表エージェント101人、全体101人、関係141件。ノードを選択すると詳細を確認できます。" [ref=f1e40]
+          - generic "グラフ表現の凡例" [ref=f1e42]:
+            - generic [ref=f1e43]: ● 市民代表
+            - generic [ref=f1e44]: ■ 専門家
+            - generic [ref=f1e45]: 発光 = 活動度
+        - complementary "グラフ詳細" [ref=f1e46]:
+          - generic [ref=f1e47]:
+            - text: Inspector
+            - heading "人物または関係を選択" [level=3] [ref=f1e48]
+            - paragraph [ref=f1e49]: 最近の活動、立場、接続先と影響履歴を確認できます。
+      - generic [ref=f1e50]:
+        - generic [ref=f1e51]: Activity timeline
+        - list "グラフ活動履歴" [ref=f1e53]:
+          - listitem [ref=f1e54] [cursor=pointer]:
+            - generic [ref=f1e55]: R0
+            - strong [ref=f1e56]: phase_changed
+            - generic [ref=f1e57]: population
+          - listitem [ref=f1e58] [cursor=pointer]:
+            - generic [ref=f1e59]: R0
+            - strong [ref=f1e60]: phase_changed
+            - generic [ref=f1e61]: selection
+          - listitem [ref=f1e62] [cursor=pointer]:
+            - generic [ref=f1e63]: R0
+            - strong [ref=f1e64]: node_status
+            - generic [ref=f1e65]: 101人 selected

@@ -74,6 +74,11 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'e2e') {
     name: 'graph-dev',
     component: () => import('./pages/GraphDevPage.vue'),
   })
+  router.addRoute({
+    path: '/__dev__/dialogue',
+    name: 'dialogue-demo',
+    component: () => import('./pages/DialogueDemoPage.vue'),
+  })
 }
 
 export default router

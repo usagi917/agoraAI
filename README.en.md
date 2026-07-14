@@ -52,7 +52,7 @@ How to read it:
 
 | Route | Purpose | Main contents |
 | --- | --- | --- |
-| `/` | LaunchPad | guided question builders, free-form prompt, file upload, analysis mode selection, run history |
+| `/` | LaunchPad | guided question builders, free-form prompt, file upload, analysis mode selection |
 | `/sim/:id` | Live Simulation | SSE progress, activity feed, social response views, conversations, live graph, Theater UI (debate cards, dialogue stream) |
 | `/sim/:id/results` | Results | Decision Brief, scenario comparison, propagation, transcript, graph panel (Social / Knowledge Graph, collapsible), Codex Review |
 | `/validate/:id?` | Validation | holdout survey topic selection, diagnostic simulation, distribution comparison, hit/partial/miss verdict |
@@ -63,7 +63,7 @@ How to read it:
 The main execution flow has three stages:
 
 1. `Society Pulse`
-Build a large synthetic population from config and aggregate reactions from selected agents.
+Build a 10,000-person synthetic population, activate a representative sample of 200 agents through the OpenAI API, and propagate those reactions across the full social network.
 2. `Council`
 Pick citizen representatives and experts, then run a structured multi-round debate.
 3. `Synthesis`
@@ -130,7 +130,7 @@ flowchart LR
         Redis["Redis compose<br/>optional in local dev"]
         Config["config/*.yaml"]
         Templates["templates/ja/*.yaml"]
-        LLM["OpenAI-compatible APIs / Anthropic adapter / Ollama"]
+        LLM["OpenAI API"]
     end
 
     Frontend --> API
@@ -203,7 +203,7 @@ docker compose up --build
 
 Notes:
 
-- The default provider is `openai`.
+- The runtime provider is OpenAI only.
 - Running new simulations usually requires `OPENAI_API_KEY`.
 - The app can still boot without API keys, but live execution will be disabled.
 

@@ -80,51 +80,38 @@ describe('LaunchPadPage', () => {
     expect(push).toHaveBeenCalledWith('/sim/sim-1')
   })
 
-  it('shows Japanese status label with pulse-dot for running simulations', async () => {
-    apiMocks.listSimulations.mockResolvedValue([
-      {
-        id: 'sim-running',
-        project_id: null,
-        mode: 'standard',
-        status: 'running',
-        template_name: 'market_entry',
-        execution_profile: 'standard',
-        colony_count: 1,
-        pipeline_stage: 'single',
-        run_id: null,
-        swarm_id: null,
-        created_at: '2026-04-01T00:00:00Z',
-        completed_at: null,
-      },
-      {
-        id: 'sim-done',
-        project_id: null,
-        mode: 'standard',
-        status: 'completed',
-        template_name: 'policy_impact',
-        execution_profile: 'standard',
-        colony_count: 1,
-        pipeline_stage: 'completed',
-        run_id: null,
-        swarm_id: null,
-        created_at: '2026-03-31T00:00:00Z',
-        completed_at: '2026-03-31T01:00:00Z',
-      },
-    ])
-
+  it('does not expose or fetch simulation history on the launchpad', async () => {
     const wrapper = mount(LaunchPadPage, {
       global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
     })
     await flushPromises()
 
-    const badges = wrapper.findAll('.status-badge')
-    const runningBadge = badges.find(b => b.classes().includes('status-running'))
-    expect(runningBadge).toBeDefined()
-    expect(runningBadge!.text()).toBe('実行中')
+    expect(wrapper.text()).not.toContain('実行履歴')
+    expect(wrapper.find('.history-details').exists()).toBe(false)
+    expect(apiMocks.listSimulations).not.toHaveBeenCalled()
+  })
 
-    const completedBadge = badges.find(b => b.classes().includes('status-completed'))
-    expect(completedBadge).toBeDefined()
-    expect(completedBadge!.text()).toBe('完了')
+  it('shows exactly one completed analysis example linking to its result', async () => {
+    const wrapper = mount(LaunchPadPage, {
+      global: {
+        stubs: {
+          RouterLink: {
+            props: ['to'],
+            template: '<a :href="to"><slot /></a>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    const examples = wrapper.findAll('[data-testid="featured-example-card"]')
+    expect(examples).toHaveLength(1)
+    expect(examples[0].text()).toContain('食生活改善サブスク')
+    expect(examples[0].text()).toContain('想定顧客へのインタビュー形式')
+    expect(examples[0].text()).toContain('分析完了')
+    expect(examples[0].attributes('href')).toBe(
+      '/sim/db6bbd23-d31c-461c-8e18-6398a44bd4b9/results',
+    )
   })
 
   it('keeps the launch button clickable-state stable while a launch is pending', async () => {

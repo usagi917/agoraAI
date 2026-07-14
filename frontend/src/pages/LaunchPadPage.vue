@@ -4,16 +4,13 @@ import { useRouter } from 'vue-router'
 import {
   getHealth,
   getTemplates,
-  listSimulations,
   createProject,
   uploadDocument,
   createSimulation,
   type HealthResponse,
   type TemplateResponse,
-  type SimulationListItem,
 } from '../api/client'
 import InputPanel from '../components/InputPanel.vue'
-import { parseServerDate } from '../utils/format'
 
 const router = useRouter()
 
@@ -29,16 +26,17 @@ const analysisModes = [
 const promptText = ref('')
 const files = ref<File[]>([])
 const isLoading = ref(false)
-const recentSimulations = ref<SimulationListItem[]>([])
 const runtimeHealth = ref<HealthResponse | null>(null)
 const bootstrapError = ref('')
 const examplesOpen = ref(false)
 const advancedOpen = ref(false)
 // advanced options removed for simplicity
 
-function formatServerDateTime(value?: string | null) {
-  const ms = parseServerDate(value)
-  return ms != null ? new Date(ms).toLocaleString('ja-JP') : ''
+const featuredExample = {
+  simulationId: 'db6bbd23-d31c-461c-8e18-6398a44bd4b9',
+  category: 'マーケティング調査',
+  title: '食生活改善サブスクは、20〜30代の一人暮らしに受け入れられるか？',
+  summary: '利用をためらう理由、継続条件、月額1,980円の価格受容性、刺さる訴求を想定顧客へのインタビュー形式で検証した実際の分析結果です。',
 }
 
 // Question Wizard state
@@ -174,10 +172,9 @@ const selectedModeInfo = computed(() => (
 
 onMounted(async () => {
   try {
-    const [health, tmpl, sims] = await Promise.all([getHealth(), getTemplates(), listSimulations()])
+    const [health, tmpl] = await Promise.all([getHealth(), getTemplates()])
     runtimeHealth.value = health
     templates.value = tmpl
-    recentSimulations.value = sims
     if (templates.value.length > 0) {
       selectedTemplate.value = templates.value[0].name
     }
@@ -226,43 +223,6 @@ async function handleLaunch() {
     alert('シミュレーションの開始に失敗しました。')
   } finally {
     isLoading.value = false
-  }
-}
-
-function getTemplateName(templateName: string | null | undefined): string {
-  const map: Record<string, string> = {
-    market_entry: '市場参入分析',
-    policy_impact: '政策影響分析',
-    scenario_exploration: 'シナリオ探索',
-  }
-  return templateName ? (map[templateName] ?? templateName) : 'カスタム分析'
-}
-
-function getStatusColor(status: string) {
-  switch (status) {
-    case 'completed': return 'status-completed'
-    case 'running': return 'status-running'
-    case 'failed': return 'status-failed'
-    default: return 'status-queued'
-  }
-}
-
-function getStatusLabel(status: string) {
-  switch (status) {
-    case 'completed': return '完了'
-    case 'running': return '実行中'
-    case 'failed': return '失敗'
-    default: return '待機中'
-  }
-}
-
-function getPipelineStageLabel(stage: string) {
-  switch (stage) {
-    case 'single': return 'Stage 1'
-    case 'swarm': return 'Stage 2'
-    case 'pm_board': return 'Stage 3'
-    case 'completed': return '完了'
-    default: return stage
   }
 }
 
@@ -402,47 +362,33 @@ function getPipelineStageLabel(stage: string) {
       </div>
     </details>
 
-    <!-- History -->
-    <details class="history-details">
-      <summary class="history-summary">実行履歴</summary>
-      <section class="section">
-      <div class="section-header">
-        <h3 class="section-title">実行履歴</h3>
-        <span v-if="recentSimulations.length > 0" class="section-badge">{{ recentSimulations.length }} 件</span>
+    <section class="featured-example" aria-labelledby="featured-example-title">
+      <div class="featured-example-heading">
+        <div>
+          <p class="featured-example-eyebrow">実際の分析結果</p>
+          <h3 id="featured-example-title" class="featured-example-title">分析事例</h3>
+        </div>
+        <span class="featured-example-count">1 CASE</span>
       </div>
-      <div v-if="recentSimulations.length === 0" class="empty-state">
-        <p class="empty-state-text">まだ分析がありません</p>
-        <p class="empty-state-hint">上のテンプレートを選んで、最初の質問を投げてみましょう</p>
-      </div>
-      <div v-else class="history-list">
-        <router-link
-          v-for="sim in recentSimulations"
-          :key="sim.id"
-          :to="sim.status === 'completed' ? `/sim/${sim.id}/results` : `/sim/${sim.id}`"
-          class="history-item"
-        >
-          <div class="history-left">
-            <span class="status-dot" :class="getStatusColor(sim.status)"></span>
-            <div class="history-info">
-              <span class="history-template">
-                {{ getTemplateName(sim.template_name) }}
-              </span>
-              <span class="history-meta">
-                {{ sim.execution_profile }}
-                <template v-if="sim.pipeline_stage && sim.pipeline_stage !== 'pending' && sim.status === 'running'">
-                  · {{ getPipelineStageLabel(sim.pipeline_stage) }}
-                </template>
-              </span>
-            </div>
+
+      <router-link
+        :to="`/sim/${featuredExample.simulationId}/results`"
+        class="featured-example-card"
+        data-testid="featured-example-card"
+      >
+        <div class="featured-example-body">
+          <div class="featured-example-meta">
+            <span class="featured-example-status"><span class="featured-example-status-dot" />分析完了</span>
+            <span>{{ featuredExample.category }}</span>
+            <span>標準分析</span>
           </div>
-          <div class="history-right">
-            <span class="status-badge" :class="getStatusColor(sim.status)">{{ getStatusLabel(sim.status) }}</span>
-            <span class="history-date">{{ formatServerDateTime(sim.created_at) }}</span>
-          </div>
-        </router-link>
-      </div>
-      </section>
-    </details>
+          <h4 class="featured-example-question">{{ featuredExample.title }}</h4>
+          <p class="featured-example-summary">{{ featuredExample.summary }}</p>
+        </div>
+        <span class="featured-example-link">結果を見る <span aria-hidden="true">→</span></span>
+      </router-link>
+    </section>
+
   </div>
 </template>
 
@@ -516,21 +462,119 @@ function getPipelineStageLabel(stage: string) {
   margin-right: var(--space-2);
 }
 
-/* Empty state */
-.empty-state {
-  text-align: center;
-  padding: var(--space-8) var(--space-4);
+/* Featured example */
+.featured-example {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
 }
 
-.empty-state-text {
-  font-size: var(--text-base);
-  color: var(--text-secondary);
-  margin-bottom: var(--space-2);
+.featured-example-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
 }
 
-.empty-state-hint {
-  font-size: var(--text-sm);
+.featured-example-eyebrow {
+  margin-bottom: 0.25rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.featured-example-title {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.featured-example-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   color: var(--text-muted);
+}
+
+.featured-example-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: clamp(1.25rem, 2vw, 1.75rem);
+  color: var(--text-primary);
+  text-decoration: none;
+  background:
+    radial-gradient(circle at 100% 0, var(--accent-subtle), transparent 44%),
+    var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+}
+
+.featured-example-card:hover {
+  border-color: var(--border-active);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  transform: translateY(-2px);
+}
+
+.featured-example-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.featured-example-body {
+  min-width: 0;
+}
+
+.featured-example-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.featured-example-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--success);
+}
+
+.featured-example-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success-glow);
+}
+
+.featured-example-question {
+  max-width: 44rem;
+  font-size: clamp(1rem, 0.6vw + 0.9rem, 1.3rem);
+  line-height: 1.5;
+  letter-spacing: -0.015em;
+}
+
+.featured-example-summary {
+  max-width: 44rem;
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.featured-example-link {
+  flex: 0 0 auto;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--accent-hover);
+  white-space: nowrap;
 }
 
 .runtime-notice {
@@ -572,7 +616,6 @@ function getPipelineStageLabel(stage: string) {
 }
 
 .section-title { font-size: 0.9rem; font-weight: 600; letter-spacing: -0.01em; }
-.section-badge { font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); background: rgba(255,255,255,0.04); padding: 0.15rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); }
 .section-note { margin-top: 0.75rem; font-size: 0.78rem; color: var(--text-muted); line-height: 1.6; }
 .section-note-warning { color: var(--warning); }
 .section-toggle { margin-left: auto; font-size: 0.78rem; }
@@ -728,14 +771,12 @@ function getPipelineStageLabel(stage: string) {
 .prompt-textarea::placeholder { color: var(--text-muted); }
 
 .example-builder-details,
-.advanced-details,
-.history-details {
+.advanced-details {
   margin-top: 0.75rem;
 }
 
 .example-builder-summary,
-.advanced-summary,
-.history-summary {
+.advanced-summary {
   font-size: 0.78rem;
   color: var(--text-muted);
   cursor: pointer;
@@ -743,8 +784,7 @@ function getPipelineStageLabel(stage: string) {
 }
 
 .example-builder-summary:hover,
-.advanced-summary:hover,
-.history-summary:hover {
+.advanced-summary:hover {
   color: var(--text-secondary);
 }
 
@@ -981,84 +1021,11 @@ function getPipelineStageLabel(stage: string) {
 
 .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.2); border-top-color: white; border-radius: 50%; animation: spin 0.6s linear infinite; }
 
-.history-list { display: flex; flex-direction: column; gap: 0.35rem; }
-.history-item {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.95rem var(--panel-padding);
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  text-decoration: none;
-  color: var(--text-primary);
-  transition: all 0.2s;
-}
-
-.history-item:hover { border-color: rgba(255,255,255,0.1); background: var(--bg-elevated); }
-.history-left {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.status-dot.status-completed { background: var(--success); box-shadow: 0 0 8px var(--success-glow); }
-.status-dot.status-running { background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); animation: pulse-dot 2s infinite; }
-.status-dot.status-failed { background: var(--danger); }
-.status-dot.status-queued { background: var(--text-muted); }
-.history-info { display: flex; flex-direction: column; min-width: 0; gap: 0.2rem; }
-
-.history-template {
-  font-size: 0.85rem;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
-.history-meta { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); word-break: break-word; }
-
-.history-right {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.85rem;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-}
-
-.status-badge { font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 4px; text-transform: uppercase; }
-.status-badge.status-completed { background: rgba(34,197,94,0.15); color: var(--success); }
-.status-badge.status-running { background: var(--accent-subtle); color: var(--accent); }
-.status-badge.status-failed { background: rgba(239,68,68,0.15); color: var(--danger); }
-.status-badge.status-queued { background: rgba(255,255,255,0.05); color: var(--text-muted); }
-.history-date {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  text-align: right;
-  white-space: nowrap;
-}
-
 @media (max-width: 900px) {
   .hero {
     padding-top: 1.5rem;
   }
 
-  .history-item {
-    flex-direction: column;
-  }
-
-  .history-right {
-    width: 100%;
-    justify-content: space-between;
-  }
 }
 
 @media (max-width: 640px) {
@@ -1088,16 +1055,12 @@ function getPipelineStageLabel(stage: string) {
     width: 100%;
   }
 
-  .history-right {
+  .featured-example-card {
     align-items: flex-start;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: var(--space-4);
   }
 
-  .history-date {
-    text-align: left;
-    white-space: normal;
-  }
 }
 
 </style>

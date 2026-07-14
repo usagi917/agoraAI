@@ -1,0 +1,55 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - link [ref=e6] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e8]:
+          - heading "Agent AI" [level=1] [ref=e9]
+          - paragraph [ref=e10]: Swarm Intelligence Simulation Platform
+      - navigation "分析メニュー" [ref=e11]:
+        - link "新規分析" [ref=e12] [cursor=pointer]:
+          - /url: /
+        - link "条件を比較" [ref=e13] [cursor=pointer]:
+          - /url: /compare
+        - link "対象者を管理" [ref=e14] [cursor=pointer]:
+          - /url: /populations
+        - link "精度を検証" [ref=e15] [cursor=pointer]:
+          - /url: /validate
+  - main [ref=e16]:
+    - generic [ref=e17]:
+      - generic [ref=e18]:
+        - heading "ひとつの問いから、 社会の反応を予測する" [level=2] [ref=e19]: ひとつの問いから、社会の反応を予測する
+        - paragraph [ref=e20]: 仮想空間でAIが議論し、代表評議会が検証し、あなたの意思決定を支える Decision Brief を生成します。
+      - generic [ref=e21]:
+        - heading "何を分析しますか？" [level=3] [ref=e22]
+        - paragraph [ref=e23]: 問いを入力すれば、標準分析でそのまま開始できます
+        - generic [ref=e24]:
+          - generic [ref=e25]: 分析したい問い
+          - textbox "分析したい問い" [ref=e26]:
+            - /placeholder: "例: EVバッテリー市場に参入すべきか。顧客受容性、規制リスク、競合反応を知りたい。"
+        - group [ref=e27]:
+          - generic "例から作る" [ref=e28] [cursor=pointer]
+        - group [ref=e29]:
+          - generic "ファイルを添付（任意）" [ref=e30] [cursor=pointer]
+        - group [ref=e31]:
+          - generic "詳細設定" [ref=e32] [cursor=pointer]
+        - button "分析を開始" [disabled] [ref=e33]
+        - paragraph [ref=e34]: 約3分 — 社会反応と代表評議会で素早く判断
+      - group [ref=e35]:
+        - generic "+ 仕組みを見る" [ref=e36] [cursor=pointer]
+      - region [ref=e37]:
+        - generic [ref=e38]:
+          - generic [ref=e39]:
+            - paragraph [ref=e40]: 実際の分析結果
+            - heading "分析事例" [level=3] [ref=e41]
+          - generic [ref=e42]: 1 CASE
+        - link "分析完了 市場参入判断 標準分析 固体電池技術を持つ企業は、日本のEVバッテリー市場に参入すべきか？ 顧客受容性、規制リスク、既存競合の反応をデジタル住民と代表評議会で検証した実際の分析結果です。 結果を見る" [ref=e43] [cursor=pointer]:
+          - /url: /sim/8a258ab6-b395-4f12-ba08-4d822ab31347/results
+          - generic [ref=e44]:
+            - generic [ref=e45]:
+              - generic [ref=e46]: 分析完了
+              - generic [ref=e48]: 市場参入判断
+              - generic [ref=e49]: 標準分析
+            - heading "固体電池技術を持つ企業は、日本のEVバッテリー市場に参入すべきか？" [level=4] [ref=e50]
+            - paragraph [ref=e51]: 顧客受容性、規制リスク、既存競合の反応をデジタル住民と代表評議会で検証した実際の分析結果です。
+          - generic [ref=e52]: 結果を見る →

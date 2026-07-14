@@ -18,8 +18,8 @@ cognitive:
     noise_level: 0.1
 
 game_master:
-  # Legacy / diagnostic path. Hybrid mode has isolated limits in hybrid_inference.yaml.
-  max_active_agents: 100
+  # OpenAI APIで直接活性化する代表サンプル数と同時実行数。
+  max_active_agents: 200
   max_concurrent_agents: 30
   conflict_resolution: priority  # priority / random / negotiation
   consistency_check_frequency: 2
