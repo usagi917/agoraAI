@@ -69,7 +69,7 @@ describe('PopulationPage', () => {
     await wrapper.get('[data-testid="generate-button"]').trigger('click')
     await flushPromises()
 
-    expect(apiMocks.generatePopulation).toHaveBeenCalledWith(1000)
+    expect(apiMocks.generatePopulation).toHaveBeenCalledWith()
   })
 
   // --- Demographics distribution charts ---

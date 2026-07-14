@@ -801,8 +801,11 @@ export async function listPopulations(): Promise<PopulationResponse[]> {
   return data
 }
 
-export async function generatePopulation(count: number = 1000, seed?: number) {
-  const { data } = await api.post('/society/populations/generate', { count, seed })
+export async function generatePopulation(count?: number, seed?: number) {
+  const payload: { count?: number; seed?: number } = {}
+  if (count !== undefined) payload.count = count
+  if (seed !== undefined) payload.seed = seed
+  const { data } = await api.post('/society/populations/generate', payload)
   return data
 }
 
