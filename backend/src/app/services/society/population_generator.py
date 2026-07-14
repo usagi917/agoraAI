@@ -9,7 +9,7 @@ from src.app.config import settings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_POPULATION_SIZE = 1000
+DEFAULT_POPULATION_SIZE = 10000
 DEFAULT_MIN_POPULATION_SIZE = 100
 DEFAULT_MAX_POPULATION_SIZE = 10000
 

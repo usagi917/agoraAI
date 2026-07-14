@@ -39,7 +39,7 @@ async function loadPopulations() {
 async function handleGenerate() {
   generating.value = true
   try {
-    await generatePopulation(1000)
+    await generatePopulation()
     await loadPopulations()
   } catch (e) {
     error.value = '人口生成に失敗しました'
