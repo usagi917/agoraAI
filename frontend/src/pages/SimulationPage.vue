@@ -194,7 +194,7 @@ const emptyState = computed(() => {
         case 'society_pulse':
           return {
             eyebrow: 'Society Pulse',
-            title: '1,000人の社会反応を測定しています',
+            title: '10,000人の社会反応を測定しています',
             detail: '人口統計・性格・価値観をサンプリングし、テーマに対する意見を収集中です。',
           }
         case 'council':
@@ -238,7 +238,7 @@ const emptyState = computed(() => {
     if (phase === 'population') {
       return {
         eyebrow: 'Population Generation',
-        title: '1,000人のデジタル住民を生成しています',
+        title: '10,000人のデジタル住民を生成しています',
         detail: '人口統計・性格・価値観を統計的にサンプリングし、社会ネットワークを構築中です。',
       }
     }

@@ -146,6 +146,24 @@ describe('useSimulationSSE', () => {
     })
   })
 
+  describe('simulation failure handling', () => {
+    it('leaves the loading state and closes the stream on simulation_failed', async () => {
+      const { useSimulationStore } = await import('../../stores/simulationStore')
+      const store = useSimulationStore()
+      store.setStatus('running')
+
+      const { start } = await createSSE()
+      start()
+      const source = MockEventSource.instances[MockEventSource.instances.length - 1]
+
+      source.emit('simulation_failed', { error: '人口データの作成に失敗しました' })
+
+      expect(store.status).toBe('failed')
+      expect(store.error).toBe('人口データの作成に失敗しました')
+      expect(source.closed).toBe(true)
+    })
+  })
+
   describe('全人口伝播 (population propagation) handling', () => {
     it('全員活性化と表示上限を選抜と誤表示しない', async () => {
       const { useAgentVisualizationStore } = await import('../../stores/agentVisualizationStore')

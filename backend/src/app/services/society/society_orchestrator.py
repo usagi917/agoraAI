@@ -487,8 +487,12 @@ async def _create_default_population(
         status="ready",
     )
     session.add(population)
-    session.add_all([AgentProfile(**agent_data) for agent_data in agents])
     try:
+        # Population and AgentProfile are linked only by their FK values, so the
+        # ORM cannot infer their insert order.  Flush the parent explicitly to
+        # keep PostgreSQL's immediate FK constraint satisfied.
+        await session.flush()
+        session.add_all([AgentProfile(**agent_data) for agent_data in agents])
         await session.commit()
     except IntegrityError:
         await session.rollback()

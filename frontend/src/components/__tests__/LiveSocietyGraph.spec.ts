@@ -127,6 +127,17 @@ describe('LiveSocietyGraph', () => {
     expect(wrapper.text()).toContain('リンク')
   })
 
+  it('shows the configured default population size during society pulse startup', () => {
+    const simulationStore = useSimulationStore()
+    simulationStore.setMode('standard')
+    simulationStore.setUnifiedPhase('society_pulse')
+    useSocietyGraphStore().reset()
+
+    const wrapper = mountGraph()
+
+    expect(wrapper.get('.empty-title').text()).toBe('10,000人の社会反応を測定しています')
+  })
+
   it('fires a synapse pulse when a new addressed dialogue arrives', async () => {
     const societyGraphStore = useSocietyGraphStore()
     societyGraphStore.setSelectedAgents([

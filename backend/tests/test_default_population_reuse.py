@@ -5,7 +5,7 @@ created once and reused, so repeated runs do not recreate residents or their
 social graph.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock, call
 
 import pytest
 from sqlalchemy import func, select
@@ -192,13 +192,40 @@ async def test_incomplete_generated_population_is_not_persisted(
 
 
 @pytest.mark.asyncio
+async def test_default_population_is_flushed_before_agent_profiles(monkeypatch):
+    """PostgreSQL must see the parent population before FK-bound profiles."""
+    session = MagicMock()
+    session.flush = AsyncMock()
+    session.commit = AsyncMock()
+    monkeypatch.setattr(
+        orchestrator,
+        "generate_population",
+        AsyncMock(side_effect=_fake_population),
+    )
+
+    await orchestrator._create_default_population(
+        session,
+        count=2,
+        reuse_key="reuse-key",
+        population_id="default-population",
+        generation_seed=123,
+    )
+
+    session.flush.assert_awaited_once()
+    assert session.method_calls.index(call.flush()) < session.method_calls.index(
+        call.add_all(ANY)
+    )
+
+
+@pytest.mark.asyncio
 async def test_concurrent_default_creation_joins_the_committed_winner(monkeypatch):
     losing_population_id = "losing-population"
     winner = ("winning-population", [_agent_payload("winning-population", 0)])
     session = MagicMock()
-    session.commit = AsyncMock(
+    session.flush = AsyncMock(
         side_effect=IntegrityError("INSERT populations", {}, RuntimeError("duplicate"))
     )
+    session.commit = AsyncMock()
     session.rollback = AsyncMock()
     generate_population = AsyncMock(side_effect=_fake_population)
     find_reusable = AsyncMock(return_value=winner)
@@ -229,9 +256,10 @@ async def test_concurrent_default_creation_joins_the_committed_winner(monkeypatc
 @pytest.mark.asyncio
 async def test_concurrent_creation_error_is_not_hidden_without_a_winner(monkeypatch):
     session = MagicMock()
-    session.commit = AsyncMock(
+    session.flush = AsyncMock(
         side_effect=IntegrityError("INSERT populations", {}, RuntimeError("duplicate"))
     )
+    session.commit = AsyncMock()
     session.rollback = AsyncMock()
     monkeypatch.setattr(
         orchestrator,

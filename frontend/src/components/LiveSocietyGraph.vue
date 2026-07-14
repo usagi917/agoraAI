@@ -294,10 +294,10 @@ onUnmounted(() => {
         <div class="empty-title">
           {{ store.isUnifiedMode
             ? (store.unifiedPhase === 'society_pulse'
-              ? '1,000人の社会反応を測定しています'
+              ? '10,000人の社会反応を測定しています'
               : '評議会メンバーを準備しています')
             : (store.societyPhase === 'population'
-              ? '1,000人のデジタル住民を生成しています'
+              ? '10,000人のデジタル住民を生成しています'
               : 'エージェントを選抜しています')
           }}
         </div>
