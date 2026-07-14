@@ -44,6 +44,10 @@ const graphStubs = {
     props: ['simulationId', 'spotlightAgentId'],
     template: '<div data-testid="stub-society-graph" />',
   },
+  SocialGraphWorkspace: {
+    props: ['simulationId', 'mode'],
+    template: '<div data-testid="stub-social-workspace"><slot name="legacy-fallback" /></div>',
+  },
 }
 
 // グラフパネル系テストで共通利用する mount スタブ一式と society シミュレーション。
@@ -181,6 +185,7 @@ describe('ResultsPage', () => {
           ScenarioCompare: true,
           AgreementHeatmap: true,
           PropagationDashboard: true,
+          SocialGraphWorkspace: true,
         },
       },
     })
@@ -210,6 +215,7 @@ describe('ResultsPage', () => {
           ToMMapVisualization: true,
           SocialNetworkDynamics: true,
           KnowledgeGraphExplorer: true,
+          SocialGraphWorkspace: true,
         },
       },
     })
@@ -489,6 +495,7 @@ describe('ResultsPage', () => {
           ScenarioCompare: true,
           AgreementHeatmap: true,
           PropagationDashboard: true,
+          SocialGraphWorkspace: true,
         },
       },
     })
@@ -573,6 +580,33 @@ describe('ResultsPage', () => {
     expect(panel.find('[data-testid="stub-force-graph"]').exists()).toBe(false)
     expect(apiMocks.getSocialGraph).toHaveBeenCalled()
     expect(apiMocks.getPopulationNetwork).toHaveBeenCalled()
+  })
+
+  it('keeps the completed social graph workspace mounted while legacy graph data is empty', async () => {
+    apiMocks.getSimulation.mockResolvedValueOnce(societySimResponse)
+    apiMocks.getSocialGraph.mockResolvedValueOnce({
+      population_id: 'pop-1',
+      nodes: [],
+      edges: [],
+    })
+
+    const wrapper = mount(ResultsPage, {
+      global: {
+        plugins: [createPinia()],
+        stubs: {
+          ...graphPanelStubs,
+          SocialGraphWorkspace: {
+            template: '<div data-testid="stub-social-workspace" />',
+          },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const panel = wrapper.get('[data-testid="results-graph-panel"]')
+    expect(panel.find('[data-testid="stub-social-workspace"]').exists()).toBe(true)
+    expect(panel.find('[data-testid="results-graph-empty"]').exists()).toBe(false)
   })
 
   it('collapsing the panel unmounts the heavy graph child (v-if)', async () => {
@@ -766,7 +800,7 @@ describe('ResultsPage', () => {
     expect(useGraphStore().nodes.length).toBe(0)
   })
 
-  it('keeps fetching the population network and shows empty state when social-graph fails (society mode)', async () => {
+  it('keeps the graph workspace available and fetches population data when the legacy social graph fails', async () => {
     apiMocks.getSimulation.mockResolvedValueOnce(societySimResponse)
     apiMocks.getSocialGraph.mockRejectedValueOnce(new Error('social graph unavailable'))
     apiMocks.getPopulationNetwork.mockResolvedValueOnce({
@@ -781,10 +815,11 @@ describe('ResultsPage', () => {
 
     await flushPromises()
 
-    // 社会グラフ（liveAgents）の取得に失敗しても空状態を表示。
+    // 旧 social-graph の取得失敗だけで、新 graph-state を読むワークスペースを
+    // 隠さない。これにより完了後の「グラフデータがありません」誤表示を防ぐ。
     const panel = wrapper.get('[data-testid="results-graph-panel"]')
-    expect(panel.find('[data-testid="results-graph-empty"]').exists()).toBe(true)
-    expect(panel.find('[data-testid="stub-society-graph"]').exists()).toBe(false)
+    expect(panel.find('[data-testid="stub-social-workspace"]').exists()).toBe(true)
+    expect(panel.find('[data-testid="results-graph-empty"]').exists()).toBe(false)
     // 並列取得なので人口ネットワークの取得は引き続き実行される。
     expect(apiMocks.getSocialGraph).toHaveBeenCalled()
     expect(apiMocks.getPopulationNetwork).toHaveBeenCalled()

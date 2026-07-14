@@ -5,6 +5,7 @@ TDD RED phase: テストを先に書き、実装がない状態で fail する�
 
 import pytest
 from dataclasses import asdict
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---------------------------------------------------------------------------
@@ -106,15 +107,21 @@ class TestRunSocietyPulse:
                 return_value=[],
             ),
             patch(
+                "src.app.services.phases.society_pulse._load_selected_social_edges",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
                 "src.app.services.phases.society_pulse.select_agents",
                 new_callable=AsyncMock,
                 return_value=fake_agents,
             ),
             patch(
-                "src.app.services.phases.society_pulse.run_activation",
+                "src.app.services.phases.society_pulse.run_hybrid_activation",
                 new_callable=AsyncMock,
                 return_value=fake_activation,
             ),
+            patch("src.app.services.phases.society_pulse.is_enabled", return_value=False),
             patch(
                 "src.app.services.phases.society_pulse.generate_persona_narratives_post_activation",
                 new_callable=AsyncMock,
@@ -158,6 +165,14 @@ class TestRunSocietyPulse:
         assert observed_register_kwargs["theme_category_estimate"].category == "politics"
         assert observed_prediction_kwargs["theme_category"] == "politics"
 
+        # 選抜直後に本物のソーシャル構造イベントを送出している（実行開始から輪を描くため）
+        published_events = [c.args[1] for c in mock_sse.publish.await_args_list]
+        assert "society_social_graph_structure" in published_events
+        # 選抜完了の後に構造イベントが来る（順序）
+        assert published_events.index("society_social_graph_structure") > published_events.index(
+            "society_selection_completed"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Phase A-1-3: council_deliberation
@@ -197,6 +212,7 @@ class TestRunCouncil:
         mock_session = AsyncMock()
         mock_sim = MagicMock()
         mock_sim.id = "sim-1"
+        mock_sim.population_id = None
 
         pulse = SocietyPulseResult(
             agents=[
@@ -267,6 +283,195 @@ class TestRunCouncil:
         assert len(result.rounds) == 3
         assert result.synthesis["consensus_points"] == ["合意1"]
         assert result.usage["total_tokens"] == 450
+
+    @pytest.mark.asyncio
+    async def test_evolves_and_publishes_live_social_graph(self, monkeypatch):
+        """run_council wires relationship evolution into the unified live path."""
+        import src.app.services.phases.council_deliberation as council_module
+        from src.app.services.graph_activity import GraphActivityCreate
+        from src.app.services.phases.society_pulse import SocietyPulseResult
+
+        participants = [
+            {
+                "role": "citizen_representative",
+                "agent_profile": {
+                    "id": f"agent-{index}",
+                    "demographics": {"occupation": "engineer", "age": 30, "region": "東京"},
+                },
+                "stance": "賛成",
+            }
+            for index in range(2)
+        ]
+        pulse = SocietyPulseResult(
+            agents=[],
+            responses=[],
+            aggregation={},
+            evaluation={},
+            representatives=participants,
+            usage={},
+        )
+        meeting_result = {
+            "rounds": [[
+                {"participant_index": 0, "position": "賛成", "argument": "主張A"},
+                {"participant_index": 1, "position": "賛成", "argument": "主張B"},
+            ]],
+            "synthesis": {},
+            "usage": {},
+        }
+        evolution_result = SimpleNamespace(changes=[])
+        graph_events = [GraphActivityCreate(
+            phase="relationship_evolution",
+            round=1,
+            kind="relationship_changed",
+            source_id="agent-0",
+            target_id="agent-1",
+            edge_id="edge-1",
+            payload={"after_strength": 0.65},
+        )]
+        evolve = AsyncMock(return_value=evolution_result)
+        persist = AsyncMock()
+        publish = AsyncMock()
+        count_result = MagicMock()
+        count_result.scalar.return_value = 7
+        session = SimpleNamespace(execute=AsyncMock(return_value=count_result))
+        sim = SimpleNamespace(id="sim-live", population_id="pop-live")
+
+        monkeypatch.setattr(council_module, "_generate_names", AsyncMock(return_value=["田中", "佐藤"]))
+        monkeypatch.setattr(council_module, "run_meeting", AsyncMock(return_value=meeting_result))
+        monkeypatch.setattr(council_module, "evolve_social_graph", evolve, raising=False)
+        monkeypatch.setattr(council_module, "persist_graph_activity_events", persist, raising=False)
+        monkeypatch.setattr(
+            council_module,
+            "relationship_changes_to_graph_events",
+            MagicMock(return_value=graph_events),
+            raising=False,
+        )
+        monkeypatch.setattr(council_module.sse_manager, "publish", publish)
+
+        await council_module.run_council(session, sim, pulse, "テスト政策")
+
+        evolve.assert_awaited_once_with(session, "pop-live", meeting_result, participants)
+        persist.assert_awaited_once_with(session, "sim-live", graph_events)
+        publish.assert_any_await(
+            "sim-live",
+            "society_social_graph_ready",
+            {"population_id": "pop-live", "edge_count": 7, "node_count": 2},
+        )
+
+    @pytest.mark.asyncio
+    async def test_graph_event_failure_rolls_back_edges_and_keeps_session_usable(
+        self, db_session, monkeypatch, caplog,
+    ):
+        """Edge updates and relationship events share one transaction boundary."""
+        import logging
+
+        from sqlalchemy import select
+
+        import src.app.services.phases.council_deliberation as council_module
+        from src.app.models.agent_profile import AgentProfile
+        from src.app.models.graph_activity_event import GraphActivityEvent
+        from src.app.models.population import Population
+        from src.app.models.social_edge import SocialEdge
+        from src.app.services.phases.society_pulse import SocietyPulseResult
+
+        population_id = "pop-council-rollback"
+        db_session.add(Population(id=population_id, agent_count=2, status="ready"))
+        db_session.add_all([
+            AgentProfile(
+                id="rollback-agent-0",
+                population_id=population_id,
+                agent_index=0,
+                demographics={},
+                big_five={},
+            ),
+            AgentProfile(
+                id="rollback-agent-1",
+                population_id=population_id,
+                agent_index=1,
+                demographics={},
+                big_five={},
+            ),
+        ])
+        db_session.add(SocialEdge(
+            id="rollback-edge",
+            population_id=population_id,
+            agent_id="rollback-agent-0",
+            target_id="rollback-agent-1",
+            relation_type="friend",
+            strength=0.5,
+        ))
+        await db_session.commit()
+
+        participants = [
+            {
+                "participant_index": index,
+                "role": "citizen_representative",
+                "agent_profile": {
+                    "id": f"rollback-agent-{index}",
+                    "demographics": {
+                        "occupation": "engineer",
+                        "age": 30,
+                        "region": "東京",
+                    },
+                },
+                "stance": "賛成",
+            }
+            for index in range(2)
+        ]
+        pulse = SocietyPulseResult(
+            agents=[],
+            responses=[],
+            aggregation={},
+            evaluation={},
+            representatives=participants,
+            usage={},
+        )
+        meeting_result = {
+            "rounds": [[
+                {"participant_index": 0, "position": "賛成", "argument": "主張A"},
+                {"participant_index": 1, "position": "賛成", "argument": "主張B"},
+            ]],
+            "synthesis": {},
+            "usage": {},
+        }
+
+        async def fail_event_persistence(*_args, **_kwargs):
+            db_session.add(GraphActivityEvent(
+                simulation_id=None,
+                phase="relationship_evolution",
+                round=1,
+                kind="relationship_changed",
+                payload={},
+            ))
+            await db_session.flush()
+
+        monkeypatch.setattr(council_module, "_generate_names", AsyncMock(return_value=["田中", "佐藤"]))
+        monkeypatch.setattr(council_module, "run_meeting", AsyncMock(return_value=meeting_result))
+        monkeypatch.setattr(
+            council_module,
+            "persist_graph_activity_events",
+            fail_event_persistence,
+        )
+        monkeypatch.setattr(council_module.sse_manager, "publish", AsyncMock())
+
+        with caplog.at_level(logging.WARNING):
+            result = await council_module.run_council(
+                db_session,
+                SimpleNamespace(id="sim-council-rollback", population_id=population_id),
+                pulse,
+                "テスト政策",
+            )
+
+        assert result.rounds == meeting_result["rounds"]
+        assert "Social graph evolution failed after council" in caplog.text
+
+        # The failed flush leaves AsyncSession pending-rollback unless run_council
+        # explicitly recovers it. A later commit must remain usable.
+        await db_session.commit()
+        edge = (await db_session.execute(
+            select(SocialEdge).where(SocialEdge.id == "rollback-edge")
+        )).scalar_one()
+        assert edge.strength == pytest.approx(0.5)
 
     @pytest.mark.asyncio
     async def test_devil_advocate_assignment(self):
@@ -342,6 +547,9 @@ class TestRunSynthesis:
                 "stance_distribution": {"賛成": 0.6, "反対": 0.3, "中立": 0.1},
                 "average_confidence": 0.75,
                 "top_concerns": ["コスト"],
+                "activated_count": 10_000,
+                "gpt_validated_count": 800,
+                "council_representative_count": 10,
             },
             evaluation={"consistency": 0.7, "calibration": 0.65},
             representatives=[],
@@ -393,13 +601,23 @@ class TestRunSynthesis:
         ):
             mock_sse.publish = AsyncMock()
 
-            result = await run_synthesis(mock_session, mock_sim, pulse, council, "テスト政策")
+            result = await run_synthesis(
+                mock_session,
+                mock_sim,
+                pulse,
+                council,
+                "テスト政策",
+                use_react=False,
+            )
 
         assert isinstance(result, SynthesisResult)
         assert result.decision_brief["recommendation"] == "条件付きGo"
         assert result.agreement_score > 0
         assert "# " in result.content  # Markdown report
         assert isinstance(result.sections, dict)
+        assert result.sections["society_summary"]["activated_count"] == 10_000
+        assert result.sections["society_summary"]["gpt_validated_count"] == 800
+        assert result.sections["society_summary"]["council_representative_count"] == 10
 
     @pytest.mark.asyncio
     async def test_normalizes_broken_brief_and_logs_repair(self, caplog):

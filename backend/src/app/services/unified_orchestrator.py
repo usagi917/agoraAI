@@ -21,6 +21,7 @@ from src.app.services.phases.society_pulse import SocietyPulseResult, run_societ
 from src.app.services.phases.synthesis import SynthesisResult, run_synthesis
 from src.app.services.scenario_pair_status import refresh_scenario_pair_status
 from src.app.services.society import accuracy_config as _acc_flags
+from src.app.services.society.activation_store import load_preferred_response_rows
 from src.app.services.society.representative_selector import select_representatives
 from src.app.sse.manager import sse_manager
 
@@ -76,6 +77,17 @@ async def _load_pulse_checkpoint(session, sim: Simulation, theme: str) -> Societ
 
     phase_data = activation_record.phase_data or {}
     responses = list(phase_data.get("responses") or [])
+    if not responses and phase_data.get("responses_persisted_separately"):
+        checkpoint_rows = await load_preferred_response_rows(
+            session,
+            simulation_id=sim.id,
+        )
+        responses = []
+        for row in checkpoint_rows:
+            response = dict(row.response_json or {})
+            response.setdefault("agent_id", row.agent_id)
+            response.setdefault("agent_index", row.agent_index)
+            responses.append(response)
     agent_ids = [r.get("agent_id") for r in responses if r.get("agent_id")]
 
     agents_by_id: dict[str, AgentProfile] = {}
@@ -422,6 +434,15 @@ async def run_unified(simulation_id: str) -> None:
                         "society_summary": {
                             "population_count": pulse.population_count,
                             "selected_count": len(pulse.agents),
+                            "activated_count": pulse.aggregation.get(
+                                "activated_count", len(pulse.agents)
+                            ),
+                            "gpt_validated_count": pulse.aggregation.get(
+                                "gpt_validated_count", 0
+                            ),
+                            "council_representative_count": pulse.aggregation.get(
+                                "council_representative_count", len(pulse.representatives)
+                            ),
                             "aggregation": pulse.aggregation,
                             "evaluation": pulse.evaluation,
                         },

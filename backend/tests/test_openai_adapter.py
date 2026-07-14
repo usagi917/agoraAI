@@ -67,7 +67,7 @@ async def test_openai_adapter_skips_temperature_for_reasoning_models(caplog):
         )
 
     assert fake_http_client.last_url.endswith("/chat/completions")
-    assert fake_http_client.last_json["max_completion_tokens"] == 8192
+    assert fake_http_client.last_json["max_completion_tokens"] == 128
     assert "temperature" not in fake_http_client.last_json
     assert "Skipping unsupported temperature override" not in caplog.text
     assert content == '{"ok": true}'
@@ -102,6 +102,50 @@ async def test_openai_adapter_keeps_larger_reasoning_token_budget():
 
     assert fake_http_client.last_json["max_completion_tokens"] == 12000
     assert "temperature" not in fake_http_client.last_json
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_uses_configured_role_specific_reasoning_controls():
+    adapter = OpenAIAdapter(
+        "openai_shadow",
+        {
+            "model": "gpt-5.4-nano",
+            "api_base": "https://api.openai.com/v1",
+            "reasoning_effort": "low",
+            "min_completion_tokens": 384,
+        },
+    )
+    adapter.api_key = "test-key"
+    fake_http_client = _FakeAsyncClient()
+    adapter._http_client = fake_http_client
+
+    await adapter.call("sys", "user", max_tokens=120)
+
+    assert fake_http_client.last_json["max_completion_tokens"] == 384
+    assert fake_http_client.last_json["reasoning_effort"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_openai_adapter_forwards_strict_json_schema() -> None:
+    adapter = OpenAIAdapter(
+        "openai_shadow",
+        {"model": "gpt-5.4-nano", "api_base": "https://api.openai.com/v1"},
+    )
+    adapter.api_key = "test-key"
+    fake_http_client = _FakeAsyncClient()
+    adapter._http_client = fake_http_client
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "activation",
+            "strict": True,
+            "schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    }
+
+    await adapter.call("sys", "user", response_format=response_format)
+
+    assert fake_http_client.last_json["response_format"] == response_format
 
 
 @pytest.mark.asyncio

@@ -8,12 +8,16 @@ Swarm Intelligence Pipeline:
   → Meeting → Evaluation → Narrative → Memory/Graph Evolution
 """
 
+import hashlib
+import inspect
+import json
 import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from src.app.config import settings
 from src.app.database import async_session
@@ -23,6 +27,11 @@ from src.app.models.population import Population
 from src.app.models.simulation import Simulation
 from src.app.models.social_edge import SocialEdge
 from src.app.models.society_result import SocietyResult
+from src.app.services.graph_activity import (
+    GraphActivityCreate,
+    persist_graph_activity_events,
+    propagation_changes_to_graph_events,
+)
 from src.app.services.scenario_pair_status import refresh_scenario_pair_status
 from src.app.services.society.activation_layer import _aggregate_opinions, run_activation
 from src.app.services.society.agent_selector import select_agents
@@ -32,7 +41,10 @@ from src.app.services.society.deliberation_quality import compute_dqi, measure_o
 from src.app.services.society.demographic_analyzer import analyze_demographics
 from src.app.services.society.emergence_tracker import EmergenceTracker
 from src.app.services.society.evaluation import evaluate_society_simulation
-from src.app.services.society.graph_evolution import evolve_social_graph
+from src.app.services.society.graph_evolution import (
+    evolve_social_graph,
+    relationship_changes_to_graph_events,
+)
 from src.app.services.society.meeting_layer import enrich_meeting_with_clusters, run_meeting
 from src.app.services.society.meeting_report import generate_meeting_report
 from src.app.services.society.memory_compressor import update_agent_memories
@@ -67,6 +79,10 @@ from src.app.services.society.theme_category import (
 from src.app.sse.manager import sse_manager
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_POPULATION_KEY_PARAM = "default_population_key"
+DEFAULT_POPULATION_SOURCE = "census_default"
+DEFAULT_POPULATION_GENERATOR_VERSION = 1
 
 _CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "economy": ["経済", "景気", "物価", "金利", "賃金", "雇用", "収入", "GDP", "インフレ", "デフレ", "財政", "税"],
@@ -332,6 +348,163 @@ def _extract_representative_updates(
     return updates
 
 
+def _serialize_agent_profile(agent: AgentProfile) -> dict:
+    """永続化済みの住民をシミュレーション用dictへ変換する。"""
+    return {
+        "id": agent.id,
+        "population_id": agent.population_id,
+        "agent_index": agent.agent_index,
+        "demographics": agent.demographics,
+        "big_five": agent.big_five,
+        "values": agent.values,
+        "life_event": agent.life_event,
+        "contradiction": agent.contradiction,
+        "information_source": agent.information_source,
+        "information_sources": agent.information_sources,
+        "local_context": agent.local_context,
+        "hidden_motivation": agent.hidden_motivation,
+        "speech_style": agent.speech_style,
+        "shock_sensitivity": agent.shock_sensitivity,
+        "llm_backend": agent.llm_backend,
+        "memory_summary": agent.memory_summary,
+        "rolling_summary": agent.rolling_summary,
+        "episodes": agent.episodes,
+    }
+
+
+async def _load_population_agents(session, population_id: str) -> list[dict]:
+    result = await session.execute(
+        select(AgentProfile)
+        .where(AgentProfile.population_id == population_id)
+        .order_by(AgentProfile.agent_index, AgentProfile.id)
+    )
+    return [_serialize_agent_profile(agent) for agent in result.scalars().all()]
+
+
+def _default_population_identity(count: int) -> tuple[str, str, int]:
+    """人口生成設定から、再利用キー・決定論的ID・固定seedを作る。"""
+    mix_config = settings.load_population_mix_config()
+    activation_config = mix_config.get("activation_layer", {})
+    generation_spec = {
+        "generator_version": DEFAULT_POPULATION_GENERATOR_VERSION,
+        "count": count,
+        "population": mix_config.get("population", {}),
+        "activation_weights": activation_config.get("weights", {}),
+    }
+    canonical_spec = json.dumps(
+        generation_spec,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(canonical_spec.encode("utf-8")).hexdigest()
+    reuse_key = f"{DEFAULT_POPULATION_SOURCE}:v{DEFAULT_POPULATION_GENERATOR_VERSION}:{digest}"
+    population_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"agentai/{reuse_key}"))
+    generation_seed = int(digest[:8], 16)
+    return reuse_key, population_id, generation_seed
+
+
+def _is_legacy_default_population(params: dict, count: int) -> bool:
+    """旧オーケストレータが自動生成した未マーク人口を識別する。"""
+    return params == {"count": count}
+
+
+async def _find_reusable_default_population(
+    session,
+    *,
+    count: int,
+    reuse_key: str,
+) -> tuple[str, list[dict]] | None:
+    result = await session.execute(
+        select(Population)
+        .where(
+            Population.status == "ready",
+            Population.parent_id.is_(None),
+            Population.agent_count == count,
+        )
+        .order_by(Population.created_at.desc(), Population.id)
+    )
+    exact_matches: list[Population] = []
+    legacy_matches: list[Population] = []
+    for population in result.scalars().all():
+        params = dict(population.generation_params or {})
+        if params.get(DEFAULT_POPULATION_KEY_PARAM) == reuse_key:
+            exact_matches.append(population)
+        elif _is_legacy_default_population(params, count):
+            legacy_matches.append(population)
+
+    for population in [*exact_matches, *legacy_matches]:
+        agents = await _load_population_agents(session, population.id)
+        if len(agents) != count:
+            logger.warning(
+                "Skipping incomplete reusable population %s: expected=%d actual=%d",
+                population.id,
+                count,
+                len(agents),
+            )
+            continue
+
+        params = dict(population.generation_params or {})
+        if params.get(DEFAULT_POPULATION_KEY_PARAM) != reuse_key:
+            population.generation_params = {
+                **params,
+                "source": DEFAULT_POPULATION_SOURCE,
+                DEFAULT_POPULATION_KEY_PARAM: reuse_key,
+            }
+            await session.commit()
+            logger.info("Adopted legacy population %s as the census default", population.id)
+        else:
+            logger.info("Reusing census default population %s", population.id)
+        return population.id, agents
+
+    return None
+
+
+async def _create_default_population(
+    session,
+    *,
+    count: int,
+    reuse_key: str,
+    population_id: str,
+    generation_seed: int,
+) -> tuple[str, list[dict]]:
+    """デフォルト人口を原子的に作成し、競合時は先に作られた人口を使う。"""
+    agents = await generate_population(population_id, count, seed=generation_seed)
+    if len(agents) != count:
+        raise RuntimeError(
+            f"Generated population size mismatch: expected={count} actual={len(agents)}"
+        )
+
+    population = Population(
+        id=population_id,
+        agent_count=count,
+        generation_params={
+            "count": count,
+            "seed": generation_seed,
+            "source": DEFAULT_POPULATION_SOURCE,
+            DEFAULT_POPULATION_KEY_PARAM: reuse_key,
+        },
+        status="ready",
+    )
+    session.add(population)
+    session.add_all([AgentProfile(**agent_data) for agent_data in agents])
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        winner = await _find_reusable_default_population(
+            session,
+            count=count,
+            reuse_key=reuse_key,
+        )
+        if winner is not None:
+            return winner
+        raise
+
+    logger.info("Created census default population %s with %d agents", population_id, count)
+    return population_id, agents
+
+
 async def _get_or_create_population(
     session,
     population_id: str | None = None,
@@ -340,7 +513,7 @@ async def _get_or_create_population(
     *,
     strict: bool = False,
 ) -> tuple[str, list[dict]]:
-    """既存の Population を取得するか、新規生成する。
+    """明示人口または共有デフォルト人口を取得し、未作成時だけ生成する。
 
     strict=True の場合、population_id が無効なときはエラーを返す（フォールバックしない）。
     """
@@ -349,35 +522,10 @@ async def _get_or_create_population(
     if population_id:
         pop = await session.get(Population, population_id)
         if pop and pop.status == "ready":
-            result = await session.execute(
-                select(AgentProfile).where(AgentProfile.population_id == population_id)
-                .order_by(AgentProfile.agent_index, AgentProfile.id)
-            )
-            agents_db = result.scalars().all()
-            if agents_db:
-                agents = []
-                for a in agents_db:
-                    agents.append({
-                        "id": a.id,
-                        "population_id": a.population_id,
-                        "agent_index": a.agent_index,
-                        "demographics": a.demographics,
-                        "big_five": a.big_five,
-                        "values": a.values,
-                        "life_event": a.life_event,
-                        "contradiction": a.contradiction,
-                        "information_source": a.information_source,
-                        "local_context": a.local_context,
-                        "hidden_motivation": a.hidden_motivation,
-                        "speech_style": a.speech_style,
-                        "shock_sensitivity": a.shock_sensitivity,
-                        "llm_backend": a.llm_backend,
-                        "memory_summary": a.memory_summary,
-                        "rolling_summary": a.rolling_summary,
-                        "episodes": a.episodes,
-                    })
+            agents = await _load_population_agents(session, population_id)
+            if agents:
                 return population_id, agents
-            elif strict:
+            if strict:
                 raise ValueError(
                     f"Population {population_id} has no agent profiles"
                 )
@@ -396,28 +544,30 @@ async def _get_or_create_population(
                 getattr(pop, "status", None),
             )
 
-    # 新規生成
-    pop_id = str(uuid.uuid4())
-    population = Population(
-        id=pop_id,
-        agent_count=resolved_count,
-        generation_params={"count": resolved_count},
-        status="generating",
+    reuse_key, default_population_id, generation_seed = _default_population_identity(
+        resolved_count
     )
-    session.add(population)
-    await session.commit()
+    reusable = await _find_reusable_default_population(
+        session,
+        count=resolved_count,
+        reuse_key=reuse_key,
+    )
+    if reusable is not None:
+        return reusable
 
-    agents = await generate_population(pop_id, resolved_count, seed=seed)
-
-    # DB に保存
-    for agent_data in agents:
-        profile = AgentProfile(**agent_data)
-        session.add(profile)
-
-    population.status = "ready"
-    await session.commit()
-
-    return pop_id, agents
+    if seed is not None:
+        logger.debug(
+            "Ignoring simulation seed %s for shared population; canonical seed=%s",
+            seed,
+            generation_seed,
+        )
+    return await _create_default_population(
+        session,
+        count=resolved_count,
+        reuse_key=reuse_key,
+        population_id=default_population_id,
+        generation_seed=generation_seed,
+    )
 
 
 async def _save_network(
@@ -426,13 +576,20 @@ async def _save_network(
     population_id: str,
     seed: int | None = None,
 ) -> None:
-    """ネットワークを生成して保存する（冪等: 既存エッジを削除してから挿入）。"""
-    from sqlalchemy import delete
-
-    await session.execute(
-        delete(SocialEdge).where(SocialEdge.population_id == population_id)
+    """人口にネットワークがなければ生成し、既存ネットワークは再利用する。"""
+    result = await session.execute(
+        select(func.count())
+        .select_from(SocialEdge)
+        .where(SocialEdge.population_id == population_id)
     )
-    await session.flush()
+    existing_edge_count = int(result.scalar() or 0)
+    if existing_edge_count > 0:
+        logger.info(
+            "Reusing %d social edges for population %s",
+            existing_edge_count,
+            population_id,
+        )
+        return
 
     edges = await generate_network(agents, population_id, seed=seed)
     for edge_data in edges:
@@ -455,6 +612,37 @@ async def _load_population_edges(session, population_id: str) -> list[dict]:
             "strength": e.strength,
         }
         for e in edges_db
+    ]
+
+
+async def _load_selected_social_edges(
+    session, population_id: str, selected_ids: set[str]
+) -> list[dict]:
+    """選抜エージェント同士（両端が selected_ids に含まれる）のソーシャルエッジを、
+    フロント表示用の形（id/source/target/relation_type/strength）で返す。
+
+    ソーシャル構造はデモグラから生成され活性化（意見形成）より前に確定・永続化
+    されているため、選抜完了直後に送出できる。/social-graph エンドポイントと
+    同じ両端フィルタのパターン。
+    """
+    if not selected_ids:
+        return []
+    edge_result = await session.execute(
+        select(SocialEdge).where(
+            SocialEdge.population_id == population_id,
+            SocialEdge.agent_id.in_(selected_ids),
+            SocialEdge.target_id.in_(selected_ids),
+        )
+    )
+    return [
+        {
+            "id": e.id or f"edge-{e.agent_id}-{e.target_id}",
+            "source": e.agent_id,
+            "target": e.target_id,
+            "relation_type": e.relation_type,
+            "strength": e.strength,
+        }
+        for e in edge_result.scalars().all()
     ]
 
 
@@ -719,6 +907,17 @@ async def _phase_network_propagation(
         })
 
         async def on_propagation_timestep(record):
+            graph_events = propagation_changes_to_graph_events(
+                getattr(record, "changes", []),
+                phase="network_propagation",
+                round=record.timestep,
+                stance_source_key="target_id",
+            )
+            await persist_graph_activity_events(
+                session,
+                simulation_id,
+                graph_events,
+            )
             await sse_manager.publish(simulation_id, "propagation_timestep", {
                 "timestep": record.timestep,
                 "opinion_distribution": record.opinion_distribution,
@@ -1023,10 +1222,16 @@ async def _phase_meeting(ctx: "SocietyRunContext", session, total_usage: dict) -
             responses_with_ids,
         )
 
+    meeting_kwargs = {
+        "simulation_id": simulation_id,
+        "num_rounds": 3,
+    }
+    if "session" in inspect.signature(run_meeting).parameters:
+        meeting_kwargs["session"] = session
     meeting_result = await run_meeting(
-        meeting_participants, theme,
-        simulation_id=simulation_id,
-        num_rounds=3,
+        meeting_participants,
+        theme,
+        **meeting_kwargs,
     )
 
     total_usage["prompt_tokens"] += meeting_result["usage"].get("prompt_tokens", 0)
@@ -1360,8 +1565,16 @@ async def _phase_persistent_society(ctx: "SocietyRunContext", session, theme_est
         accuracy_flags=_acc_flags,
     )
 
-    await evolve_social_graph(
+    evolution_result = await evolve_social_graph(
         session, pop_id, ctx.meeting_result, ctx.meeting_participants,
+    )
+    await persist_graph_activity_events(
+        session,
+        simulation_id,
+        relationship_changes_to_graph_events(
+            evolution_result,
+            len(ctx.meeting_result.get("rounds", [])),
+        ),
     )
 
     # ソーシャルグラフ準備完了を通知
@@ -1450,6 +1663,15 @@ async def run_society(simulation_id: str) -> None:
 
         try:
             # === Phase 1: Population ===
+            await persist_graph_activity_events(
+                session,
+                simulation_id,
+                [GraphActivityCreate(
+                    phase="population",
+                    kind="phase_changed",
+                    payload={"phase": "population"},
+                )],
+            )
             await sse_manager.publish(simulation_id, "society_started", {
                 "simulation_id": simulation_id,
                 "theme": theme[:100],
@@ -1496,6 +1718,30 @@ async def run_society(simulation_id: str) -> None:
                     for i, a in enumerate(selected_agents)
                 ],
             })
+            await persist_graph_activity_events(
+                session,
+                simulation_id,
+                [
+                    GraphActivityCreate(
+                        phase="selection",
+                        kind="phase_changed",
+                        payload={"phase": "selection"},
+                    ),
+                    *[
+                        GraphActivityCreate(
+                            phase="selection",
+                            kind="node_status",
+                            source_id=agent.get("id"),
+                            payload={
+                                "status": "selected",
+                                "agent_index": agent.get("agent_index", index),
+                            },
+                        )
+                        for index, agent in enumerate(selected_agents)
+                        if agent.get("id")
+                    ],
+                ],
+            )
 
             # === Phase 2.7: Grounding ===
             grounding_facts = _phase_grounding(theme, selected_agents)
@@ -1518,6 +1764,15 @@ async def run_society(simulation_id: str) -> None:
             await sse_manager.publish(simulation_id, "society_activation_started", {
                 "agent_count": len(selected_agents),
             })
+            await persist_graph_activity_events(
+                session,
+                simulation_id,
+                [GraphActivityCreate(
+                    phase="activation",
+                    kind="phase_changed",
+                    payload={"phase": "activation"},
+                )],
+            )
 
             async def on_progress(completed: int, total: int):
                 await sse_manager.publish(simulation_id, "society_activation_progress", {
@@ -1609,6 +1864,23 @@ async def run_society(simulation_id: str) -> None:
                 "selected_agent_ids": selected_agent_ids,
                 "usage": activation_result["usage"],
             })
+            await persist_graph_activity_events(
+                session,
+                simulation_id,
+                [
+                    GraphActivityCreate(
+                        phase="activation",
+                        kind="node_status",
+                        source_id=response["agent_id"],
+                        payload={
+                            "status": "activated",
+                            "stance": response["stance"],
+                            "confidence": response["confidence"],
+                        },
+                    )
+                    for response in individual_responses
+                ],
+            )
 
             ctx = SocietyRunContext(
                 simulation_id=simulation_id,
@@ -1704,6 +1976,16 @@ async def run_society(simulation_id: str) -> None:
                 "time_axis_available": time_axis_available,
                 "usage": total_usage,
             })
+            await persist_graph_activity_events(
+                session,
+                simulation_id,
+                [GraphActivityCreate(
+                    phase="completed",
+                    round=len(ctx.meeting_result.get("rounds", [])),
+                    kind="phase_changed",
+                    payload={"phase": "completed"},
+                )],
+            )
 
             logger.info("Society simulation %s completed", simulation_id)
 

@@ -247,7 +247,7 @@ async def select_agents(
     theme: str,
     target_count: int = 100,
     min_count: int = 50,
-    max_count: int = 200,
+    max_count: int | None = 200,
     edges: list[dict] | None = None,
     seed: int | None = None,
 ) -> list[dict]:
@@ -261,8 +261,13 @@ async def select_agents(
     Returns:
         選抜されたエージェントプロフィールのリスト
     """
-    target_count = max(min_count, min(max_count, target_count))
+    resolved_max = len(agents) if max_count is None else max_count
+    target_count = max(min_count, min(resolved_max, target_count))
     target_count = min(target_count, len(agents))
+
+    if target_count >= len(agents):
+        logger.info("Selected full population: %d agents", len(agents))
+        return list(agents)
 
     # テーマから関連トピックを抽出
     relevant_topics = _extract_relevant_topics(theme)

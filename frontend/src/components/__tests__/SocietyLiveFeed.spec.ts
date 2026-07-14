@@ -11,9 +11,7 @@ function dialogueEntry(overrides: Partial<FeedEntry> = {}): FeedEntry {
     id: `dialogue-${idSeq++}`,
     kind: 'dialogue',
     round: 1,
-    receivedAt: Date.now(),
     participant_name: '田中太郎',
-    role: 'expert',
     position: '中立',
     argument: '発言内容です。',
     ...overrides,
@@ -86,7 +84,6 @@ describe('SocietyLiveFeed', () => {
         id: 'shift-1',
         kind: 'stance_shift',
         round: 2,
-        receivedAt: Date.now(),
         participant: '田中太郎',
         from: '中立',
         to: '賛成',
@@ -123,7 +120,6 @@ describe('SocietyLiveFeed', () => {
         id: 'round-2',
         kind: 'round',
         round: 2,
-        receivedAt: Date.now(),
         round_name: '深掘り',
       },
     ]
@@ -133,5 +129,106 @@ describe('SocietyLiveFeed', () => {
     expect(marker.exists()).toBe(true)
     expect(marker.text()).toContain('Round 2')
     expect(marker.text()).toContain('深掘り')
+  })
+
+  it('filters dialogue and population voices in shifts-only mode while retaining shifts and rounds', async () => {
+    const store = useSocietyGraphStore()
+    store.feedEntries = [
+      dialogueEntry(),
+      { id: 'voice-1', kind: 'population_voice', round: 1, agent_id: 'citizen-1', comment: '市民意見', stance: '中立', occupation: '会社員', age_bracket: '40代' },
+      { id: 'shift-1', kind: 'stance_shift', round: 1, participant: '田中太郎', from: '中立', to: '賛成' },
+      { id: 'round-2', kind: 'round', round: 2 },
+    ]
+    const wrapper = mount(SocietyLiveFeed)
+
+    await wrapper.find('.feed-filter-mode').setValue('shifts_only')
+
+    expect(wrapper.find('.feed-dialogue').exists()).toBe(false)
+    expect(wrapper.find('.feed-population-voice').exists()).toBe(false)
+    expect(wrapper.find('.feed-stance-shift').exists()).toBe(true)
+    expect(wrapper.find('.feed-round').exists()).toBe(true)
+  })
+
+  it('filters entries by related council agent while retaining round markers', async () => {
+    const store = useSocietyGraphStore()
+    store.setSelectedAgents([
+      { id: 'agent-tanaka', agent_index: 1, name: '田中太郎', display_name: '田中太郎', occupation: '会社員', age: 40, region: '東京' },
+      { id: 'agent-sato', agent_index: 2, name: '佐藤花子', display_name: '佐藤花子', occupation: '医師', age: 35, region: '大阪' },
+    ])
+    store.feedEntries = [
+      dialogueEntry({ id: 'tanaka', participant_name: '田中太郎' }),
+      dialogueEntry({ id: 'sato', participant_name: '佐藤花子' }),
+      { id: 'shift-sato', kind: 'stance_shift', round: 1, participant: '佐藤花子', from: '中立', to: '賛成' },
+      { id: 'round-2', kind: 'round', round: 2 },
+      { id: 'voice-1', kind: 'population_voice', round: 2, agent_id: 'citizen-1', comment: '市民意見', stance: '中立' },
+    ]
+    const wrapper = mount(SocietyLiveFeed)
+
+    await wrapper.find('.feed-filter-agent').setValue('agent-tanaka')
+
+    expect(wrapper.findAll('.feed-dialogue')).toHaveLength(1)
+    expect(wrapper.find('.feed-dialogue').text()).toContain('田中太郎')
+    expect(wrapper.find('.feed-dialogue').text()).not.toContain('佐藤花子')
+    expect(wrapper.find('.feed-round').exists()).toBe(true)
+    expect(wrapper.find('.feed-population-voice').exists()).toBe(false)
+  })
+
+  it('emits resolved agent ids when speaker and addressee are clicked', async () => {
+    const store = useSocietyGraphStore()
+    store.setSelectedAgents([
+      { id: 'agent-tanaka', agent_index: 1, name: '田中太郎', display_name: '田中太郎', occupation: '会社員', age: 40, region: '東京' },
+      { id: 'agent-sato', agent_index: 2, name: '佐藤花子', display_name: '佐藤花子', occupation: '医師', age: 35, region: '大阪' },
+    ])
+    store.feedEntries = [dialogueEntry({ participant_name: '田中太郎', addressed_to: '佐藤花子' })]
+    const wrapper = mount(SocietyLiveFeed)
+
+    await wrapper.find('.feed-speaker').trigger('click')
+    await wrapper.find('.feed-addressed').trigger('click')
+
+    expect(wrapper.emitted('select-agent')).toEqual([['agent-tanaka']])
+    expect(wrapper.emitted('highlight-edge')).toEqual([['agent-tanaka', 'agent-sato']])
+  })
+
+  it('emits the resolved agent id when a stance-shift participant is clicked', async () => {
+    const store = useSocietyGraphStore()
+    store.setSelectedAgents([
+      { id: 'agent-tanaka', agent_index: 1, name: '田中太郎', display_name: '田中太郎', occupation: '会社員', age: 40, region: '東京' },
+    ])
+    store.feedEntries = [
+      { id: 'shift-1', kind: 'stance_shift', round: 1, participant: '田中太郎', from: '中立', to: '賛成' },
+    ]
+    const wrapper = mount(SocietyLiveFeed)
+
+    await wrapper.find('.shift-participant').trigger('click')
+
+    expect(wrapper.emitted('select-agent')).toEqual([['agent-tanaka']])
+  })
+
+  it('renders and selects a visually distinct population voice', async () => {
+    const store = useSocietyGraphStore()
+    store.feedEntries = [{
+      id: 'voice-citizen-9',
+      kind: 'population_voice',
+      round: 2,
+      agent_id: 'citizen-9',
+      agent_index: 9,
+      comment: '生活費への影響が心配です。',
+      stance: '反対',
+      prev_stance: '中立',
+      occupation: '会社員',
+      age_bracket: '40代',
+    }]
+    const wrapper = mount(SocietyLiveFeed)
+    const card = wrapper.find('.feed-population-voice')
+
+    expect(card.exists()).toBe(true)
+    expect(card.find('.feed-voice-badge').text()).toBe('市民の声')
+    expect(card.text()).toContain('40代・会社員')
+    expect(card.text()).toContain('中立')
+    expect(card.text()).toContain('反対')
+    expect(card.text()).toContain('生活費への影響が心配です。')
+
+    await card.trigger('click')
+    expect(wrapper.emitted('select-agent')).toEqual([['citizen-9']])
   })
 })

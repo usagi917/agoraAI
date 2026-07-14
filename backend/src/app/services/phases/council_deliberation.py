@@ -5,9 +5,18 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.app.llm.multi_client import multi_llm_client
 from src.app.models.simulation import Simulation
+from src.app.models.social_edge import SocialEdge
+from src.app.services.graph_activity import persist_graph_activity_events
 from src.app.services.phases.society_pulse import SocietyPulseResult
+from src.app.services.society.graph_evolution import (
+    evolve_social_graph,
+    relationship_changes_to_graph_events,
+)
 from src.app.services.society.kg_evolution_service import KGEvolutionService
 from src.app.services.society.kg_updater import apply_kg_updates
 from src.app.services.society.meeting_layer import run_meeting
@@ -254,6 +263,42 @@ async def run_council(
         "devil_advocate_summary": devil_advocate_summary[:200],
         "kg_evolved": len(evolved_entities) > len(kg_entities or []),
     })
+
+    population_id = getattr(sim, "population_id", None)
+    if population_id:
+        try:
+            evolution_result = await evolve_social_graph(
+                session,
+                population_id,
+                meeting_result,
+                participants,
+            )
+            await persist_graph_activity_events(
+                session,
+                simulation_id,
+                relationship_changes_to_graph_events(
+                    evolution_result,
+                    len(meeting_result.get("rounds", [])),
+                ),
+            )
+            edge_count_result = await session.execute(
+                select(func.count()).select_from(SocialEdge).where(
+                    SocialEdge.population_id == population_id
+                )
+            )
+            edge_count = edge_count_result.scalar() or 0
+            await sse_manager.publish(simulation_id, "society_social_graph_ready", {
+                "population_id": population_id,
+                "edge_count": edge_count,
+                "node_count": sum(
+                    participant.get("role") == "citizen_representative"
+                    for participant in participants
+                ),
+            })
+        except Exception as e:
+            if isinstance(session, AsyncSession):
+                await session.rollback()
+            logger.warning("Social graph evolution failed after council: %s", e)
 
     # 参加者サマリーを構築
     participant_summaries = []

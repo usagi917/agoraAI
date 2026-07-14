@@ -18,6 +18,7 @@ cognitive:
     noise_level: 0.1
 
 game_master:
+  # Legacy / diagnostic path. Hybrid mode has isolated limits in hybrid_inference.yaml.
   max_active_agents: 100
   max_concurrent_agents: 30
   conflict_resolution: priority  # priority / random / negotiation

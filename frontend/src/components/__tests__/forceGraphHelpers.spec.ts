@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import {
   DEFAULT_PHYSICS,
+  PENDING_AGENT_COLOR,
   POPULATION_NODE_RADIUS,
+  RELATION_EDGE_COLORS,
   TYPE_COLORS,
+  ambientPulse,
   assignLinkCurvatures,
   buildAdjacency,
   buildSyntheticLinks,
@@ -13,11 +16,15 @@ import {
   hashUnit,
   labelAlpha,
   linkColor,
+  linkParticleCount,
   linkWidth,
   mergeGraphData,
+  mixHex,
   nodeColor,
   nodeDisplayColor,
   nodeRadius,
+  softenStanceColor,
+  spawnProgress,
   syntheticLinkColor,
   toEdgeProp,
   toNodeProp,
@@ -53,7 +60,50 @@ describe('clamp01', () => {
   })
 })
 
+describe('ambient animation helpers', () => {
+  it('breathes between 0.75 and 1.0 over a 2.4 second period with stable per-id phase', () => {
+    const samples = Array.from({ length: 25 }, (_, i) => ambientPulse('agent-7', i * 100))
+    expect(Math.min(...samples)).toBeGreaterThanOrEqual(0.75)
+    expect(Math.max(...samples)).toBeLessThanOrEqual(1)
+    expect(ambientPulse('agent-7', 150)).toBeCloseTo(ambientPulse('agent-7', 2550), 10)
+    expect(ambientPulse('agent-7', 150)).not.toBeCloseTo(ambientPulse('agent-8', 150), 5)
+  })
+
+})
+
+describe('linkParticleCount', () => {
+  it('uses strict weight thresholds and suppresses synthetic and population edges', () => {
+    expect(linkParticleCount(0.8, false, false)).toBe(0)
+    expect(linkParticleCount(0.80001, false, false)).toBe(1)
+    expect(linkParticleCount(0.55, false, false)).toBe(0)
+    expect(linkParticleCount(0.55001, false, false)).toBe(0)
+    expect(linkParticleCount(1, true, false)).toBe(0)
+    expect(linkParticleCount(1, false, true)).toBe(0)
+  })
+})
+
+describe('spawnProgress', () => {
+  it('ease-outs from zero to one over 600ms and treats missing or past timestamps as complete', () => {
+    expect(spawnProgress(1_000, 1_000)).toBe(0)
+    expect(spawnProgress(1_000, 1_300)).toBeCloseTo(0.875, 8)
+    expect(spawnProgress(1_000, 1_600)).toBe(1)
+    expect(spawnProgress(1_000, 2_000)).toBe(1)
+    expect(spawnProgress(undefined, 1_000)).toBe(1)
+  })
+})
+
 describe('nodeColor', () => {
+  it('uses the monochrome lavender graph palette without changing its keys', () => {
+    expect(TYPE_COLORS).toEqual({
+      organization: '#aeb9e8', person: '#c3cdf2', policy: '#b0c4e4', market: '#c9c3ea',
+      technology: '#b6b1ec', resource: '#a9c1e6', concept: '#bac6ee', risk: '#d4b9d4',
+      opportunity: '#b5cbe0', agent: '#c3cdf2', friend: '#a9b8e6', family: '#c3bfe0',
+      colleague: '#aec4e2', neighbor: '#a9c1e6', acquaintance: '#9aa6c8', mentions: '#b6b1ec',
+      default: '#aab4d6',
+    })
+    expect(PENDING_AGENT_COLOR).toBe('#c3cdf2')
+  })
+
   it('maps known types', () => {
     expect(nodeColor('organization')).toBe(TYPE_COLORS.organization)
     expect(nodeColor('person')).toBe(TYPE_COLORS.person)
@@ -67,61 +117,84 @@ describe('nodeColor', () => {
 
 describe('nodeDisplayColor', () => {
   it('uses stance color for society agent nodes', () => {
-    expect(nodeDisplayColor(baseNode({ type: 'agent', stance: '反対' }))).toBe('#ef4444')
-    expect(nodeDisplayColor(baseNode({ type: 'agent', stance: '賛成' }))).toBe('#22c55e')
+    expect(nodeDisplayColor(baseNode({ type: 'agent', stance: '反対' }))).toBe(softenStanceColor('反対', TYPE_COLORS.agent))
+    expect(nodeDisplayColor(baseNode({ type: 'agent', stance: '賛成' }))).toBe(softenStanceColor('賛成', TYPE_COLORS.agent))
   })
 
   it('keeps type color for non-agent nodes and unknown agent stances', () => {
     expect(nodeDisplayColor(baseNode({ type: 'organization', stance: '反対' }))).toBe(TYPE_COLORS.organization)
     expect(nodeDisplayColor(baseNode({ type: 'agent', stance: '不明' }))).toBe(TYPE_COLORS.agent)
   })
+
+  it('uses plain lavender pending color and softens stance-bearing agents', () => {
+    expect(nodeDisplayColor(baseNode({ type: 'agent' }))).toBe(PENDING_AGENT_COLOR)
+    expect(nodeDisplayColor(baseNode({ type: 'agent', stance: '' }))).toBe(PENDING_AGENT_COLOR)
+    expect(nodeDisplayColor(baseNode({ type: 'agent', stance: '賛成' }))).not.toBe(PENDING_AGENT_COLOR)
+  })
+})
+
+describe('lavender color mixing', () => {
+  it('mixes hex channels linearly', () => {
+    expect(mixHex('#000000', '#ffffff', 0.5)).toBe('#808080')
+    expect(mixHex('#123456', '#abcdef', 0)).toBe('#123456')
+    expect(mixHex('#123456', '#abcdef', 1)).toBe('#abcdef')
+  })
+
+  it('softens stance colors 45% toward lavender', () => {
+    expect(softenStanceColor('賛成', '#000000')).toBe(mixHex('#34d399', '#c3cdf2', 0.45))
+    expect(softenStanceColor('不明', '#aabbcc')).toBe(mixHex('#aabbcc', '#c3cdf2', 0.45))
+  })
 })
 
 describe('nodeRadius', () => {
   it('scales with importance_score', () => {
-    expect(nodeRadius({ importance_score: 0, activity_score: 0 })).toBe(5)
-    expect(nodeRadius({ importance_score: 1, activity_score: 0 })).toBe(13)
+    expect(nodeRadius({ importance_score: 0, activity_score: 0 })).toBe(1.6)
+    expect(nodeRadius({ importance_score: 1, activity_score: 0 })).toBe(3.6)
   })
 
   it('adds activity boost when activity_score > 0', () => {
-    expect(nodeRadius({ importance_score: 0.5, activity_score: 0.6 })).toBe(5 + 4 + 3)
+    expect(nodeRadius({ importance_score: 0.5, activity_score: 0.6 })).toBe(1.6 + 1 + 1)
   })
 
   it('adds activity boost when status is speaking', () => {
-    expect(nodeRadius({ importance_score: 0.5, activity_score: 0, status: 'speaking' })).toBe(5 + 4 + 3)
+    expect(nodeRadius({ importance_score: 0.5, activity_score: 0, status: 'speaking' })).toBe(1.6 + 1 + 1)
   })
 
   it('handles nullish importance_score by defaulting to 0.4', () => {
-    expect(nodeRadius({ importance_score: undefined as unknown as number, activity_score: 0 })).toBeCloseTo(5 + 0.4 * 8)
+    expect(nodeRadius({ importance_score: undefined as unknown as number, activity_score: 0 })).toBeCloseTo(1.6 + 0.4 * 2)
   })
 })
 
 describe('linkWidth', () => {
-  it('floor at 0.7 and grows quietly with weight', () => {
-    expect(linkWidth(0)).toBe(0.7)
-    expect(linkWidth(1)).toBeCloseTo(3.1, 5)
-    expect(linkWidth(undefined)).toBe(0.7)
+  it('uses the more visible width range and clamps weights', () => {
+    expect(linkWidth(0)).toBe(0.5)
+    expect(linkWidth(1)).toBeCloseTo(1.2, 5)
+    expect(linkWidth(undefined)).toBe(0.5)
+    expect(linkWidth(2)).toBeCloseTo(1.2, 5)
   })
 })
 
 describe('linkColor', () => {
-  it('uses relation_type color and reduces alpha when dimmed', () => {
-    const normal = linkColor('friend', 0.5, false)
-    const dimmed = linkColor('friend', 0.5, true)
-    expect(normal).toMatch(/^rgba\(/)
-    expect(dimmed).toContain('0.06')
-    // normal should have higher alpha than dimmed
-    const normalAlpha = Number(normal.match(/, (0\.\d+)\)/)?.[1])
-    expect(normalAlpha).toBeGreaterThan(0.06)
+  it('colors edges by relation type', () => {
+    expect(linkColor('friend', 0.5, false)).toBe('rgba(90, 160, 200, 0.21000000000000002)')
+    expect(linkColor('family', 0.5, false)).toBe('rgba(201, 163, 115, 0.21000000000000002)')
+    expect(linkColor('friend', 0.5, false)).not.toBe(linkColor('family', 0.5, false))
   })
 
-  it('keeps a quiet Obsidian-like alpha band [0.14, 0.42] for any weight', () => {
-    const lo = linkColor('friend', 0, false)
-    const hi = linkColor('friend', 1, false)
-    expect(lo).toContain('0.14')
-    const hiAlpha = Number(hi.match(/, (0\.\d+)\)/)?.[1])
-    expect(hiAlpha).toBeGreaterThan(0.3)
-    expect(hiAlpha).toBeLessThanOrEqual(0.42)
+  it('falls back to the default relation color for unknown types', () => {
+    expect(linkColor('unknown', 0.5, false)).toBe(linkColor('default', 0.5, false))
+    expect(RELATION_EDGE_COLORS.default).toBe('#7c8aa0')
+  })
+
+  it('uses alpha 0.04 when dimmed regardless of weight', () => {
+    expect(linkColor('friend', 0, true)).toBe('rgba(90, 160, 200, 0.04)')
+    expect(linkColor('friend', 1, true)).toBe('rgba(90, 160, 200, 0.04)')
+  })
+
+  it('uses and clamps the visible alpha band [0.14, 0.28]', () => {
+    expect(linkColor('friend', -1, false)).toBe('rgba(90, 160, 200, 0.14)')
+    expect(linkColor('friend', 1, false)).toBe('rgba(90, 160, 200, 0.28)')
+    expect(linkColor('friend', 2, false)).toBe('rgba(90, 160, 200, 0.28)')
   })
 })
 
@@ -129,8 +202,8 @@ describe('syntheticLinkColor', () => {
   it('collapses endpoint colors toward a quiet cool slate at a hair of alpha', () => {
     // Opposed stance colors (green vs red) must NOT survive as loud yarn — the
     // result is dominated by slate with only a trace of the endpoints.
-    expect(syntheticLinkColor('#22c55e', '#ef4444', false)).toBe('rgba(122, 137, 152, 0.1)')
-    expect(syntheticLinkColor('#22c55e', '#ef4444', true)).toBe('rgba(120, 138, 168, 0.04)')
+    expect(syntheticLinkColor('#22c55e', '#ef4444', false)).toBe('rgba(138, 150, 200, 0.05)')
+    expect(syntheticLinkColor('#22c55e', '#ef4444', true)).toBe('rgba(138, 150, 200, 0.02)')
   })
 
   it('keeps synthetic links far quieter than real relation links', () => {
@@ -228,8 +301,8 @@ describe('computeDegrees', () => {
 
 describe('nodeRadius with degree', () => {
   it('keeps backward-compatible values when degree omitted', () => {
-    expect(nodeRadius({ importance_score: 0, activity_score: 0 })).toBe(5)
-    expect(nodeRadius({ importance_score: 1, activity_score: 0 })).toBe(13)
+    expect(nodeRadius({ importance_score: 0, activity_score: 0 })).toBe(1.6)
+    expect(nodeRadius({ importance_score: 1, activity_score: 0 })).toBe(3.6)
   })
 
   it('grows with degree using sqrt scaling for Obsidian-like hubs', () => {
@@ -244,7 +317,7 @@ describe('nodeRadius with degree', () => {
   it('caps degree boost so giant hubs do not dominate', () => {
     const d100 = nodeRadius({ importance_score: 0.5, activity_score: 0 }, 100)
     const d10000 = nodeRadius({ importance_score: 0.5, activity_score: 0 }, 10000)
-    expect(d10000 - d100).toBeLessThanOrEqual(8)
+    expect(d10000 - d100).toBeLessThanOrEqual(6)
   })
 })
 
@@ -256,7 +329,7 @@ describe('nodeRadius for population tier', () => {
   })
 
   it('keeps ordinary nodes on the existing radius scale', () => {
-    expect(nodeRadius({ importance_score: 0, activity_score: 0 })).toBe(5)
+    expect(nodeRadius({ importance_score: 0, activity_score: 0 })).toBe(1.6)
   })
 })
 
@@ -267,15 +340,15 @@ describe('labelAlpha', () => {
     expect(labelAlpha(2)).toBe(0)
   })
 
-  it('fades in continuously between 2.0 and 3.4 (deliberate zoom-in)', () => {
-    const mid = labelAlpha(2.7)
+  it('fades in continuously between 2.6 and 4.0 (deliberate zoom-in)', () => {
+    const mid = labelAlpha(3.2)
     expect(mid).toBeGreaterThan(0)
     expect(mid).toBeLessThan(1)
-    expect(labelAlpha(2.2)).toBeLessThan(labelAlpha(3.2))
+    expect(labelAlpha(2.8)).toBeLessThan(labelAlpha(3.8))
   })
 
   it('is fully visible only once zoomed deep in', () => {
-    expect(labelAlpha(3.4)).toBe(1)
+    expect(labelAlpha(4.0)).toBe(1)
     expect(labelAlpha(6)).toBe(1)
   })
 })
@@ -283,15 +356,24 @@ describe('labelAlpha', () => {
 describe('DEFAULT_PHYSICS', () => {
   it('matches the Obsidian-style baseline force settings', () => {
     expect(DEFAULT_PHYSICS).toEqual({
-      chargeStrength: -220,
-      linkDistance: 60,
-      centerStrength: 0.04,
-      collidePadding: 4,
+      chargeStrength: -70,
+      linkDistance: 42,
+      centerStrength: 0.08,
+      collidePadding: 2.5,
     })
   })
 })
 
 describe('buildSyntheticLinks', () => {
+  it('skips synthetic links entirely while the population layer is visible', () => {
+    const nodes = [
+      ...Array.from({ length: 6 }, (_, i) => baseNode({ id: `a-${i}`, type: 'agent' })),
+      baseNode({ id: 'p-1', tier: 'population' }),
+    ]
+    expect(buildSyntheticLinks(nodes, [])).toEqual([])
+  })
+
+
   it('adds visual affinity links for sparse completed graphs', () => {
     const nodes = Array.from({ length: 8 }, (_, i) => baseNode({
       id: `agent-${i + 1}`,
@@ -307,7 +389,7 @@ describe('buildSyntheticLinks', () => {
     expect(links.every((link) => link.source !== link.target)).toBe(true)
   })
 
-  it('does not add visual links when real graph density is already sufficient', () => {
+  it('still adds visual links when real graph density is already sufficient', () => {
     const nodes = Array.from({ length: 4 }, (_, i) => baseNode({ id: `n${i}` }))
     const edges: EdgeProp[] = [
       { source: 'n0', target: 'n1', relation_type: 'friend', weight: 0.5 },
@@ -317,7 +399,7 @@ describe('buildSyntheticLinks', () => {
       { source: 'n0', target: 'n2', relation_type: 'friend', weight: 0.5 },
     ]
 
-    expect(buildSyntheticLinks(nodes, edges)).toEqual([])
+    expect(buildSyntheticLinks(nodes, edges).length).toBeGreaterThan(0)
   })
 })
 
@@ -390,6 +472,18 @@ describe('assignLinkCurvatures', () => {
 })
 
 describe('mergeGraphData', () => {
+  it('timestamps only brand-new non-population nodes and preserves that timestamp on reuse', () => {
+    const first = mergeGraphData([], [baseNode({ id: 'agent' }), baseNode({ id: 'pop', tier: 'population' })], [])
+    const agent = first.nodes.find((node) => node.id === 'agent')!
+    const population = first.nodes.find((node) => node.id === 'pop')!
+    expect(agent.spawnedAt).toBeTypeOf('number')
+    expect(population.spawnedAt).toBeUndefined()
+
+    const second = mergeGraphData(first.nodes, [baseNode({ id: 'agent', label: 'updated' })], [])
+    expect(second.nodes[0]).toBe(agent)
+    expect(second.nodes[0].spawnedAt).toBe(agent.spawnedAt)
+  })
+
   it('preserves x/y/vx/vy/fx/fy on existing nodes by mutating same reference', () => {
     const prev: SimNode[] = [
       {
@@ -458,7 +552,7 @@ describe('mergeGraphData', () => {
     expect(result.links.some((link) => link.synthetic)).toBe(true)
   })
 
-  it('applies curvature distribution to parallel real edges', () => {
+  it('leaves parallel real edges straight for the renderer', () => {
     const result = mergeGraphData(
       [],
       [baseNode({ id: 'a' }), baseNode({ id: 'b' })],
@@ -469,9 +563,7 @@ describe('mergeGraphData', () => {
     )
     const real = result.links.filter((link) => !link.synthetic)
     expect(real).toHaveLength(2)
-    const [c0, c1] = real.map((link) => link.curvature ?? Number.NaN)
-    expect(c0).not.toBe(0)
-    expect(c0 + c1).toBeCloseTo(0, 6)
+    expect(real.every((link) => link.curvature === undefined)).toBe(true)
   })
 
   it('drops links whose endpoints are missing from the node set before synthetic links are built', () => {

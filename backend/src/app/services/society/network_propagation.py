@@ -19,6 +19,7 @@ from typing import Any
 
 import numpy as np
 
+from src.app.services.society.edge_utils import mirror_edges
 from src.app.services.society.event_exposure import (
     ablation_heterogeneous_exposure,
     event_residual,
@@ -29,6 +30,7 @@ from src.app.services.society.opinion_dynamics import (
     apply_belief_decay,
     stubbornness_from_big_five,
 )
+from src.app.services.society.opinion_influence import primary_influence
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +107,7 @@ class TimestepRecord:
     entropy: float
     cluster_count: int
     max_delta: float
+    changes: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -321,7 +324,7 @@ async def run_network_propagation(
     # Initialize engine
     engine = OpinionDynamicsEngine(
         agents=engine_agents,
-        edges=edges,
+        edges=mirror_edges(edges),
         confidence_threshold=confidence_threshold,
     )
 
@@ -362,6 +365,7 @@ async def run_network_propagation(
                     np.clip(engine._opinions[i][0] + cumulative_deltas[i], 0.0, 1.0)
                 )
 
+        previous_opinions = engine._opinions.copy()
         result = engine.propagation_step(timestep=t)
 
         # Phase 3: Belief decay — opinion drifts back toward initial anchor.
@@ -386,6 +390,28 @@ async def run_network_propagation(
         entropy = _shannon_entropy(dist)
         clusters = engine.detect_clusters()
 
+        changes = []
+        for index, (before, after) in enumerate(
+            zip(previous_opinions, result.updated_opinions)
+        ):
+            before_stance = _convert_opinion_to_stance(list(before))
+            after_stance = _convert_opinion_to_stance(list(after))
+            if before_stance == after_stance:
+                continue
+            source_id, edge_strength = primary_influence(
+                engine,
+                index,
+                previous_opinions,
+            )
+            changes.append({
+                "source_id": source_id,
+                "target_id": agents[index]["id"],
+                "before_stance": before_stance,
+                "after_stance": after_stance,
+                "opinion_delta": round(float(after[0]) - float(before[0]), 4),
+                "edge_strength": round(edge_strength, 4),
+            })
+
         record = TimestepRecord(
             timestep=t,
             opinions=[list(row) for row in result.updated_opinions],
@@ -393,6 +419,7 @@ async def run_network_propagation(
             entropy=entropy,
             cluster_count=len(clusters),
             max_delta=result.max_delta,
+            changes=changes,
         )
         timestep_history.append(record)
 

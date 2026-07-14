@@ -69,6 +69,7 @@ population:
 # 精度改善機能のオン/オフフラグ（replay 再現性確保用）
 # false にすると対応機能を無効化してベースライン動作と比較できる
 accuracy_improvements:
+  single_llm_ensemble: true   # 単一LLM分布と混合（実測JSD 0.0181 vs swarm 0.179）
   memory_anchor: true          # FJ-MM 記憶効果（Step 8）
   confirmation_bias: true      # Motivated cognition 確証バイアス（Step 8）
   bayesian_param_opt: true     # Optuna TPE パラメータ推定（Step 8）
@@ -88,6 +89,11 @@ accuracy_improvements:
   multi_outcome_market: false         # 多銘柄 LMSR (society_orchestrator 統合は次フェーズ)
   monte_carlo_ensemble: false         # Monte Carlo Ensemble (next phase)
   calibration_learner: false          # 自動キャリブレーション学習
+
   diversity_enforcement: false        # 多様性強制
   population_drift: false             # 人口 drift
   temporal_report: false              # 時系列統合レポート
+  heterogeneous_thresholds: true      # 人口伝播に個人別 bounded confidence 閾値（Big Five由来）を適用
+
+ensemble:
+  single_llm_beta: 0.85

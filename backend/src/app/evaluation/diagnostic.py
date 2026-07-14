@@ -24,6 +24,7 @@ from src.app.models.simulation import Simulation
 from src.app.models.society_result import SocietyResult
 from src.app.services.simulation_dispatcher import dispatch_simulation
 from src.app.services.society.diagnostic_baseline import run_single_llm_distribution
+from src.app.services.society.ensemble import blend_distributions, get_ensemble_beta
 from src.app.services.society.survey_anchor import (
     load_manifest_anchor_distribution,
     normalize_stance_distribution,
@@ -113,6 +114,13 @@ def condition_definitions(preset: str) -> dict[str, DiagnosticCondition]:
             diagnostic={"stop_after": "society_pulse"},
             uses_simulation=True,
             description="現行構成の事後アンカーブレンドON",
+        ),
+        "5": DiagnosticCondition(
+            id="5",
+            label="swarm_single_ensemble",
+            diagnostic={"anchor_blend": False, "stop_after": "society_pulse"},
+            uses_simulation=True,
+            description="pure swarmと単一LLM分布を設定betaで混合",
         ),
     }
 
@@ -273,7 +281,7 @@ def estimate_dry_run(config: DiagnosticConfig) -> dict[str, Any]:
     single_llm_calls = sum(
         1
         for condition, _case, _seed, _run in trial_plan
-        if condition.id == "1"
+        if condition.id in {"1", "5"}
     )
     return {
         "preset": config.preset,
@@ -342,13 +350,20 @@ async def run_single_trial(
     *,
     preset: str,
     dispatcher: Callable[[str], Awaitable[None]] = dispatch_simulation,
-    single_llm_fn: Callable[[str, int], Awaitable[dict[str, float]]] = run_single_llm_distribution,
+    single_llm_fn: Callable[
+        [str, int], Awaitable[tuple[dict[str, float], dict]]
+    ] = run_single_llm_distribution,
 ) -> dict[str, Any]:
     if condition.id == "0":
         predicted, anchor_ids = load_manifest_anchor_distribution(preset, split="train")
         validate_no_leakage(anchor_ids, [case["survey_id"]])
     elif condition.id == "1":
-        predicted = await single_llm_fn(case["theme"], seed)
+        predicted, _usage = await single_llm_fn(case["theme"], seed)
+    elif condition.id == "5":
+        diagnostic = dict(condition.diagnostic or {})
+        swarm = await _run_simulation_prediction(case, seed, diagnostic, dispatcher)
+        single, _usage = await single_llm_fn(case["theme"], seed)
+        predicted = blend_distributions(swarm, single, get_ensemble_beta())
     elif condition.uses_simulation:
         diagnostic = dict(condition.diagnostic or {})
         if diagnostic.get("anchor_source") == f"manifest_train:{preset}":
@@ -383,7 +398,9 @@ async def run_trial_with_retry(
     *,
     preset: str,
     dispatcher: Callable[[str], Awaitable[None]] = dispatch_simulation,
-    single_llm_fn: Callable[[str, int], Awaitable[dict[str, float]]] = run_single_llm_distribution,
+    single_llm_fn: Callable[
+        [str, int], Awaitable[tuple[dict[str, float], dict]]
+    ] = run_single_llm_distribution,
 ) -> dict[str, Any]:
     last_exc: Exception | None = None
     for _attempt in range(2):
@@ -419,7 +436,9 @@ async def run_diagnostic(
     config: DiagnosticConfig,
     *,
     dispatcher: Callable[[str], Awaitable[None]] = dispatch_simulation,
-    single_llm_fn: Callable[[str, int], Awaitable[dict[str, float]]] = run_single_llm_distribution,
+    single_llm_fn: Callable[
+        [str, int], Awaitable[tuple[dict[str, float], dict]]
+    ] = run_single_llm_distribution,
 ) -> dict[str, Any]:
     if config.dry_run:
         return {"status": "dry_run", "dry_run": estimate_dry_run(config)}

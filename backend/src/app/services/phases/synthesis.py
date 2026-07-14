@@ -611,6 +611,11 @@ async def run_synthesis(
         "society_summary": {
             "population_count": pulse.population_count,
             "selected_count": len(pulse.agents),
+            "activated_count": pulse.aggregation.get("activated_count", len(pulse.agents)),
+            "gpt_validated_count": pulse.aggregation.get("gpt_validated_count", 0),
+            "council_representative_count": pulse.aggregation.get(
+                "council_representative_count", len(pulse.representatives)
+            ),
             "aggregation": pulse.aggregation,
             "evaluation": pulse.evaluation,
         },

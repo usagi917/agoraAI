@@ -7,6 +7,7 @@ import os
 from src.app.config import settings
 from src.app.llm.adapters.anthropic_adapter import AnthropicAdapter
 from src.app.llm.adapters.base import LLMAdapter
+from src.app.llm.adapters.ollama_adapter import OllamaAdapter
 from src.app.llm.adapters.openai_adapter import OpenAIAdapter
 from src.app.llm.json_extraction import extract_json as _extract_json
 from src.app.llm.rate_limiter import RateLimiter
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 ADAPTER_CLASSES = {
     "openai": OpenAIAdapter,
     "anthropic": AnthropicAdapter,
+    "ollama": OllamaAdapter,
 }
 
 
@@ -26,6 +28,7 @@ class MultiLLMClient:
         self._adapters: dict[str, LLMAdapter] = {}
         self._rate_limiters: dict[str, RateLimiter] = {}
         self._fallback_order: list[str] = []
+        self._no_fallback_providers: set[str] = set()
         self._initialized = False
 
     def initialize(self) -> None:
@@ -38,17 +41,25 @@ class MultiLLMClient:
         self._fallback_order = providers_config.get("fallback_order", [])
 
         for name, config in providers.items():
+            if not config.get("allow_fallback", True):
+                self._no_fallback_providers.add(name)
             if not config.get("enabled", True):
                 continue
 
+            adapter_type = config.get("type", "openai")
+            if adapter_type not in ADAPTER_CLASSES:
+                raise ValueError(f"Unknown LLM adapter type: {adapter_type}")
+
             env_key = config.get("env_key", "")
-            api_key = os.environ.get(env_key, "") or getattr(settings, env_key.lower(), "")
-            if not api_key:
+            requires_api_key = bool(config.get("requires_api_key", adapter_type != "ollama"))
+            api_key = ""
+            if env_key:
+                api_key = os.environ.get(env_key, "") or getattr(settings, env_key.lower(), "")
+            if requires_api_key and not api_key:
                 logger.info("Provider %s skipped: no API key (%s)", name, env_key)
                 continue
 
-            adapter_type = config.get("type", "openai")
-            adapter_cls = ADAPTER_CLASSES.get(adapter_type, OpenAIAdapter)
+            adapter_cls = ADAPTER_CLASSES[adapter_type]
             adapter = adapter_cls(name, config)
             adapter.api_key = api_key
             self._adapters[name] = adapter
@@ -74,6 +85,10 @@ class MultiLLMClient:
 
         if provider_name in self._adapters:
             return self._adapters[provider_name], self._rate_limiters[provider_name]
+        if provider_name in self._no_fallback_providers:
+            raise RuntimeError(
+                f"Provider {provider_name} unavailable. Fallback disabled for cost safety."
+            )
 
         # フォールバック
         for fallback in self._fallback_order:
@@ -88,6 +103,13 @@ class MultiLLMClient:
             return self._adapters[first], self._rate_limiters[first]
 
         raise RuntimeError("No LLM providers available. Check API keys and llm_providers.yaml.")
+
+    async def ensure_provider_ready(self, provider_name: str) -> None:
+        """Run an adapter-specific readiness check before a large batch starts."""
+        adapter, _ = self._resolve_provider(provider_name)
+        ensure_ready = getattr(adapter, "ensure_ready", None)
+        if ensure_ready is not None:
+            await ensure_ready()
 
     async def call(
         self,
@@ -164,6 +186,7 @@ class MultiLLMClient:
                             user_prompt=call_params["user_prompt"],
                             temperature=call_params.get("temperature", 0.5),
                             max_tokens=call_params.get("max_tokens", 1024),
+                            max_retries=0,
                             seed=call_params.get("seed"),
                             response_format=call_params.get("response_format"),
                         )

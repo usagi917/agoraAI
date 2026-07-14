@@ -6,6 +6,7 @@ import { useSimulationStore } from '../stores/simulationStore'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useValidationStore } from '../stores/validationStore'
 import LiveSocietyGraph from '../components/LiveSocietyGraph.vue'
+import SocialGraphWorkspace from '../components/SocialGraphWorkspace.vue'
 import ValidationVerdictCard from '../components/ValidationVerdictCard.vue'
 import DistributionCompare from '../components/DistributionCompare.vue'
 import ConditionStrip from '../components/ConditionStrip.vue'
@@ -112,10 +113,15 @@ onUnmounted(() => closeSse())
 
     <section class="validate-workspace">
       <div class="graph-hero">
-        <LiveSocietyGraph
+        <SocialGraphWorkspace
           v-if="activeSimulationId"
           :simulation-id="activeSimulationId"
-        />
+          :mode="simulation.status === 'running' ? 'live' : 'readonly'"
+        >
+          <template #legacy-fallback>
+            <LiveSocietyGraph :simulation-id="activeSimulationId" />
+          </template>
+        </SocialGraphWorkspace>
         <div v-else class="graph-placeholder">
           <span>{{ validation.selectedTopic?.theme || '検証トピック' }}</span>
         </div>

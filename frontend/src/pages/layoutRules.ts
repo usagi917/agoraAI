@@ -2,7 +2,7 @@ export type ResultsPrimaryView = 'report' | 'scenarios' | 'decision_brief'
 export type ResultsSecondaryTab = 'pm' | 'society' | 'evidence' | 'transcript'
 export type LivePrimaryView = 'graph' | 'society'
 export type LiveSecondaryTab =
-  | 'conversations' | 'analysis'
+  | 'analysis'
   | 'progress' | 'debate' | 'activity' | 'colonies' | 'thinking'
 
 interface ResultsLayoutContext {
@@ -113,7 +113,7 @@ export function getLiveSecondaryTabs(context: LiveLayoutContext): LiveSecondaryT
 
   // Society modes: consolidated layout — debate retains alliance/decision visibility
   if (SOCIETY_MODES.has(mode)) {
-    return ['conversations', 'progress', 'analysis', 'debate']
+    return ['debate', 'progress', 'analysis']
   }
 
   // Pipeline / swarm / hybrid modes
@@ -134,7 +134,7 @@ export function getLiveSecondaryTabs(context: LiveLayoutContext): LiveSecondaryT
 export function getDefaultLiveSecondaryTab(context: LiveLayoutContext): LiveSecondaryTab {
   const mode = context.mode || ''
   if (SOCIETY_MODES.has(mode)) {
-    return 'conversations'
+    return 'debate'
   }
   const tabs = getLiveSecondaryTabs(context)
   return tabs[0] || 'progress'

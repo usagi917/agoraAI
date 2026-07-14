@@ -73,6 +73,26 @@ class TestPostActivationPersona:
         assert "賛成" in user_prompt, "Stance should be included in LLM prompt"
 
     @pytest.mark.asyncio
+    async def test_provider_override_keeps_bounded_narratives_local(self):
+        agents = [_make_agent()]
+        responses = [_make_response()]
+
+        with patch("src.app.services.society.persona_generator.multi_llm_client") as mock_client:
+            mock_client.initialize = lambda: None
+            mock_client.call_batch_by_provider = AsyncMock(
+                return_value=[("私は地域の生活者です。", {"total_tokens": 20})]
+            )
+            await generate_persona_narratives_post_activation(
+                agents,
+                responses,
+                "テスト政策",
+                provider_override="liquid",
+            )
+
+        calls = mock_client.call_batch_by_provider.call_args.args[0]
+        assert calls[0]["provider"] == "liquid"
+
+    @pytest.mark.asyncio
     async def test_activation_prompt_no_persona_leak(self):
         """activation プロンプトに persona_narrative が含まれない。"""
         agent = _make_agent()

@@ -1,0 +1,40 @@
+# M4 MacBook Air (32 GB) 向け Liquid + GPT ハイブリッド設定。
+# 通常実行は API 費用 $1.00 の包絡内に収め、ローカル推論時間を主な制約とする。
+enabled: true
+
+budget:
+  hard_limit_usd: 0.85
+  reserve_usd: 0.15
+  shadow_stop_usd: 0.70
+
+population_activation:
+  provider: liquid
+  target_count: 10000
+  max_tokens: 160
+  minimal_output: true
+  chunk_size: 128
+  max_concurrency: 1
+
+gpt_shadow:
+  provider: openai_shadow
+  sample_size: 800
+  max_calls: 1000
+  max_tokens: 120
+  chunk_size: 25
+  max_concurrency: 10
+  estimated_input_tokens: 1600
+  # OpenAI adapter raises max_completion_tokens to this role's 384-token floor.
+  estimated_output_tokens: 384
+
+gpt_escalation:
+  provider: openai_escalation
+  max_calls: 40
+  max_tokens: 250
+  chunk_size: 10
+  max_concurrency: 5
+  estimated_input_tokens: 1800
+  # OpenAI adapter raises max_completion_tokens to this role's 512-token floor.
+  estimated_output_tokens: 512
+
+narrative_count: 100
+social_requery_max: 1000

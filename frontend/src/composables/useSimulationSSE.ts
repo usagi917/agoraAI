@@ -5,11 +5,16 @@ import { useActivityStore } from '../stores/activityStore'
 import { useSocietyStore } from '../stores/societyStore'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { getPopulationNetwork } from '../api/client'
+import type { GraphActivityEvent } from '../api/client'
 import { useKGEvolutionStore } from '../stores/kgEvolutionStore'
 import { useAgentVisualizationStore } from '../stores/agentVisualizationStore'
 import { useCognitiveSSE } from './useCognitiveSSE'
 import { useTheaterSSE } from './useTheaterSSE'
 import { formatPercent } from '../utils/format'
+import { handleGraphActivityEvent } from '../services/graphActivityAdapter'
+import { bootstrapGraphActivity } from '../services/graphActivitySync'
+import { useSocialGraphActivityStore } from '../stores/socialGraphActivityStore'
+import { useSocialGraphTopologyStore } from '../stores/socialGraphTopologyStore'
 
 function getSimulationStreamUrl(simulationId: string) {
   const base = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '')
@@ -28,6 +33,8 @@ export function useSimulationSSE(simulationId: string) {
   const activity = useActivityStore()
   const societyStore = useSocietyStore()
   const societyGraphStore = useSocietyGraphStore()
+  const graphActivityStore = useSocialGraphActivityStore()
+  const graphTopologyStore = useSocialGraphTopologyStore()
   const vizStore = useAgentVisualizationStore()
   const { handleCognitiveEvent } = useCognitiveSSE()
   const { handleTheaterEvent } = useTheaterSSE()
@@ -36,6 +43,23 @@ export function useSimulationSSE(simulationId: string) {
   const MAX_RECONNECTS = 3
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let populationNetworkAbort: AbortController | null = null
+  let graphBootstrapAbort: AbortController | null = null
+
+  function synchronizeGraphActivity(bufferingStarted = false) {
+    if (!bufferingStarted) graphActivityStore.beginBuffering(simulationId)
+    graphBootstrapAbort?.abort()
+    graphBootstrapAbort = new AbortController()
+    const bootstrapController = graphBootstrapAbort
+    void bootstrapGraphActivity(simulationId, {
+      signal: bootstrapController.signal,
+      bufferingStarted: true,
+    }).catch((error) => {
+      if (error?.name === 'AbortError' || error?.code === 'ERR_CANCELED') return
+      console.warn('graph activity の初期同期に失敗:', error)
+    }).finally(() => {
+      if (graphBootstrapAbort === bootstrapController) graphBootstrapAbort = null
+    })
+  }
 
   function start() {
     const e2eEvents = (window as Window & {
@@ -52,6 +76,7 @@ export function useSimulationSSE(simulationId: string) {
     }
 
     const url = getSimulationStreamUrl(simulationId)
+    graphActivityStore.beginBuffering(simulationId)
     source = new EventSource(url)
 
     const eventTypes = [
@@ -121,7 +146,9 @@ export function useSimulationSSE(simulationId: string) {
       'population_propagation_round',
       'population_propagation_completed',
       // Society ソーシャルグラフ
+      'society_social_graph_structure',
       'society_social_graph_ready',
+      'graph_activity',
       // Unified モード イベント
       'unified_phase_changed',
       'persona_generation_started',
@@ -130,6 +157,7 @@ export function useSimulationSSE(simulationId: string) {
       'meeting_dialogue',
       'meeting_round_completed',
       'meeting_completed',
+      'population_voice',
       // KG Evolution イベント
       'kg_evolution',
       // 認知シミュレーション イベント
@@ -169,11 +197,15 @@ export function useSimulationSSE(simulationId: string) {
       })
     }
 
+    synchronizeGraphActivity(true)
+
     source.onerror = () => {
       if (store.status === 'completed' || store.status === 'failed') return
       store.setStatus('disconnected')
       source?.close()
       source = null
+      graphBootstrapAbort?.abort()
+      graphBootstrapAbort = null
 
       if (reconnectAttempts < MAX_RECONNECTS) {
         const delay = Math.pow(2, reconnectAttempts) * 1000
@@ -188,6 +220,10 @@ export function useSimulationSSE(simulationId: string) {
 
   function handleEvent(eventType: string, payload: Record<string, any>) {
     reconnectAttempts = 0
+    if (eventType === 'graph_activity') {
+      handleGraphActivityEvent(payload as unknown as GraphActivityEvent)
+      return
+    }
     switch (eventType) {
       // === Meta Simulation イベント ===
       case 'meta_started':
@@ -662,12 +698,26 @@ export function useSimulationSSE(simulationId: string) {
         if (payload.selected_agents) {
           societyGraphStore.setSelectedAgents(payload.selected_agents)
         }
-        vizStore.addSystemEvent('◎', 'エージェント選抜', `${payload.total_population}人から${payload.selected_count}人を選出`)
-        activity.addEntry('event', '◎', `${payload.selected_count}人を選抜`, {
-          detail: `${payload.total_population}人から${payload.selected_count}人を選出`,
+        {
+          const activatedTarget = Number(payload.activated_target_count ?? payload.selected_count ?? 0)
+          const visualizedCount = Number(payload.visualized_count ?? payload.selected_agents?.length ?? 0)
+          const detail = `全${activatedTarget.toLocaleString('ja-JP')}人を活性化、グラフ表示${visualizedCount.toLocaleString('ja-JP')}人`
+          vizStore.addSystemEvent('◎', '住民活性化対象', detail)
+          activity.addEntry('event', '◎', `${activatedTarget.toLocaleString('ja-JP')}人を活性化対象に設定`, {
+            detail,
           track: 'agent',
           status: 'completed',
-        })
+          })
+        }
+        break
+
+      case 'society_social_graph_structure':
+        // 選抜直後: 意見（stance）はまだ無いが、本物のソーシャル構造（友人/家族/同僚…）は
+        // デモグラから既に確定しているので即座にエッジだけを投入し、開始直後から本物の輪を描く。
+        if (payload.edges) {
+          societyGraphStore.setSocialEdges(payload.edges)
+        }
+        if (!graphTopologyStore.selectedNodes.length) synchronizeGraphActivity()
         break
 
       case 'society_activation_started':
@@ -858,6 +908,12 @@ export function useSimulationSSE(simulationId: string) {
         })
         break
 
+      case 'population_voice':
+        societyGraphStore.appendPopulationVoices(
+          payload as Parameters<typeof societyGraphStore.appendPopulationVoices>[0],
+        )
+        break
+
       case 'society_social_graph_ready':
         societyStore.loadSocialGraph(simulationId).then(() => {
           societyGraphStore.hydrateWithSocialGraph(
@@ -970,6 +1026,8 @@ export function useSimulationSSE(simulationId: string) {
     source = null
     populationNetworkAbort?.abort()
     populationNetworkAbort = null
+    graphBootstrapAbort?.abort()
+    graphBootstrapAbort = null
   }
 
   onUnmounted(close)

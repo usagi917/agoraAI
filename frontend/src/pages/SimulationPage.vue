@@ -24,6 +24,7 @@ import ActivityFeed from '../components/ActivityFeed.vue'
 import SocietyProgress from '../components/SocietyProgress.vue'
 import OpinionDistribution from '../components/OpinionDistribution.vue'
 import LiveSocietyGraph from '../components/LiveSocietyGraph.vue'
+import SocialGraphWorkspace from '../components/SocialGraphWorkspace.vue'
 import SocietyLiveFeed from '../components/SocietyLiveFeed.vue'
 import { useSocietyGraphStore } from '../stores/societyGraphStore'
 import { useSocietyStore } from '../stores/societyStore'
@@ -35,7 +36,6 @@ import DigitalWorkspaceBackground from '../components/DigitalWorkspaceBackground
 import DebateCards from '../components/DebateCards.vue'
 import ForceGraph2D from '../components/ForceGraph2D.vue'
 import AgentStoryDrawer from '../components/AgentStoryDrawer.vue'
-import ConversationsTab from '../components/ConversationsTab.vue'
 import { useTheaterStore } from '../stores/theaterStore'
 import { unifiedPhaseLabel } from '../constants/phases'
 import { formatPercent, parseServerDate } from '../utils/format'
@@ -321,7 +321,6 @@ const liveLayoutContext = computed(() => ({
 const livePrimaryView = computed<LivePrimaryView>(() => getLivePrimaryView(liveLayoutContext.value))
 const liveSecondaryTabs = computed<LiveSecondaryTab[]>(() => getLiveSecondaryTabs(liveLayoutContext.value))
 const liveSecondaryLabels: Record<LiveSecondaryTab, string> = {
-  conversations: '会話',
   analysis: '分析',
   progress: 'Progress',
   debate: 'Debate',
@@ -818,14 +817,21 @@ function goToResults() {
               </template>
             </div>
           </div>
-          <div class="graph-container" :class="graphContainerClass">
+          <div class="graph-container" :class="[graphContainerClass, { 'society-live': store.isSocietyMode }]">
             <!-- Society mode: Live Social Graph -->
-            <LiveSocietyGraph
+            <SocialGraphWorkspace
               v-if="store.isSocietyMode"
               :simulation-id="simId"
-              :spotlight-agent-id="selectedAgentForStory"
-              @select-agent="selectedAgentForStory = $event"
-            />
+              mode="live"
+            >
+              <template #legacy-fallback>
+                <LiveSocietyGraph
+                  :simulation-id="simId"
+                  :spotlight-agent-id="selectedAgentForStory"
+                  @select-agent="selectedAgentForStory = $event"
+                />
+              </template>
+            </SocialGraphWorkspace>
             <!-- Other modes: 2D Knowledge Graph -->
             <template v-else>
               <ForceGraph2D
@@ -857,8 +863,8 @@ function goToResults() {
                 <span class="phase-icon">{{ phaseOverlay.icon }}</span>
                 <span class="phase-label">{{ phaseOverlay.label }}</span>
               </div>
+              <AgentActivityTicker />
             </template>
-            <AgentActivityTicker />
           </div>
           <div v-if="!store.isSocietyMode && graphStore.nodes.length > 0" class="graph-legend">
             <span class="legend-item" v-for="(color, type) in entityTypeColors" :key="type">
@@ -958,13 +964,6 @@ function goToResults() {
           <ThinkingPanel />
         </div>
 
-        <div v-if="activeSecondaryTab === 'conversations'" class="panel-card">
-          <ConversationsTab
-            @select-agent="selectedAgentForStory = $event"
-            @highlight-edge="handleConnectionHighlight"
-          />
-        </div>
-
         <div v-if="activeSecondaryTab === 'analysis'" class="panel-stack">
           <div class="panel-card">
             <div class="panel-header">
@@ -987,7 +986,11 @@ function goToResults() {
     </div>
 
     <!-- SNS-style live feed (society mode) -->
-    <SocietyLiveFeed v-if="store.isSocietyMode" />
+    <SocietyLiveFeed
+      v-if="store.isSocietyMode"
+      @select-agent="selectedAgentForStory = $event"
+      @highlight-edge="handleConnectionHighlight"
+    />
 
     <!-- Agent Story Drawer (society mode) -->
     <AgentStoryDrawer
@@ -1157,6 +1160,13 @@ function goToResults() {
   border: 1px solid rgba(100,100,255,0.12);
   position: relative;
   overflow: hidden;
+}
+
+.graph-container.society-live {
+  flex: none;
+  min-height: 0;
+  height: clamp(38rem, 68vh, 50rem);
+  border-color: var(--border);
 }
 
 .graph-container.tone-graphrag { background: radial-gradient(ellipse at 30% 30%, rgba(15, 60, 54, 0.88) 0%, #041118 48%, #02070b 100%); }

@@ -107,7 +107,13 @@ describe('ForceGraph2D', () => {
       restore: vi.fn(),
       setTransform: vi.fn(),
       fillRect: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      closePath: vi.fn(),
+      quadraticCurveTo: vi.fn(),
+      setLineDash: vi.fn(),
       createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+      createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
       canvas: { width: 800, height: 600 },
       set fillStyle(_value: string) {},
       set strokeStyle(_value: string) {},
@@ -179,15 +185,16 @@ describe('ForceGraph2D', () => {
     await flushPromises()
 
     const inst = MockForceGraph.lastInstance!
-    expect(inst.setterCalls.backgroundColor?.[0]).toBe('#05060d')
+    expect(inst.setterCalls.backgroundColor?.[0]).toBe('#0a0e1a')
+    expect(inst.setterCalls.autoPauseRedraw?.[0]).toBe(false)
     expect(inst.setterCalls.nodeCanvasObjectMode?.[0]).toBeTypeOf('function')
     expect(inst.setterCalls.linkCurvature?.[0]).toBeTypeOf('function')
     expect(inst.setterCalls.linkDirectionalParticleSpeed?.[0]).toBeTypeOf('function')
-    expect(inst.setterCalls.linkDirectionalParticleWidth?.[0]).toBe(1.6)
+    expect(inst.setterCalls.linkDirectionalParticleWidth?.[0]).toBe(1.2)
 
     const link = inst.graphDataValue.links[0]
-    expect((inst.setterCalls.linkDirectionalParticles?.[0] as (link: unknown) => number)(link)).toBe(1)
-    expect((inst.setterCalls.linkCurvature?.[0] as (link: unknown) => number)(link)).toBeGreaterThan(0)
+    expect((inst.setterCalls.linkDirectionalParticles?.[0] as (link: unknown) => number)(link)).toBe(0)
+    expect((inst.setterCalls.linkCurvature?.[0] as (link: unknown) => number)(link)).toBe(0)
     void wrapper
   })
 
@@ -535,9 +542,15 @@ describe('ForceGraph2D', () => {
     await flushPromises()
 
     const inst = MockForceGraph.lastInstance!
-    // The glow layer's mode accessor reports 'after' only for firing links.
+    // Real links add a glow overlay only while firing.
     const modeFn = inst.setterCalls.linkCanvasObjectMode?.[0] as (l: unknown) => string | undefined
+    const paintLink = inst.setterCalls.linkCanvasObject?.[0] as (
+      l: unknown,
+      ctx: CanvasRenderingContext2D,
+      scale: number,
+    ) => void
     expect(modeFn).toBeTypeOf('function')
+    expect(paintLink).toBeTypeOf('function')
 
     const firePulse = (wrapper.vm as unknown as { firePulse: (s: string, t: string) => boolean }).firePulse
     expect(firePulse('n1', 'n2')).toBe(true)
@@ -550,12 +563,22 @@ describe('ForceGraph2D', () => {
     })
     await flushPromises()
     const recreated = inst.graphDataValue.links[0]
+    const drawable = {
+      ...(recreated as object),
+      source: { id: 'n1', x: 0, y: 0 },
+      target: { id: 'n2', x: 40, y: 20 },
+    }
     nowSpy.mockReturnValue(1500) // still inside the 900ms window (expiry 1900)
     expect(modeFn(recreated)).toBe('after')
+    const activeCtx = createCanvasContext()
+    paintLink(drawable, activeCtx, 1)
+    expect(activeCtx.stroke).toHaveBeenCalledTimes(1)
 
-    // Past the window: the entry expires and is dropped from the map.
+    // Past the window: no custom overlay remains; the built-in straight link persists.
     nowSpy.mockReturnValue(2000)
-    expect(modeFn(recreated)).toBeUndefined()
+    const idleCtx = createCanvasContext()
+    paintLink(drawable, idleCtx, 1)
+    expect(idleCtx.stroke).toHaveBeenCalledTimes(0)
   })
 
   it('does not fire across synthetic-only links', async () => {

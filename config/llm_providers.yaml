@@ -2,18 +2,69 @@
 # Society モードで住民ごとに異なるLLMプロバイダを割り当てる
 
 providers:
+  liquid:
+    type: ollama
+    model: hf.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF:Q8_0
+    api_base: http://127.0.0.1:11434
+    requires_api_key: false
+    allow_fallback: false
+    keep_alive: 30m
+    timeout_seconds: 1800
+    cost_per_1k_input: 0.0
+    cost_per_1k_output: 0.0
+    enabled: true
+    rate_limit:
+      rpm: 100000
+      tpm: 100000000
+      max_concurrent: 1
+
   openai:
     type: openai
     model: gpt-5.4-nano
     api_base: https://api.openai.com/v1
     env_key: OPENAI_API_KEY
-    cost_per_1k_input: 0.00015
-    cost_per_1k_output: 0.0006
+    cost_per_1k_input: 0.0002
+    cost_per_1k_cached_input: 0.00002
+    cost_per_1k_output: 0.00125
     enabled: true
     rate_limit:
       rpm: 500
       tpm: 200000
       max_concurrent: 20
+
+  openai_shadow:
+    type: openai
+    model: gpt-5.4-nano
+    api_base: https://api.openai.com/v1
+    env_key: OPENAI_API_KEY
+    allow_fallback: false
+    reasoning_effort: low
+    min_completion_tokens: 384
+    cost_per_1k_input: 0.0002
+    cost_per_1k_cached_input: 0.00002
+    cost_per_1k_output: 0.00125
+    enabled: true
+    rate_limit:
+      rpm: 500
+      tpm: 200000
+      max_concurrent: 10
+
+  openai_escalation:
+    type: openai
+    model: gpt-5.6-luna
+    api_base: https://api.openai.com/v1
+    env_key: OPENAI_API_KEY
+    allow_fallback: false
+    reasoning_effort: low
+    min_completion_tokens: 512
+    cost_per_1k_input: 0.001
+    cost_per_1k_cached_input: 0.0001
+    cost_per_1k_output: 0.006
+    enabled: true
+    rate_limit:
+      rpm: 200
+      tpm: 200000
+      max_concurrent: 5
 
   gemini:
     type: openai  # Gemini は OpenAI互換エンドポイント

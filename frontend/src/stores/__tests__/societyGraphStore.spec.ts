@@ -6,6 +6,7 @@ import {
   useSocietyGraphStore,
   type MeetingArgument,
 } from '../societyGraphStore'
+import { useKGEvolutionStore } from '../kgEvolutionStore'
 
 function createArgument(overrides: Partial<MeetingArgument> = {}): MeetingArgument {
   return {
@@ -54,6 +55,126 @@ describe('societyGraphStore', () => {
     expect(store.liveAgents.get('agent-2')?.agentIndex).toBe(2)
     // Ensure fallback key is NOT used when backend id is present
     expect(store.liveAgents.get('agent-1')).toBeUndefined()
+  })
+
+  it('sets social edges early without mutating agent stance or status', () => {
+    const store = useSocietyGraphStore()
+    store.setSelectedAgents([
+      { id: 'a1', agent_index: 1, name: 'A', occupation: '会社員', age: 30, region: '東京' },
+      { id: 'a2', agent_index: 2, name: 'B', occupation: '医師', age: 40, region: '大阪' },
+    ])
+
+    store.setSocialEdges([
+      { id: 'e1', source: 'a1', target: 'a2', relation_type: 'friend', strength: 0.8 },
+      { id: 'e-weak', source: 'a1', target: 'a2', relation_type: 'acquaintance', strength: 0.2 },
+    ])
+
+    // 弱い関係も含め、すべての social edge が graphEdges に描画される
+    const socialEdges = store.graphEdges.filter((e) => e.id === 'e1' || e.id === 'e-weak')
+    expect(socialEdges.map((e) => e.id)).toEqual(['e1', 'e-weak'])
+    expect(socialEdges[0].relation_type).toBe('friend')
+
+    // 意見未確定の窓を壊さない: agent の stance/status は選抜直後のまま
+    expect(store.liveAgents.get('a1')?.stance).toBeNull()
+    expect(store.liveAgents.get('a1')?.status).toBe('selected')
+    const node = store.graphNodes.find((n) => n.id === 'a1')
+    expect(node?.stance).toBe('')
+    expect(node?.status).toBe('selected')
+  })
+
+  it('sizes selected display-name agents from confidence instead of display-name presence', () => {
+    const store = useSocietyGraphStore()
+
+    store.setSelectedAgents([
+      {
+        id: 'agent-1',
+        agent_index: 1,
+        name: '田中太郎',
+        display_name: '田中太郎',
+        occupation: '会社員',
+        age: 35,
+        region: '東京',
+      },
+    ])
+
+    const node = store.graphNodes.find((n) => n.id === 'agent-1')
+    expect(node?.importance_score).toBe(0.5)
+  })
+
+  it('keeps confidence-based sizing identical before and after social graph hydration', () => {
+    const store = useSocietyGraphStore()
+
+    store.setSelectedAgents([
+      {
+        id: 'agent-1',
+        agent_index: 1,
+        name: '田中太郎',
+        display_name: '田中太郎',
+        occupation: '会社員',
+        age: 35,
+        region: '東京',
+      },
+    ])
+
+    const immediateImportance = store.graphNodes.find((n) => n.id === 'agent-1')?.importance_score
+
+    store.hydrateWithSocialGraph([
+      {
+        id: 'agent-1',
+        agent_index: 1,
+        demographics: {
+          age: 35,
+          gender: 'male',
+          occupation: '会社員',
+          region: '東京',
+          income_bracket: 'middle',
+          education: 'university',
+        },
+        big_five: {},
+        values: {},
+        speech_style: 'calm',
+        stance: '賛成',
+        confidence: 0.5,
+        reason: 'テスト理由',
+        concern: 'テスト懸念',
+        priority: '生活',
+      },
+    ], [])
+
+    const hydratedImportance = store.graphNodes.find((n) => n.id === 'agent-1')?.importance_score
+    expect(immediateImportance).toBe(0.5)
+    expect(hydratedImportance).toBe(0.5)
+    expect(hydratedImportance).toBe(immediateImportance)
+  })
+
+  it('keeps KG layer nodes and edges hidden until the KG layer is explicitly visible', () => {
+    const store = useSocietyGraphStore()
+    const kgStore = useKGEvolutionStore()
+
+    kgStore.applyDiff({
+      added_nodes: [
+        { id: 'kg-policy', label: '政策', type: 'concept', importance_score: 0.8 },
+        { id: 'kg-budget', label: '予算', type: 'concept', importance_score: 0.6 },
+      ],
+      added_edges: [
+        {
+          id: 'kg-edge-policy-budget',
+          source: 'kg-policy',
+          target: 'kg-budget',
+          relation_type: 'requires',
+          weight: 0.7,
+        },
+      ],
+    }, 0)
+
+    expect(kgStore.layerVisible).toBe(false)
+    expect(store.graphNodes.some((n) => n.id.startsWith('kg-'))).toBe(false)
+    expect(store.graphEdges.some((e) => e.id?.startsWith('kg-'))).toBe(false)
+
+    kgStore.setLayerVisible(true)
+
+    expect(store.graphNodes.map((n) => n.id)).toEqual(expect.arrayContaining(['kg-policy', 'kg-budget']))
+    expect(store.graphEdges.map((e) => e.id)).toContain('kg-edge-policy-budget')
   })
 
   it('deduplicates streamed meeting dialogue and clears the active speaker after round completion', () => {
@@ -195,7 +316,6 @@ describe('societyGraphStore', () => {
       expect(dialogues[0].position).toBe('賛成')
       expect(dialogues[0].addressed_to).toBe('佐藤花子')
       expect(dialogues[0].round).toBe(1)
-      expect(typeof dialogues[0].receivedAt).toBe('number')
     })
 
     it('retains feed entries across round changes and inserts a round marker', () => {
@@ -236,6 +356,73 @@ describe('societyGraphStore', () => {
       expect(shifts[0].from).toBe('中立')
       expect(shifts[0].to).toBe('賛成')
       expect(shifts[0].reason).toBe('議論で納得した')
+    })
+
+    it('appends population_voice entries with every contracted field', () => {
+      const store = useSocietyGraphStore()
+
+      store.appendPopulationVoices({
+        round: 3,
+        voices: [
+          {
+            agent_id: 'citizen-42',
+            agent_index: 42,
+            comment: '暮らしへの影響を慎重に見たいです。',
+            stance: '条件付き賛成',
+            prev_stance: '中立',
+            occupation: '会社員',
+            age_bracket: '40代',
+          },
+          {
+            agent_id: 'citizen-7',
+            agent_index: 7,
+            comment: '将来世代への投資に賛成です。',
+            stance: '賛成',
+            prev_stance: null,
+            occupation: '学生',
+            age_bracket: '20代',
+          },
+        ],
+      })
+
+      const voices = store.feedEntries.filter((entry) => entry.kind === 'population_voice')
+      expect(voices).toHaveLength(2)
+      expect(voices[0]).toMatchObject({
+        kind: 'population_voice',
+        round: 3,
+        agent_id: 'citizen-42',
+        agent_index: 42,
+        comment: '暮らしへの影響を慎重に見たいです。',
+        stance: '条件付き賛成',
+        prev_stance: '中立',
+        occupation: '会社員',
+        age_bracket: '40代',
+      })
+      expect(voices[1].prev_stance).toBeNull()
+    })
+
+    it('caps population_voice entries at 300 and clears them on reset', () => {
+      const store = useSocietyGraphStore()
+
+      store.appendPopulationVoices({
+        round: 4,
+        voices: Array.from({ length: 350 }, (_, index) => ({
+          agent_id: `citizen-${index}`,
+          agent_index: index,
+          comment: `voice-${index}`,
+          stance: '中立',
+          prev_stance: null,
+          occupation: '会社員',
+          age_bracket: '30代',
+        })),
+      })
+
+      expect(store.feedEntries).toHaveLength(300)
+      expect(store.feedEntries[0].agent_id).toBe('citizen-50')
+      expect(store.feedEntries[299].comment).toBe('voice-349')
+
+      store.reset()
+      expect(store.feedEntries).toHaveLength(0)
     })
 
     it('does not add a duplicate dialogue entry', () => {

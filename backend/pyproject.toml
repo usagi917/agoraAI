@@ -60,6 +60,7 @@ select = ["F401", "I", "UP"]
 
 [tool.deptry]
 extend_exclude = ["tests"]
+known_first_party = ["src"]
 
 [tool.deptry.per_rule_ignores]
 DEP002 = [

@@ -184,6 +184,40 @@ class TestRoundsAndResult:
             assert abs(sum(d.distribution.values()) - 1.0) < 1e-6
 
     @pytest.mark.asyncio
+    async def test_changed_agent_reports_deterministic_primary_influencer(self):
+        """同じ寄与度なら agent_id 順で主要影響元を一意に決める。"""
+        agents = [_agent(index) for index in range(3)]
+        responses = [
+            _response(0, "賛成", confidence=1.0),
+            _response(1, "賛成", confidence=1.0),
+        ]
+        edges = [
+            _edge(2, 1, strength=0.9),
+            _edge(2, 0, strength=0.9),
+        ]
+
+        result = await run_population_propagation(
+            agents,
+            responses,
+            edges,
+            max_timesteps=8,
+            seed=7,
+        )
+
+        target_change = next(
+            change
+            for delta in result.rounds
+            for change in delta.changes
+            if change["agent_id"] == "agent-2"
+        )
+        assert target_change["source_id"] == "agent-0"
+        assert target_change["target_id"] == "agent-2"
+        assert target_change["before_stance"] == "中立"
+        assert target_change["after_stance"] in ("条件付き賛成", "賛成")
+        assert target_change["opinion_delta"] > 0
+        assert target_change["edge_strength"] == pytest.approx(0.9)
+
+    @pytest.mark.asyncio
     async def test_on_round_accepts_sync_callback(self):
         """同期コールバックも await されず正しく呼ばれる。"""
         agents = [_agent(i) for i in range(5)]
